@@ -12,6 +12,11 @@ RUN npm ci
 
 FROM node:22-slim AS builder
 WORKDIR /app
+# node:22-slim doesn't ship the `openssl` CLI, which Prisma shells out to at
+# runtime to detect the linked libssl version. Without it Prisma guesses
+# (defaults to 1.1.x) and warns on every boot — installing it removes the
+# warning and the guesswork.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # Facade values only — next build never connects to a real database, and
@@ -39,6 +44,10 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0
+
+# Same reason as the builder stage — the query engine that actually serves
+# requests runs here.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 1001 nodejs \
     && useradd --system --uid 1001 --gid nodejs nextjs
