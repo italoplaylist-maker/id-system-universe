@@ -21,6 +21,11 @@ interface ProjectRoomSceneProps {
   onSelectResource: (id: string) => void;
   onSelectNameplate?: () => void;
   dimmed?: boolean;
+  /** Room-level selection/focus, distinct from selecting a resource inside it. */
+  selected?: boolean;
+  tooltipLines?: string[];
+  onSelectRoom?: () => void;
+  onFocusRoom?: () => void;
 }
 
 /**
@@ -59,7 +64,18 @@ function hashCode(input: string): number {
   return hash;
 }
 
-export function ProjectRoomScene({ room, resources, selectedResourceId, onSelectResource, onSelectNameplate, dimmed = false }: ProjectRoomSceneProps) {
+export function ProjectRoomScene({
+  room,
+  resources,
+  selectedResourceId,
+  onSelectResource,
+  onSelectNameplate,
+  dimmed = false,
+  selected = false,
+  tooltipLines,
+  onSelectRoom,
+  onFocusRoom,
+}: ProjectRoomSceneProps) {
   const positions = useMemo(() => computeWorkstationLocalPositions(room, resources.length), [room, resources.length]);
   const employeeCount = resources.length === 0 ? 0 : resources.length > 3 ? 2 : 1;
   const plantCorner: [number, number, number] = [room.width / 2 - 0.5, 0, -room.depth / 2 + 0.5];
@@ -73,7 +89,11 @@ export function ProjectRoomScene({ room, resources, selectedResourceId, onSelect
         accent={room.accent}
         openSides={room.openSides}
         dimmed={dimmed}
+        selected={selected}
+        tooltipLines={tooltipLines}
         onSelectNameplate={onSelectNameplate}
+        onSelectRoom={onSelectRoom}
+        onFocusRoom={onFocusRoom}
       >
         {resources.map((resource, index) => (
           <ResourceWorkstation

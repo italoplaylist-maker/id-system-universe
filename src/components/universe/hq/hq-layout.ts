@@ -30,12 +30,38 @@ export interface CorridorLayout {
   width: number;
 }
 
+export interface WorldBounds {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
 export interface HqLayout {
   rooms: RoomLayout[];
   corridor: CorridorLayout;
   serverRacks: { providerId: string; name: string; color: string; x: number; z: number }[];
-  /** Bounding radius, used to size the camera and ground plane. */
+  /** Real footprint of every room — the camera fits to this, never a magic constant (briefing: calculateWorldBounds). */
+  bounds: WorldBounds;
+  /** Center of `bounds`, on the ground plane — what the overview camera looks at. */
+  center: [number, number];
+  /** Bounding radius derived from `bounds`, used to size the camera distance and ground plane/fog. */
   radius: number;
+}
+
+/** Real footprint of the whole building — every camera calculation starts here instead of a magic constant. */
+function computeWorldBounds(rooms: RoomLayout[]): WorldBounds {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const room of rooms) {
+    minX = Math.min(minX, room.x - room.width / 2);
+    maxX = Math.max(maxX, room.x + room.width / 2);
+    minZ = Math.min(minZ, room.z - room.depth / 2);
+    maxZ = Math.max(maxZ, room.z + room.depth / 2);
+  }
+  return { minX, maxX, minZ, maxZ };
 }
 
 const CORRIDOR_WIDTH = 2.6;
@@ -52,21 +78,67 @@ interface ProjectRow {
   projects: UniverseProject[];
 }
 
+const ROW_SIZE = 3;
+
 function chunkIntoRows(projects: UniverseProject[]): ProjectRow[] {
   const rows: ProjectRow[] = [];
-  for (let i = 0; i < projects.length; i += 2) rows.push({ projects: projects.slice(i, i + 2) });
+  for (let i = 0; i < projects.length; i += ROW_SIZE) rows.push({ projects: projects.slice(i, i + ROW_SIZE) });
   return rows;
 }
 
+/**
+ * Up to 3 rooms per row — left/right open onto the corridor sideways (like
+ * before), and when a row has a middle room, it straddles the corridor
+ * spine itself (open north+south) exactly like Command Center already does,
+ * so the single-corridor waypoint model (everything walkable reaches x=0)
+ * never has to change. Wider rows (3 instead of 2) is what actually makes
+ * the building read as compact/square instead of a long corridor.
+ */
 function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number): number {
-  const rowSizes = row.projects.map((p) => roomSizeFor(p.resourceCount));
+  const hasMiddle = row.projects.length === 3;
+  // A center room sits between the two side rooms' inner (corridor-facing)
+  // walls, so its width is capped to that gap — any width it would have
+  // needed beyond that becomes extra depth instead, keeping roughly the same
+  // floor area for computeWorkstationLocalPositions to lay out. Computed
+  // before rowDepth so the row reserves enough Z for the (now deeper) room.
+  const maxCenterWidth = CORRIDOR_WIDTH + ROOM_GAP * 2 - 0.3;
+  const rowSizes = row.projects.map((p, idx) => {
+    const natural = roomSizeFor(p.resourceCount);
+    if (hasMiddle && idx === 1) {
+      const width = Math.min(natural.width, maxCenterWidth);
+      const depth = width < natural.width ? natural.depth * (natural.width / width) : natural.depth;
+      return { size: natural.size, width, depth };
+    }
+    return natural;
+  });
   const rowDepth = Math.max(...rowSizes.map((s) => s.depth));
   const rowCenterZ = z + rowDepth / 2;
 
   row.projects.forEach((project, idx) => {
-    const side: "left" | "right" = idx === 0 ? "left" : "right";
     const { size, width, depth } = rowSizes[idx];
-    const roomX = (side === "left" ? -1 : 1) * (CORRIDOR_WIDTH / 2 + ROOM_GAP + width / 2);
+    const slot: "left" | "center" | "right" = hasMiddle ? (["left", "center", "right"] as const)[idx] : idx === 0 ? "left" : "right";
+
+    if (slot === "center") {
+      rooms.push({
+        id: project.id,
+        kind: "project",
+        projectId: project.id,
+        name: project.name,
+        accent: project.accent,
+        size,
+        x: 0,
+        z: rowCenterZ,
+        width,
+        depth,
+        doorPoint: [0, rowCenterZ - depth / 2],
+        side: "center",
+        openSides: ["north", "south"],
+        resourceCount: project.resourceCount,
+      });
+      return;
+    }
+
+    const roomX = (slot === "left" ? -1 : 1) * (CORRIDOR_WIDTH / 2 + ROOM_GAP + width / 2);
     rooms.push({
       id: project.id,
       kind: "project",
@@ -78,9 +150,9 @@ function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number): number {
       z: rowCenterZ,
       width,
       depth,
-      doorPoint: [(side === "left" ? -1 : 1) * (CORRIDOR_WIDTH / 2), rowCenterZ],
-      side,
-      openSides: [side === "left" ? "east" : "west"],
+      doorPoint: [(slot === "left" ? -1 : 1) * (CORRIDOR_WIDTH / 2), rowCenterZ],
+      side: slot,
+      openSides: [slot === "left" ? "east" : "west"],
       resourceCount: project.resourceCount,
     });
   });
@@ -197,9 +269,16 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
 
   z += serverDepth;
 
-  const radius = Math.max(z / 2, 7) + 3.5;
+  const bounds = computeWorldBounds(rooms);
+  const center: [number, number] = [(bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2];
+  const halfWidth = (bounds.maxX - bounds.minX) / 2;
+  const halfDepth = (bounds.maxZ - bounds.minZ) / 2;
+  // Diagonal of the footprint, not just half its length — so a building that
+  // grows wider (more projects per row) gets the camera pulled back too, not
+  // only one that grows longer.
+  const radius = Math.max(Math.sqrt(halfWidth ** 2 + halfDepth ** 2), 6) + 2.5;
 
-  return { rooms, corridor: { length: z, width: CORRIDOR_WIDTH }, serverRacks, radius };
+  return { rooms, corridor: { length: z, width: CORRIDOR_WIDTH }, serverRacks, bounds, center, radius };
 }
 
 /** A room's walkable "door" and "inside" points, for the waypoint path builder. */

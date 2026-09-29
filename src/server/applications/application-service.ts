@@ -92,6 +92,22 @@ export async function syncAllProviders(): Promise<void> {
   const providers = await prisma.infrastructureProvider.findMany({ where: { enabled: true } });
   await Promise.all(providers.map((p) => syncProviderApplications(p.id)));
   await recordUniverseEvent({ type: "SYNC_COMPLETED", message: `Synced ${providers.length} provider(s).` });
+
+  // Diagnostic summary — cheap (three counts), never logs secrets, and is
+  // the fastest way to tell "no Projects because none exist yet" apart from
+  // "no Projects because something upstream is silently failing."
+  const [projectCount, resourceCount, unassignedCount] = await Promise.all([
+    prisma.project.count(),
+    prisma.application.count(),
+    prisma.application.count({ where: { projectId: null } }),
+  ]);
+  logger.info("universe_sync_summary", {
+    providers: providers.length,
+    projects: projectCount,
+    resources: resourceCount,
+    assigned: resourceCount - unassignedCount,
+    unassigned: unassignedCount,
+  });
 }
 
 export interface ListApplicationsFilter {

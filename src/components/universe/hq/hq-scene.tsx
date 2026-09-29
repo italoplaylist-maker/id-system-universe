@@ -24,7 +24,21 @@ interface HqSceneProps {
   onOpenProject: (projectId: string) => void;
   onOpenProvider: (providerId: string) => void;
   reducedGraphics: boolean;
+  /** Room-level selection (single click) — highlights without moving the camera. */
+  selectedProjectId: string | null;
+  onSelectProject: (projectId: string | null) => void;
+  /** Room-level focus (double click) — camera eases toward this project's room, or the overview when null. */
+  focusedProjectId: string | null;
+  onFocusProject: (projectId: string) => void;
 }
+
+const HEALTH_LABEL: Record<UniverseProject["health"], string> = {
+  HEALTHY: "Healthy",
+  DEPLOYING: "Deploying",
+  DEGRADED: "Degraded",
+  OFFLINE: "Offline",
+  UNKNOWN: "Unknown",
+};
 
 export function HqScene({
   providers,
@@ -35,6 +49,10 @@ export function HqScene({
   onOpenProject,
   onOpenProvider,
   reducedGraphics,
+  selectedProjectId,
+  onSelectProject,
+  focusedProjectId,
+  onFocusProject,
 }: HqSceneProps) {
   const enabledProviders = useMemo(() => providers.filter((p) => p.enabled), [providers]);
   const activeProjects = useMemo(() => projects.filter((p) => !p.archivedAt), [projects]);
@@ -58,6 +76,14 @@ export function HqScene({
 
   const workstationPositions = useMemo(() => computeWorkstationWorldPositions(layout.rooms, resourcesByRoom), [layout.rooms, resourcesByRoom]);
 
+  const projectById = useMemo(() => new Map(activeProjects.map((p) => [p.id, p])), [activeProjects]);
+
+  const focusTarget = useMemo((): [number, number] | null => {
+    if (!focusedProjectId) return null;
+    const room = layout.rooms.find((r) => r.kind === "project" && r.projectId === focusedProjectId);
+    return room ? [room.x, room.z] : null;
+  }, [focusedProjectId, layout.rooms]);
+
   const stats: CommandCenterStats = useMemo(
     () => ({
       projectCount: activeProjects.length,
@@ -69,10 +95,16 @@ export function HqScene({
     [applications, activeProjects],
   );
 
-  const centerZ = layout.corridor.length / 2;
+  const [centerX, centerZ] = layout.center;
 
   return (
-    <Canvas shadows={!reducedGraphics} dpr={reducedGraphics ? 1 : [1, 1.6]} gl={{ antialias: !reducedGraphics }} className="bg-background">
+    <Canvas
+      shadows={!reducedGraphics}
+      dpr={reducedGraphics ? 1 : [1, 1.6]}
+      gl={{ antialias: !reducedGraphics }}
+      className="bg-background"
+      onPointerMissed={() => selectedProjectId && onSelectProject(null)}
+    >
       <color attach="background" args={[PALETTE.background]} />
       <fog attach="fog" args={[PALETTE.background, layout.radius * 1.9, layout.radius * 3.6]} />
 
@@ -80,17 +112,17 @@ export function HqScene({
           models shadows/contrast, a soft cyan rim keeps the far side of the building readable. */}
       <hemisphereLight args={["#5b6f88", "#0a0d12", 0.85] as const} />
       <ambientLight intensity={0.5} />
-      <directionalLight position={[9, 14, 7]} intensity={1.6} castShadow={!reducedGraphics} shadow-mapSize={[1024, 1024]} />
-      <directionalLight position={[-8, 9, centerZ - 4]} intensity={0.5} color={PALETTE.glass} />
-      <pointLight position={[0, 5, centerZ]} intensity={0.35} color={PALETTE.screen} distance={layout.radius} />
+      <directionalLight position={[centerX + 9, 14, centerZ + 7]} intensity={1.6} castShadow={!reducedGraphics} shadow-mapSize={[1024, 1024]} />
+      <directionalLight position={[centerX - 8, 9, centerZ - 4]} intensity={0.5} color={PALETTE.glass} />
+      <pointLight position={[centerX, 5, centerZ]} intensity={0.35} color={PALETTE.screen} distance={layout.radius} />
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.06, centerZ]} receiveShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[centerX, -0.06, centerZ]} receiveShadow>
         <planeGeometry args={[layout.radius * 2.2, layout.radius * 2.4]} />
         <meshStandardMaterial color="#0c0f14" roughness={1} />
       </mesh>
 
       {!reducedGraphics && (
-        <ContactShadows position={[0, 0.001, centerZ]} opacity={0.45} scale={layout.radius * 2.4} blur={2} far={4} color="#000000" />
+        <ContactShadows position={[centerX, 0.001, centerZ]} opacity={0.45} scale={layout.radius * 2.4} blur={2} far={4} color="#000000" />
       )}
 
       <Suspense fallback={null}>
@@ -114,6 +146,12 @@ export function HqScene({
           }
           if (room.kind === "project" && room.projectId) {
             const projectId = room.projectId;
+            const project = projectById.get(projectId);
+            const resourceCount = resourcesByRoom.get(projectId)?.length ?? room.resourceCount;
+            const tooltipLines = [
+              `${resourceCount} Resource${resourceCount === 1 ? "" : "s"}`,
+              project ? HEALTH_LABEL[project.health] : "Unknown",
+            ];
             return (
               <ProjectRoomScene
                 key={room.id}
@@ -122,6 +160,10 @@ export function HqScene({
                 selectedResourceId={selectedApplicationId}
                 onSelectResource={onSelectApplication}
                 onSelectNameplate={() => onOpenProject(projectId)}
+                selected={selectedProjectId === projectId || focusedProjectId === projectId}
+                tooltipLines={tooltipLines}
+                onSelectRoom={() => onSelectProject(projectId)}
+                onFocusRoom={() => onFocusProject(projectId)}
               />
             );
           }
@@ -131,7 +173,7 @@ export function HqScene({
         <TaskAgents layout={layout} applications={applications} workstationPositions={workstationPositions} />
       </Suspense>
 
-      <HqCamera radius={layout.radius} centerZ={centerZ} focusTarget={null} />
+      <HqCamera radius={layout.radius} centerX={centerX} centerZ={centerZ} focusTarget={focusTarget} />
     </Canvas>
   );
 }

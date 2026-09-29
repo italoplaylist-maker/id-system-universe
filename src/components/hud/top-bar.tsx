@@ -7,9 +7,9 @@ import { toast } from "sonner";
 import { useSession } from "@/hooks/use-session";
 import { useApplications } from "@/hooks/use-applications";
 import { useSyncAll } from "@/hooks/use-applications";
-import { useProjects } from "@/hooks/use-projects";
 import { useUiStore } from "@/store/ui-store";
 import { Button } from "@/components/ui/button";
+import { ProjectManagerDrawer } from "@/components/projects/project-manager-drawer";
 
 function StatusPill({ label, value, dotClassName }: { label: string; value: number; dotClassName: string }) {
   return (
@@ -25,11 +25,9 @@ export function TopBar() {
   const router = useRouter();
   const { data: user } = useSession();
   const { data: applications } = useApplications();
-  const { data: projects } = useProjects();
   const sync = useSyncAll();
   const { viewMode, setViewMode, setCommandPaletteOpen } = useUiStore();
 
-  const projectCount = projects?.length ?? 0;
   const total = applications?.length ?? 0;
   const online = applications?.filter((a) => a.status === "RUNNING").length ?? 0;
   const deploying = applications?.filter((a) => a.status === "DEPLOYING").length ?? 0;
@@ -50,7 +48,7 @@ export function TopBar() {
           <p className="text-sm font-semibold">Universe</p>
         </div>
         <div className="hidden items-center gap-5 md:flex">
-          <StatusPill label="Projects" value={projectCount} dotClassName="bg-accent" />
+          <ProjectManagerDrawer />
           <StatusPill label="Resources" value={total} dotClassName="bg-accent" />
           <StatusPill label="Online" value={online} dotClassName="bg-status-running" />
           <StatusPill label="Deploying" value={deploying} dotClassName="bg-status-deploying" />

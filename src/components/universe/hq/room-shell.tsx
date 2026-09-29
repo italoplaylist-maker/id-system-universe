@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import { Html } from "@react-three/drei";
 import type { OpenSide } from "./hq-layout";
 
@@ -125,7 +125,14 @@ export interface RoomShellProps {
   openSides: OpenSide[];
   floorColor?: string;
   dimmed?: boolean;
+  selected?: boolean;
+  /** e.g. ["5 Resources", "Healthy"] — shown in the hover tooltip under the room name. */
+  tooltipLines?: string[];
   onSelectNameplate?: () => void;
+  /** Single click anywhere in the room — select without moving the camera. */
+  onSelectRoom?: () => void;
+  /** Double click anywhere in the room — camera focuses on it (briefing: "double click → focus"). */
+  onFocusRoom?: () => void;
   children?: React.ReactNode;
 }
 
@@ -137,10 +144,16 @@ export const RoomShell = memo(function RoomShell({
   openSides,
   floorColor = "#151923",
   dimmed = false,
+  selected = false,
+  tooltipLines,
   onSelectNameplate,
+  onSelectRoom,
+  onFocusRoom,
   children,
 }: RoomShellProps) {
   const walls = wallsFor(width, depth, openSides);
+  const [hovered, setHovered] = useState(false);
+  const interactive = Boolean(onSelectRoom || onFocusRoom);
 
   return (
     <group>
@@ -149,11 +162,75 @@ export const RoomShell = memo(function RoomShell({
         <meshStandardMaterial color={floorColor} roughness={0.9} />
       </mesh>
 
+      {/* Full-floor hitbox — the whole room is the click target, not just the
+          nameplate (briefing: "sala inteira deve possuir interaction target"). */}
+      {interactive && (
+        <mesh
+          position={[0, 0.06, 0]}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelectRoom?.();
+          }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            onFocusRoom?.();
+          }}
+          onPointerOver={(e) => {
+            e.stopPropagation();
+            setHovered(true);
+            document.body.style.cursor = "pointer";
+          }}
+          onPointerOut={() => {
+            setHovered(false);
+            document.body.style.cursor = "auto";
+          }}
+        >
+          <boxGeometry args={[width - 0.05, 0.01, depth - 0.05]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      )}
+
+      {interactive && hovered && (
+        <Html position={[0, 0.9, 0]} center distanceFactor={8} occlude style={{ pointerEvents: "none" }}>
+          <div className="pointer-events-none whitespace-nowrap rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-xs shadow-xl">
+            <p className="font-semibold text-foreground">{name}</p>
+            {tooltipLines?.map((line) => (
+              <p key={line} className="text-muted">
+                {line}
+              </p>
+            ))}
+            <p className="mt-0.5 text-[10px] text-muted">Double-click to focus</p>
+          </div>
+        </Html>
+      )}
+
       {/* Accent floor trim so a room reads as "this project's color" without painting the whole floor. */}
       <mesh position={[0, 0.051, -depth / 2 + 0.04]}>
         <boxGeometry args={[width, 0.02, 0.08]} />
-        <meshBasicMaterial color={accent} transparent opacity={dimmed ? 0.25 : 0.7} />
+        <meshBasicMaterial color={accent} transparent opacity={dimmed ? 0.25 : hovered || selected ? 1 : 0.7} />
       </mesh>
+
+      {/* Hover/selected outline — a thin frame just inside the walls, on every open side too, so the whole footprint reads as "this is clickable/selected." */}
+      {(hovered || selected) && (
+        <>
+          <mesh position={[0, 0.03, depth / 2 - 0.03]}>
+            <boxGeometry args={[width - 0.1, 0.04, 0.03]} />
+            <meshBasicMaterial color={accent} transparent opacity={0.55} />
+          </mesh>
+          <mesh position={[0, 0.03, -depth / 2 + 0.03]}>
+            <boxGeometry args={[width - 0.1, 0.04, 0.03]} />
+            <meshBasicMaterial color={accent} transparent opacity={0.55} />
+          </mesh>
+          <mesh position={[width / 2 - 0.03, 0.03, 0]}>
+            <boxGeometry args={[0.03, 0.04, depth - 0.1]} />
+            <meshBasicMaterial color={accent} transparent opacity={0.55} />
+          </mesh>
+          <mesh position={[-width / 2 + 0.03, 0.03, 0]}>
+            <boxGeometry args={[0.03, 0.04, depth - 0.1]} />
+            <meshBasicMaterial color={accent} transparent opacity={0.55} />
+          </mesh>
+        </>
+      )}
 
       {walls.map((wall) => (
         <mesh key={wall.side} position={wall.position} castShadow receiveShadow>
