@@ -21,6 +21,7 @@ interface HqSceneProps {
   onSelectApplication: (id: string) => void;
   onOpenProject: (projectId: string) => void;
   onOpenProvider: (providerId: string) => void;
+  onOpenUnassigned: () => void;
   reducedGraphics: boolean;
 }
 
@@ -32,20 +33,25 @@ export function HqScene({
   onSelectApplication,
   onOpenProject,
   onOpenProvider,
+  onOpenUnassigned,
   reducedGraphics,
 }: HqSceneProps) {
   const enabledProviders = useMemo(() => providers.filter((p) => p.enabled), [providers]);
   const activeProjects = useMemo(() => projects.filter((p) => !p.archivedAt), [projects]);
+  const unassignedCount = useMemo(() => applications.filter((a) => !a.projectId).length, [applications]);
 
-  const layout = useMemo(() => computeHqLayout(activeProjects, enabledProviders), [activeProjects, enabledProviders]);
+  const layout = useMemo(
+    () => computeHqLayout(activeProjects, enabledProviders, unassignedCount),
+    [activeProjects, enabledProviders, unassignedCount],
+  );
 
   const resourcesByRoom = useMemo(() => {
     const map = new Map<string, UniverseApplication[]>();
     for (const app of applications) {
-      if (!app.projectId) continue;
-      const list = map.get(app.projectId) ?? [];
+      const key = app.projectId ?? "unassigned";
+      const list = map.get(key) ?? [];
       list.push(app);
-      map.set(app.projectId, list);
+      map.set(key, list);
     }
     for (const list of map.values()) list.sort((a, b) => a.id.localeCompare(b.id));
     return map;
@@ -102,14 +108,27 @@ export function HqScene({
             );
           }
           if (room.kind === "project" && room.projectId) {
+            const projectId = room.projectId;
             return (
               <ProjectRoomScene
                 key={room.id}
                 room={room}
-                resources={resourcesByRoom.get(room.projectId) ?? []}
+                resources={resourcesByRoom.get(projectId) ?? []}
                 selectedResourceId={selectedApplicationId}
                 onSelectResource={onSelectApplication}
-                onSelectProject={onOpenProject}
+                onSelectNameplate={() => onOpenProject(projectId)}
+              />
+            );
+          }
+          if (room.kind === "unassigned") {
+            return (
+              <ProjectRoomScene
+                key={room.id}
+                room={room}
+                resources={resourcesByRoom.get("unassigned") ?? []}
+                selectedResourceId={selectedApplicationId}
+                onSelectResource={onSelectApplication}
+                onSelectNameplate={onOpenUnassigned}
               />
             );
           }

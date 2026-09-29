@@ -1,6 +1,6 @@
 import type { UniverseProject, UniverseProviderSummary } from "@/types/domain";
 
-export type RoomKind = "reception" | "project" | "command-center" | "operations" | "server-room";
+export type RoomKind = "reception" | "unassigned" | "project" | "command-center" | "operations" | "server-room";
 export type RoomSize = "SMALL" | "MEDIUM" | "LARGE";
 export type OpenSide = "north" | "south" | "east" | "west";
 
@@ -55,7 +55,11 @@ function roomSizeFor(resourceCount: number): { size: RoomSize; width: number; de
  * by id keeps the layout stable across refreshes for the same data (spec:
  * "mesmo conjunto de projetos deve produzir layout estável").
  */
-export function computeHqLayout(projects: UniverseProject[], providers: UniverseProviderSummary[]): HqLayout {
+export function computeHqLayout(
+  projects: UniverseProject[],
+  providers: UniverseProviderSummary[],
+  unassignedCount = 0,
+): HqLayout {
   const rooms: RoomLayout[] = [];
   const sortedProjects = [...projects].sort((a, b) => a.id.localeCompare(b.id));
 
@@ -79,6 +83,30 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
     resourceCount: 0,
   });
   z += receptionDepth + ROW_GAP;
+
+  // Unassigned holding area — only exists while there are resources not yet
+  // grouped into a Project, so a fresh real deployment (synced apps, zero
+  // Projects created yet) shows them immediately instead of an empty
+  // building. Disappears on its own once everything is organized.
+  if (unassignedCount > 0) {
+    const { size: unassignedSize, width: unassignedWidth, depth: unassignedDepth } = roomSizeFor(unassignedCount);
+    rooms.push({
+      id: "unassigned",
+      kind: "unassigned",
+      name: "UNASSIGNED",
+      accent: "#8890a3",
+      size: unassignedSize,
+      x: 0,
+      z: z + unassignedDepth / 2,
+      width: Math.max(7, unassignedWidth),
+      depth: unassignedDepth,
+      doorPoint: [0, z],
+      side: "center",
+      openSides: ["north", "south"],
+      resourceCount: unassignedCount,
+    });
+    z += unassignedDepth + ROW_GAP;
+  }
 
   // Project rooms, two per row (left/right of the corridor).
   for (let i = 0; i < sortedProjects.length; i += 2) {
@@ -216,7 +244,7 @@ export function computeWorkstationWorldPositions(
 ): Map<string, [number, number]> {
   const result = new Map<string, [number, number]>();
   for (const room of rooms) {
-    if (room.kind !== "project") continue;
+    if (room.kind !== "project" && room.kind !== "unassigned") continue;
     const resources = resourcesByRoom.get(room.id) ?? [];
     const localPositions = computeWorkstationLocalPositions(room, resources.length);
     resources.forEach((resource, index) => {

@@ -82,6 +82,13 @@ export function HqView() {
             }
             router.push(`/projects/${projectId}`);
           }}
+          onOpenUnassigned={() => {
+            if (demoMode) {
+              toast.message("This is demo data. Connect a real Coolify instance to organize resources.");
+              return;
+            }
+            router.push("/projects");
+          }}
           onOpenProvider={() => {
             if (demoMode) {
               toast.message("This is demo data. Connect a real Coolify instance to manage providers.");

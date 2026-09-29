@@ -15,7 +15,7 @@ interface ProjectRoomSceneProps {
   resources: UniverseApplication[];
   selectedResourceId: string | null;
   onSelectResource: (id: string) => void;
-  onSelectProject: (projectId: string) => void;
+  onSelectNameplate?: () => void;
   dimmed?: boolean;
 }
 
@@ -54,7 +54,7 @@ function hashCode(input: string): number {
   return hash;
 }
 
-export function ProjectRoomScene({ room, resources, selectedResourceId, onSelectResource, onSelectProject, dimmed = false }: ProjectRoomSceneProps) {
+export function ProjectRoomScene({ room, resources, selectedResourceId, onSelectResource, onSelectNameplate, dimmed = false }: ProjectRoomSceneProps) {
   const positions = useMemo(() => computeWorkstationLocalPositions(room, resources.length), [room, resources.length]);
 
   return (
@@ -66,7 +66,7 @@ export function ProjectRoomScene({ room, resources, selectedResourceId, onSelect
         accent={room.accent}
         openSides={room.openSides}
         dimmed={dimmed}
-        onSelectNameplate={room.projectId ? () => onSelectProject(room.projectId!) : undefined}
+        onSelectNameplate={onSelectNameplate}
       >
         {resources.map((resource, index) => (
           <ResourceWorkstation

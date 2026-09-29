@@ -36,10 +36,10 @@ export function TaskAgents({ layout, applications, workstationPositions }: TaskA
   return (
     <>
       {busy.map(({ app, state }) => {
-        if (!app.projectId) return null;
+        const targetRoomId = app.projectId ?? "unassigned";
         const workstation = workstationPositions.get(app.id);
         if (!workstation) return null;
-        const path = buildCorridorPath(layout, "operations", app.projectId);
+        const path = buildCorridorPath(layout, "operations", targetRoomId);
         if (path.length === 0) return null;
         const waypoints: [number, number][] = [...path.slice(0, -1), workstation];
         return <TaskAgentController key={app.id} waypoints={waypoints} state={state} />;
