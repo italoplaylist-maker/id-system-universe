@@ -33,7 +33,7 @@ layer changes.
 ```bash
 npm install
 cp .env.example .env   # fill in DATABASE_URL, AUTH_SECRET, CREDENTIAL_ENCRYPTION_KEY
-npx prisma db push     # applies the schema to your Postgres database
+npx prisma migrate deploy  # applies versioned migrations to your Postgres database
 npm run dev
 ```
 
@@ -55,11 +55,12 @@ user exists.
 
 ## Database
 
-Prisma schema: `prisma/schema.prisma`. This project uses `prisma db push`
-rather than versioned migrations (matching the pattern already in use
-elsewhere in this Second Brain's projects) — a genuine limitation worth
-promoting to real migrations before this handles anything you can't afford
-to `db push` your way out of.
+Prisma schema: `prisma/schema.prisma`, versioned migrations in
+`prisma/migrations/`. In development, `npx prisma migrate dev --name <change>`
+creates and applies a new migration; in production, the Docker entrypoint
+runs `prisma migrate deploy`, which fails the container (rather than the
+database) if a migration errors — Coolify keeps the previous version running
+until the health check on the new one passes.
 
 ## Coolify integration
 
@@ -111,15 +112,19 @@ docker run -p 3000:3000 --env-file .env id-system-universe
 Multi-stage Debian-slim build (`output: "standalone"`), with the Prisma CLI
 installed in its own stage since the standalone bundle only carries the
 query engine, not the schema engine — see `Dockerfile` and
-`docker-entrypoint.sh`. The entrypoint runs `prisma db push` (no
-`--accept-data-loss`) before starting the server, so a destructive schema
-change fails the container rather than silently dropping data; Coolify keeps
-the previous version running until the health check on the new one passes.
+`docker-entrypoint.sh`. The entrypoint runs `prisma migrate deploy` before
+starting the server, so a failed migration fails the container rather than
+silently corrupting data; Coolify keeps the previous version running until
+the health check on the new one passes.
 
 `/api/health` checks only this app's own database connectivity — never
 Coolify — so a Coolify outage never fails this container's health check.
 
-**Not verified in this environment:** no Docker daemon was available here,
-so the image itself was not actually built/run — only reviewed against the
-same pattern already proven for another project in this Second Brain. Build
-and run it once before trusting it in production.
+**Partially verified in this environment:** a Docker daemon *was* available
+here and `docker build` got as far as pulling `node:22-slim` and resolving
+every build stage, but every `npm install` inside the build then failed on
+`SELF_SIGNED_CERT_IN_CHAIN` — this sandbox transparently intercepts
+container egress for a network policy the container image doesn't trust,
+which is specific to this development environment, not the Dockerfile.
+Build and run the image once in a normal environment (or on Coolify itself)
+before trusting it in production.

@@ -17,7 +17,8 @@ export type Permission =
   | "application:redeploy"
   | "application:force-redeploy"
   | "activity:read"
-  | "settings:write";
+  | "settings:write"
+  | "user:manage";
 
 const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   ADMIN: new Set([
@@ -33,6 +34,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "application:force-redeploy",
     "activity:read",
     "settings:write",
+    "user:manage",
   ]),
   OPERATOR: new Set([
     "provider:read",

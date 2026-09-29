@@ -2,14 +2,15 @@ import "server-only";
 import { randomBytes, createHash } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { prisma } from "@/server/db/client";
+import { AppError } from "@/lib/errors";
 import type { Role } from "@prisma/client";
 
 export const SESSION_COOKIE = "isu_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
-export class UnauthorizedError extends Error {
+export class UnauthorizedError extends AppError {
   constructor(message = "Not authenticated") {
-    super(message);
+    super(message, 401, "UNAUTHORIZED");
   }
 }
 
@@ -75,6 +76,13 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     if (session) {
       await prisma.session.delete({ where: { id: session.id } }).catch(() => undefined);
     }
+    return null;
+  }
+
+  // A deactivated user's existing sessions stop working immediately, not
+  // just future logins.
+  if (!session.user.active) {
+    await prisma.session.delete({ where: { id: session.id } }).catch(() => undefined);
     return null;
   }
 

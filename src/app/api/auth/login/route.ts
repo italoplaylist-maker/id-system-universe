@@ -23,7 +23,10 @@ export async function POST(request: Request) {
     consumeRateLimit(`login-email:${email}`, 10, 60_000);
 
     const user = await prisma.user.findUnique({ where: { email } });
-    const valid = user ? await verifyPassword(user.passwordHash, parsed.data.password) : false;
+    // Run the hash comparison even for a deactivated account so response
+    // timing doesn't reveal whether the account exists vs. is disabled.
+    const passwordOk = user ? await verifyPassword(user.passwordHash, parsed.data.password) : false;
+    const valid = passwordOk && Boolean(user?.active);
 
     if (!user || !valid) {
       await recordAuditEvent({ action: "AUTH_LOGIN_FAILED", status: "FAILED", metadata: { email }, ipAddress: meta.ip, userAgent: meta.userAgent });

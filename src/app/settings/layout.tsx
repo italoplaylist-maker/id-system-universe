@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SettingsNav } from "@/components/settings/settings-nav";
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -9,6 +10,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         </Link>
         <h1 className="mt-1 text-lg font-semibold">Settings</h1>
       </header>
+      <SettingsNav />
       <main className="mx-auto max-w-5xl px-6 py-8">{children}</main>
     </div>
   );

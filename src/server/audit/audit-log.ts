@@ -14,7 +14,12 @@ export type AuditAction =
   | "AUTH_LOGIN"
   | "AUTH_LOGIN_FAILED"
   | "AUTH_LOGOUT"
-  | "AUTH_BOOTSTRAP";
+  | "AUTH_BOOTSTRAP"
+  | "USER_CREATED"
+  | "USER_ROLE_CHANGED"
+  | "USER_DEACTIVATED"
+  | "USER_REACTIVATED"
+  | "USER_PASSWORD_RESET";
 
 export type AuditStatus = "REQUESTED" | "RUNNING" | "SUCCESS" | "FAILED";
 
