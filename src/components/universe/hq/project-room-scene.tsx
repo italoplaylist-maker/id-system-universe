@@ -84,7 +84,7 @@ export function ProjectRoomScene({
   const plantCorner: [number, number, number] = [room.width / 2 - 0.5, 0, -room.depth / 2 + 0.5];
 
   return (
-    <group position={[room.x, 0, room.z]}>
+    <group position={[room.x, room.y, room.z]}>
       <RoomShell
         width={room.width}
         depth={room.depth}
@@ -110,7 +110,7 @@ export function ProjectRoomScene({
               position={[local[0], 0.1, local[1]]}
               selected={resource.id === selectedResourceId}
               onSelect={onSelectResource}
-              onFocus={onFocusResource ? () => onFocusResource(resource.id, [room.x + local[0], 0.7, room.z + local[1]], resource.name) : undefined}
+              onFocus={onFocusResource ? () => onFocusResource(resource.id, [room.x + local[0], room.y + 0.7, room.z + local[1]], resource.name) : undefined}
             />
           );
         })}

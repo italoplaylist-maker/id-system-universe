@@ -7,6 +7,7 @@ import { computeHqLayout, computeWorkstationWorldPositions } from "./hq-layout";
 import { UniverseCameraController } from "./camera/universe-camera-controller";
 import { useCameraStore } from "@/store/camera-store";
 import { CorridorScene } from "./corridor-scene";
+import { ElevatorShaft } from "./elevator-shaft";
 import { ReceptionScene } from "./reception-scene";
 import { ProjectRoomScene } from "./project-room-scene";
 import { CommandCenterScene, type CommandCenterStats } from "./command-center-scene";
@@ -90,7 +91,10 @@ export function HqScene({
     [applications, activeProjects],
   );
 
-  const [centerX, centerZ] = layout.center;
+  // Ground-level atmosphere (fog anchor, ground plane, contact shadows, lights) stays
+  // anchored at the building's XZ center but at actual ground height — only the camera's
+  // overview shot uses the full 3D center (including the vertical middle of the stack).
+  const [centerX, , centerZ] = layout.center;
 
   return (
     <Canvas
@@ -107,8 +111,13 @@ export function HqScene({
           models shadows/contrast, a soft cyan rim keeps the far side of the building readable. */}
       <hemisphereLight args={["#5b6f88", "#0a0d12", 0.85] as const} />
       <ambientLight intensity={0.5} />
-      <directionalLight position={[centerX + 9, 14, centerZ + 7]} intensity={1.6} castShadow={!reducedGraphics} shadow-mapSize={[1024, 1024]} />
-      <directionalLight position={[centerX - 8, 9, centerZ - 4]} intensity={0.5} color={PALETTE.glass} />
+      <directionalLight
+        position={[centerX + 9, Math.max(14, layout.bounds.maxY + 8), centerZ + 7]}
+        intensity={1.6}
+        castShadow={!reducedGraphics}
+        shadow-mapSize={[1024, 1024]}
+      />
+      <directionalLight position={[centerX - 8, Math.max(9, layout.bounds.maxY + 4), centerZ - 4]} intensity={0.5} color={PALETTE.glass} />
       <pointLight position={[centerX, 5, centerZ]} intensity={0.35} color={PALETTE.screen} distance={layout.radius} />
 
       {/* Double-click empty floor = "look here" (focusPoint) — a free, natural
@@ -130,8 +139,30 @@ export function HqScene({
         <ContactShadows position={[centerX, 0.001, centerZ]} opacity={0.45} scale={layout.radius * 2.4} blur={2} far={4} color="#000000" />
       )}
 
+      {/* One structural slab per stacked floor, sized to THAT floor's own footprint (not the
+          whole building's — ground floor is far longer than any single project row, and a
+          slab sized to it would hang as an opaque ceiling over floors that don't reach that
+          far, hiding whatever's underneath). Ground floor needs none (it sits on the scene's
+          own ground plane). */}
+      {Array.from({ length: layout.floorCount }).map((_, i) => {
+        const floorIndex = i + 1;
+        const floorRooms = layout.rooms.filter((r) => r.floorIndex === floorIndex);
+        const fMinX = Math.min(...floorRooms.map((r) => r.x - r.width / 2));
+        const fMaxX = Math.max(...floorRooms.map((r) => r.x + r.width / 2));
+        const fLength = layout.corridors.find((c) => c.y === floorIndex * layout.floorHeight)?.length ?? 0;
+        const fCenterX = (fMinX + fMaxX) / 2;
+        return (
+          <mesh key={`slab-${i}`} position={[fCenterX, floorIndex * layout.floorHeight - 0.08, fLength / 2]} receiveShadow>
+            <boxGeometry args={[fMaxX - fMinX + 1, 0.15, fLength + 1]} />
+            <meshStandardMaterial color="#12151d" roughness={0.95} />
+          </mesh>
+        );
+      })}
+
+      <ElevatorShaft x={layout.elevator.x} z={layout.elevator.z} topY={layout.elevator.topY} floorCount={layout.floorCount} floorHeight={layout.floorHeight} />
+
       <Suspense fallback={null}>
-        <CorridorScene corridor={layout.corridor} walls={layout.corridorWalls} doors={layout.corridorDoors} />
+        <CorridorScene corridors={layout.corridors} walls={layout.corridorWalls} doors={layout.corridorDoors} />
 
         {layout.rooms.map((room) => {
           if (room.kind === "reception") return <ReceptionScene key={room.id} room={room} />;
@@ -149,7 +180,7 @@ export function HqScene({
                 onFocusProvider={(providerId, name) => {
                   const rack = layout.serverRacks.find((r) => r.providerId === providerId);
                   if (!rack) return;
-                  focusProvider(providerId, [rack.x, 1, rack.z], 2.5, name);
+                  focusProvider(providerId, [rack.x, room.y + 1, rack.z], 2.5, name);
                 }}
               />
             );
@@ -177,7 +208,7 @@ export function HqScene({
                 selected={selectedProjectId === projectId || focusId === projectId}
                 tooltipLines={tooltipLines}
                 onSelectRoom={() => setSelectedProjectId(projectId)}
-                onFocusRoom={() => focusProject(projectId, [room.x, 1, room.z], roomRadius, project?.name ?? room.name)}
+                onFocusRoom={() => focusProject(projectId, [room.x, room.y + 1, room.z], roomRadius, project?.name ?? room.name)}
               />
             );
           }

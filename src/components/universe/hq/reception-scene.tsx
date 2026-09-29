@@ -10,7 +10,7 @@ import { ReceptionDeskFallback, SofaFallback, PlantFallback } from "./assets/pro
 /** The building's front door — reception desk, a greeter, a place to sit, nothing operational happens here. */
 export function ReceptionScene({ room }: { room: RoomLayout }) {
   return (
-    <group position={[room.x, 0, room.z]}>
+    <group position={[room.x, room.y, room.z]}>
       <RoomShell width={room.width} depth={room.depth} name={room.name} accent={room.accent} openSides={room.openSides}>
         <WorldAsset asset={ASSET_KEYS.RECEPTION_DESK} fallback={<ReceptionDeskFallback accent={room.accent} />} position={[0, 0, -0.9]} />
         <group position={[0, 0, -1.25]} rotation={[0, Math.PI, 0]}>

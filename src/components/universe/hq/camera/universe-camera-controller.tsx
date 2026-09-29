@@ -9,7 +9,7 @@ import { useCameraStore } from "@/store/camera-store";
 
 interface UniverseCameraControllerProps {
   /** The HQ's current overview shot — read once per change into a ref, never applied to the camera automatically. Only an explicit reset() (or the very first mount) actually moves the camera to it. */
-  overviewCenter: [number, number];
+  overviewCenter: [number, number, number];
   overviewRadius: number;
 }
 
@@ -32,10 +32,11 @@ const MOUSE_BUTTONS = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: T
 
 type Shot = { position: THREE.Vector3; target: THREE.Vector3 };
 
-function overviewShot(center: [number, number], radius: number): Shot {
+function overviewShot(center: [number, number, number], radius: number): Shot {
+  const target = new THREE.Vector3(center[0], center[1], center[2]);
   return {
-    target: new THREE.Vector3(center[0], 0, center[1]),
-    position: new THREE.Vector3(center[0], 0, center[1]).addScaledVector(VIEW_DIRECTION, radius * 1.05),
+    target,
+    position: target.clone().addScaledVector(VIEW_DIRECTION, radius * 1.05),
   };
 }
 
@@ -95,7 +96,7 @@ export function UniverseCameraController({ overviewCenter, overviewRadius }: Uni
   const { camera } = useThree();
   const controlsRef = useRef<MapControlsImpl>(null);
 
-  const overviewCenterRef = useRef<[number, number]>(overviewCenter);
+  const overviewCenterRef = useRef<[number, number, number]>(overviewCenter);
   const overviewRadiusRef = useRef(overviewRadius);
   useEffect(() => {
     overviewCenterRef.current = overviewCenter;

@@ -48,7 +48,7 @@ function StandbyEmployee() {
 
 export function OperationsScene({ room, activeCount }: { room: RoomLayout; activeCount: number }) {
   return (
-    <group position={[room.x, 0, room.z]}>
+    <group position={[room.x, room.y, room.z]}>
       <RoomShell width={room.width} depth={room.depth} name={room.name} accent={room.accent} openSides={room.openSides}>
         {DESK_POSITIONS.map(([x, z], i) => (
           <OpsDesk key={i} x={x} z={z} manned={i < Math.max(1, 2 - activeCount)} />

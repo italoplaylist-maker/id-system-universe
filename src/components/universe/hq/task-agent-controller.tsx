@@ -17,8 +17,9 @@ const STATE_COLOR: Record<TaskAgentState, string> = {
 const WALK_SPEED = 2.6; // world units / second
 
 interface TaskAgentControllerProps {
-  /** Door-to-door, wall-safe path from Operations to the resource's own workstation. */
-  waypoints: [number, number][];
+  /** Door-to-door, wall-safe path from Operations to the resource's own workstation —
+      including a vertical leg through the elevator core when it crosses floors. */
+  waypoints: [number, number, number][];
   state: TaskAgentState;
 }
 
@@ -42,14 +43,14 @@ export function TaskAgentController({ waypoints, state }: TaskAgentControllerPro
     if (!group || waypoints.length === 0) return;
 
     if (!initialized.current) {
-      group.position.set(waypoints[0][0], 0, waypoints[0][1]);
+      group.position.set(waypoints[0][0], waypoints[0][1], waypoints[0][2]);
       initialized.current = true;
     }
 
     const lastIndex = waypoints.length - 1;
     const targetIdx = Math.min(indexRef.current, lastIndex);
-    const [tx, tz] = waypoints[targetIdx];
-    const toTarget = new THREE.Vector3(tx - group.position.x, 0, tz - group.position.z);
+    const [tx, ty, tz] = waypoints[targetIdx];
+    const toTarget = new THREE.Vector3(tx - group.position.x, ty - group.position.y, tz - group.position.z);
     const distance = toTarget.length();
 
     if (targetIdx < lastIndex && distance < 0.15) {
@@ -65,9 +66,13 @@ export function TaskAgentController({ waypoints, state }: TaskAgentControllerPro
     const step = Math.min(distance, WALK_SPEED * delta);
     toTarget.normalize();
     group.position.x += toTarget.x * step;
+    group.position.y += toTarget.y * step;
     group.position.z += toTarget.z * step;
-    group.position.y = 0;
-    group.rotation.y = Math.atan2(toTarget.x, toTarget.z);
+    // Riding the elevator is a near-vertical leg (toTarget.x/z ~ 0) — keep facing the
+    // last horizontal heading instead of snapping to atan2(0, 0).
+    if (Math.abs(toTarget.x) > 0.001 || Math.abs(toTarget.z) > 0.001) {
+      group.rotation.y = Math.atan2(toTarget.x, toTarget.z);
+    }
   });
 
   return (

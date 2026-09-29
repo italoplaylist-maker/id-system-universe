@@ -11,8 +11,9 @@ export interface RoomLayout {
   name: string;
   accent: string;
   size: RoomSize;
-  /** Footprint center, on the XZ ground plane. */
+  /** Footprint center. x/z are on that floor's own ground plane; y is the floor's elevation. */
   x: number;
+  y: number;
   z: number;
   width: number;
   depth: number;
@@ -22,12 +23,15 @@ export interface RoomLayout {
   /** Walls are skipped on these sides — the room's only openings. */
   openSides: OpenSide[];
   resourceCount: number;
+  /** 0 = ground floor (Reception/Command Center/Operations/Server Room). 1+ = a stacked project floor. */
+  floorIndex: number;
 }
 
-export interface CorridorLayout {
-  /** The shared walking spine: x is always 0, z runs from 0 to length. */
+export interface CorridorFloor {
+  /** The shared walking spine on this floor: x is always 0, z runs from 0 to length. */
   length: number;
   width: number;
+  y: number;
 }
 
 export interface WorldBounds {
@@ -35,18 +39,25 @@ export interface WorldBounds {
   maxX: number;
   minZ: number;
   maxZ: number;
+  minY: number;
+  maxY: number;
 }
 
 export interface HqLayout {
   rooms: RoomLayout[];
-  corridor: CorridorLayout;
+  /** One entry per floor (ground + every stacked project floor), for the corridor floor strip. */
+  corridors: CorridorFloor[];
   serverRacks: { providerId: string; name: string; color: string; x: number; z: number }[];
   corridorWalls: CorridorWallSegment[];
   corridorDoors: CorridorDoor[];
+  /** Fixed (x,z) of the vertical circulation core, straight through every floor. */
+  elevator: { x: number; z: number; topY: number };
+  floorCount: number;
+  floorHeight: number;
   /** Real footprint of every room — the camera fits to this, never a magic constant (briefing: calculateWorldBounds). */
   bounds: WorldBounds;
-  /** Center of `bounds`, on the ground plane — what the overview camera looks at. */
-  center: [number, number];
+  /** Center of `bounds` in 3D — what the overview camera looks at. */
+  center: [number, number, number];
   /** Bounding radius derived from `bounds`, used to size the camera distance and ground plane/fog. */
   radius: number;
 }
@@ -57,13 +68,17 @@ function computeWorldBounds(rooms: RoomLayout[]): WorldBounds {
   let maxX = -Infinity;
   let minZ = Infinity;
   let maxZ = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
   for (const room of rooms) {
     minX = Math.min(minX, room.x - room.width / 2);
     maxX = Math.max(maxX, room.x + room.width / 2);
     minZ = Math.min(minZ, room.z - room.depth / 2);
     maxZ = Math.max(maxZ, room.z + room.depth / 2);
+    minY = Math.min(minY, room.y);
+    maxY = Math.max(maxY, room.y + WALL_HEIGHT);
   }
-  return { minX, maxX, minZ, maxZ };
+  return { minX, maxX, minZ, maxZ, minY, maxY };
 }
 
 const CORRIDOR_WIDTH = 2.6;
@@ -74,8 +89,16 @@ export const WALL_HEIGHT = 1.3;
 export const WALL_THICKNESS = 0.12;
 const DOOR_WIDTH = 1.6;
 
+/** Every floor's row of project rooms starts at this same z — the z-range before it
+    (0..LANDING_DEPTH) is reserved on every floor as the elevator landing, so the shaft
+    lines up at the exact same (x,z) all the way up the building. On the ground floor
+    that reserved zone is where Reception physically stands. */
+const LANDING_DEPTH = 3;
+export const FLOOR_HEIGHT = 3.3;
+
 export interface CorridorWallSegment {
   side: "left" | "right";
+  y: number;
   z: number;
   length: number;
 }
@@ -83,22 +106,22 @@ export interface CorridorWallSegment {
 export interface CorridorDoor {
   side: "left" | "right";
   x: number;
+  y: number;
   z: number;
   width: number;
   accent: string;
 }
 
 /**
- * Real hallway walls along both corridor edges, with a door-width gap cut
- * wherever a room actually opens onto that edge — so you walk down an
- * enclosed corridor and enter each room through a distinct doorway, instead
- * of the whole room frontage being open floor. Center rooms (Reception,
- * Command Center, Operations, Server Room, and any 3-project row's middle
- * room) straddle the corridor spine itself and are wider than it, so both
- * edges are left fully open across their depth — the room's own walls take
- * over as the corridor boundary there.
+ * Real hallway walls along both corridor edges of ONE floor, with a door-width gap cut
+ * wherever a room actually opens onto that edge — so you walk down an enclosed corridor
+ * and enter each room through a distinct doorway, instead of the whole room frontage
+ * being open floor. Center rooms (Reception, Command Center, Operations, Server Room,
+ * and any 3-project row's middle room) straddle the corridor spine itself and are wider
+ * than it, so both edges are left fully open across their depth — the room's own walls
+ * take over as the corridor boundary there.
  */
-function computeCorridorWallsAndDoors(rooms: RoomLayout[], corridorLength: number, corridorWidth: number) {
+function computeCorridorWallsAndDoors(rooms: RoomLayout[], corridorLength: number, corridorWidth: number, y: number) {
   const walls: CorridorWallSegment[] = [];
   const doors: CorridorDoor[] = [];
 
@@ -110,7 +133,7 @@ function computeCorridorWallsAndDoors(rooms: RoomLayout[], corridorLength: numbe
       } else if (room.side === side) {
         const doorSpan = Math.min(DOOR_WIDTH, room.depth);
         blocked.push([room.z - doorSpan / 2, room.z + doorSpan / 2]);
-        doors.push({ side, x: (side === "left" ? -1 : 1) * (corridorWidth / 2), z: room.z, width: doorSpan, accent: room.accent });
+        doors.push({ side, x: (side === "left" ? -1 : 1) * (corridorWidth / 2), y, z: room.z, width: doorSpan, accent: room.accent });
       }
     }
     blocked.sort((a, b) => a[0] - b[0]);
@@ -122,10 +145,10 @@ function computeCorridorWallsAndDoors(rooms: RoomLayout[], corridorLength: numbe
     }
     let cursor = 0;
     for (const [start, end] of merged) {
-      if (start - cursor > 0.15) walls.push({ side, z: (cursor + start) / 2, length: start - cursor });
+      if (start - cursor > 0.15) walls.push({ side, y, z: (cursor + start) / 2, length: start - cursor });
       cursor = Math.max(cursor, end);
     }
-    if (corridorLength - cursor > 0.15) walls.push({ side, z: (cursor + corridorLength) / 2, length: corridorLength - cursor });
+    if (corridorLength - cursor > 0.15) walls.push({ side, y, z: (cursor + corridorLength) / 2, length: corridorLength - cursor });
   }
 
   return { walls, doors };
@@ -150,14 +173,11 @@ function chunkIntoRows(projects: UniverseProject[]): ProjectRow[] {
 }
 
 /**
- * Up to 3 rooms per row — left/right open onto the corridor sideways (like
- * before), and when a row has a middle room, it straddles the corridor
- * spine itself (open north+south) exactly like Command Center already does,
- * so the single-corridor waypoint model (everything walkable reaches x=0)
- * never has to change. Wider rows (3 instead of 2) is what actually makes
- * the building read as compact/square instead of a long corridor.
+ * Up to 3 rooms per row — left/right open onto the corridor sideways, and when a row has
+ * a middle room, it straddles the corridor spine itself (open north+south), so the
+ * single-corridor waypoint model (everything walkable reaches x=0) never has to change.
  */
-function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number): number {
+function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number, y: number, floorIndex: number): number {
   const hasMiddle = row.projects.length === 3;
   // A center room sits between the two side rooms' inner (corridor-facing)
   // walls, so its width is capped to that gap — any width it would have
@@ -190,6 +210,7 @@ function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number): number {
         accent: project.accent,
         size,
         x: 0,
+        y,
         z: rowCenterZ,
         width,
         depth,
@@ -197,6 +218,7 @@ function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number): number {
         side: "center",
         openSides: ["north", "south"],
         resourceCount: project.resourceCount,
+        floorIndex,
       });
       return;
     }
@@ -210,6 +232,7 @@ function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number): number {
       accent: project.accent,
       size,
       x: roomX,
+      y,
       z: rowCenterZ,
       width,
       depth,
@@ -217,33 +240,20 @@ function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number): number {
       side: slot,
       openSides: [slot === "left" ? "east" : "west"],
       resourceCount: project.resourceCount,
+      floorIndex,
     });
   });
 
   return z + rowDepth + ROW_GAP;
 }
 
-/**
- * Compact office floor plan: Reception at the entrance, then Project Rooms
- * in pairs either side of a central corridor — half the rows before Command
- * Center and half after, so Command Center sits at the geometric middle of
- * the project cluster (briefing: sandwich composition, not one long
- * corridor with everything strung along a single axis) — then Operations
- * and the Server Room at the far end. Sorting by id keeps the layout stable
- * across refreshes for the same data.
- */
-export function computeHqLayout(projects: UniverseProject[], providers: UniverseProviderSummary[]): HqLayout {
+/** Ground floor: Reception (the elevator physically stands inside its back half), then
+    Command Center, Operations, and the Server Room — no projects here anymore, they each
+    get their own floor above. */
+function buildGroundFloor(providers: UniverseProviderSummary[]) {
   const rooms: RoomLayout[] = [];
-  const sortedProjects = [...projects].sort((a, b) => a.id.localeCompare(b.id));
-  const rows = chunkIntoRows(sortedProjects);
-  const splitIndex = Math.ceil(rows.length / 2);
-  const rowsBefore = rows.slice(0, splitIndex);
-  const rowsAfter = rows.slice(splitIndex);
-
   let z = 0;
 
-  // Reception
-  const receptionDepth = 3;
   rooms.push({
     id: "reception",
     kind: "reception",
@@ -251,19 +261,18 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
     accent: "#38bdf8",
     size: "SMALL",
     x: 0,
-    z: z + receptionDepth / 2,
+    y: 0,
+    z: z + LANDING_DEPTH / 2,
     width: 4.5,
-    depth: receptionDepth,
-    doorPoint: [0, z + receptionDepth],
+    depth: LANDING_DEPTH,
+    doorPoint: [0, z + LANDING_DEPTH],
     side: "center",
     openSides: ["north"],
     resourceCount: 0,
+    floorIndex: 0,
   });
-  z += receptionDepth + ROW_GAP;
+  z += LANDING_DEPTH + ROW_GAP;
 
-  for (const row of rowsBefore) z = placeRow(rooms, row, z);
-
-  // Command Center — the hub of the composition, sized generously regardless of project count.
   const commandDepth = 4.5;
   rooms.push({
     id: "command-center",
@@ -272,6 +281,7 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
     accent: "#38bdf8",
     size: "MEDIUM",
     x: 0,
+    y: 0,
     z: z + commandDepth / 2,
     width: 6.5,
     depth: commandDepth,
@@ -279,12 +289,10 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
     side: "center",
     openSides: ["north", "south"],
     resourceCount: 0,
+    floorIndex: 0,
   });
   z += commandDepth + ROW_GAP;
 
-  for (const row of rowsAfter) z = placeRow(rooms, row, z);
-
-  // Operations
   const opsDepth = 4;
   rooms.push({
     id: "operations",
@@ -293,6 +301,7 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
     accent: "#8890a3",
     size: "MEDIUM",
     x: 0,
+    y: 0,
     z: z + opsDepth / 2,
     width: 6,
     depth: opsDepth,
@@ -300,10 +309,10 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
     side: "center",
     openSides: ["north", "south"],
     resourceCount: 0,
+    floorIndex: 0,
   });
   z += opsDepth + ROW_GAP;
 
-  // Server Room — width grows with provider count so racks never overlap.
   const providerCount = Math.max(providers.length, 1);
   const serverWidth = Math.max(6.5, providerCount * 2.6 + 2);
   const serverDepth = 5;
@@ -315,6 +324,7 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
     accent: "#38bdf8",
     size: "LARGE",
     x: 0,
+    y: 0,
     z: serverZ,
     width: serverWidth,
     depth: serverDepth,
@@ -322,6 +332,7 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
     side: "center",
     openSides: ["south"],
     resourceCount: 0,
+    floorIndex: 0,
   });
 
   const serverRacks = providers.map((provider, index) => {
@@ -331,18 +342,52 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
   });
 
   z += serverDepth;
+  return { rooms, corridorLength: z, serverRacks };
+}
+
+/**
+ * A real multi-story building: Reception/Command Center/Operations/Server Room stay on
+ * the ground floor, and every row of up to 3 projects gets its own floor stacked straight
+ * above, all sharing one elevator core at a fixed (x,z) so the shaft lines up cleanly
+ * through the whole stack. Sorting projects by id keeps floor assignment stable across
+ * refreshes for the same data.
+ */
+export function computeHqLayout(projects: UniverseProject[], providers: UniverseProviderSummary[]): HqLayout {
+  const sortedProjects = [...projects].sort((a, b) => a.id.localeCompare(b.id));
+  const rows = chunkIntoRows(sortedProjects);
+
+  const ground = buildGroundFloor(providers);
+  const rooms: RoomLayout[] = [...ground.rooms];
+  const corridors: CorridorFloor[] = [{ length: ground.corridorLength, width: CORRIDOR_WIDTH, y: 0 }];
+  const { walls: groundWalls, doors: groundDoors } = computeCorridorWallsAndDoors(ground.rooms, ground.corridorLength, CORRIDOR_WIDTH, 0);
+  const corridorWalls: CorridorWallSegment[] = [...groundWalls];
+  const corridorDoors: CorridorDoor[] = [...groundDoors];
+
+  rows.forEach((row, i) => {
+    const floorIndex = i + 1;
+    const y = floorIndex * FLOOR_HEIGHT;
+    const floorRooms: RoomLayout[] = [];
+    const corridorLength = placeRow(floorRooms, row, LANDING_DEPTH + ROW_GAP, y, floorIndex);
+    rooms.push(...floorRooms);
+    corridors.push({ length: corridorLength, width: CORRIDOR_WIDTH, y });
+    const { walls, doors } = computeCorridorWallsAndDoors(floorRooms, corridorLength, CORRIDOR_WIDTH, y);
+    corridorWalls.push(...walls);
+    corridorDoors.push(...doors);
+  });
+
+  const floorCount = rows.length;
+  const elevator = { x: 0, z: LANDING_DEPTH / 2, topY: floorCount * FLOOR_HEIGHT + WALL_HEIGHT + 0.6 };
 
   const bounds = computeWorldBounds(rooms);
-  const center: [number, number] = [(bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2];
+  const center: [number, number, number] = [(bounds.minX + bounds.maxX) / 2, (bounds.minY + bounds.maxY) / 2, (bounds.minZ + bounds.maxZ) / 2];
   const halfWidth = (bounds.maxX - bounds.minX) / 2;
   const halfDepth = (bounds.maxZ - bounds.minZ) / 2;
-  // Diagonal of the footprint, not just half its length — so a building that
-  // grows wider (more projects per row) gets the camera pulled back too, not
-  // only one that grows longer.
-  const radius = Math.max(Math.sqrt(halfWidth ** 2 + halfDepth ** 2), 6) + 2.5;
-  const { walls: corridorWalls, doors: corridorDoors } = computeCorridorWallsAndDoors(rooms, z, CORRIDOR_WIDTH);
+  const halfHeight = (bounds.maxY - bounds.minY) / 2;
+  // Diagonal of the full 3D footprint, not just XZ — so a taller building (more floors)
+  // pulls the overview camera back too, not only a wider or longer one.
+  const radius = Math.max(Math.sqrt(halfWidth ** 2 + halfDepth ** 2 + halfHeight ** 2), 6) + 2.5;
 
-  return { rooms, corridor: { length: z, width: CORRIDOR_WIDTH }, serverRacks, corridorWalls, corridorDoors, bounds, center, radius };
+  return { rooms, corridors, serverRacks: ground.serverRacks, corridorWalls, corridorDoors, elevator, floorCount, floorHeight: FLOOR_HEIGHT, bounds, center, radius };
 }
 
 /** A room's walkable "door" and "inside" points, for the waypoint path builder. */
@@ -351,19 +396,30 @@ export function findRoom(layout: HqLayout, id: string): RoomLayout | undefined {
 }
 
 /**
- * Builds a simple, wall-safe path between two rooms: door → along the
- * corridor spine (x=0) → door. No navmesh, but it never cuts through a wall
- * because every room's only opening faces the shared corridor line.
+ * Builds a simple, wall-safe path between two rooms: door → along that floor's corridor
+ * spine (x=0) → door. When the rooms are on different floors, the path detours through
+ * the elevator core (same x,z on every floor) for the vertical leg — never cuts through a
+ * wall or a floor slab, because every room's only opening faces its own floor's corridor.
  */
-export function buildCorridorPath(layout: HqLayout, fromRoomId: string, toRoomId: string): [number, number][] {
+export function buildCorridorPath(layout: HqLayout, fromRoomId: string, toRoomId: string): [number, number, number][] {
   const from = findRoom(layout, fromRoomId);
   const to = findRoom(layout, toRoomId);
   if (!from || !to) return [];
 
-  const fromCorridorPoint: [number, number] = [0, from.doorPoint[1]];
-  const toCorridorPoint: [number, number] = [0, to.doorPoint[1]];
+  const fromDoor: [number, number, number] = [from.doorPoint[0], from.y, from.doorPoint[1]];
+  const fromCorridor: [number, number, number] = [0, from.y, from.doorPoint[1]];
+  const toCorridor: [number, number, number] = [0, to.y, to.doorPoint[1]];
+  const toDoor: [number, number, number] = [to.doorPoint[0], to.y, to.doorPoint[1]];
+  const toCenter: [number, number, number] = [to.x, to.y, to.z];
 
-  return [from.doorPoint, fromCorridorPoint, toCorridorPoint, to.doorPoint, [to.x, to.z]];
+  if (from.floorIndex === to.floorIndex) {
+    return [fromDoor, fromCorridor, toCorridor, toDoor, toCenter];
+  }
+
+  const { x: ex, z: ez } = layout.elevator;
+  const fromElevator: [number, number, number] = [ex, from.y, ez];
+  const toElevator: [number, number, number] = [ex, to.y, ez];
+  return [fromDoor, fromCorridor, fromElevator, toElevator, toCorridor, toDoor, toCenter];
 }
 
 /**
@@ -374,8 +430,8 @@ export function buildCorridorPath(layout: HqLayout, fromRoomId: string, toRoomId
 export function computeWorkstationWorldPositions(
   rooms: RoomLayout[],
   resourcesByRoom: Map<string, { id: string }[]>,
-): Map<string, [number, number]> {
-  const result = new Map<string, [number, number]>();
+): Map<string, [number, number, number]> {
+  const result = new Map<string, [number, number, number]>();
   for (const room of rooms) {
     if (room.kind !== "project") continue;
     const resources = resourcesByRoom.get(room.id) ?? [];
@@ -383,7 +439,7 @@ export function computeWorkstationWorldPositions(
     resources.forEach((resource, index) => {
       const local = localPositions[index];
       if (!local) return;
-      result.set(resource.id, [room.x + local[0], room.z + local[1]]);
+      result.set(resource.id, [room.x + local[0], room.y, room.z + local[1]]);
     });
   }
   return result;

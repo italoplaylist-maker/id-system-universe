@@ -67,7 +67,7 @@ const DESK_XS = [-1.6, -0.55, 0.55, 1.6];
 
 export function CommandCenterScene({ room, stats }: { room: RoomLayout; stats: CommandCenterStats }) {
   return (
-    <group position={[room.x, 0, room.z]}>
+    <group position={[room.x, room.y, room.z]}>
       <RoomShell width={room.width} depth={room.depth} name={room.name} accent={room.accent} openSides={room.openSides}>
         <BigScreen width={room.width} stats={stats} />
 

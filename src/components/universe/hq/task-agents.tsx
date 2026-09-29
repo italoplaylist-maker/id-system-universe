@@ -16,7 +16,7 @@ function stateFor(app: UniverseApplication): TaskAgentState | null {
 interface TaskAgentsProps {
   layout: HqLayout;
   applications: UniverseApplication[];
-  workstationPositions: Map<string, [number, number]>;
+  workstationPositions: Map<string, [number, number, number]>;
 }
 
 /**
@@ -41,7 +41,7 @@ export function TaskAgents({ layout, applications, workstationPositions }: TaskA
         if (!workstation) return null;
         const path = buildCorridorPath(layout, "operations", targetRoomId);
         if (path.length === 0) return null;
-        const waypoints: [number, number][] = [...path.slice(0, -1), workstation];
+        const waypoints: [number, number, number][] = [...path.slice(0, -1), workstation];
         return <TaskAgentController key={app.id} waypoints={waypoints} state={state} />;
       })}
     </>
