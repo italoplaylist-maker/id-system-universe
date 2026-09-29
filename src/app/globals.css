@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+/*
+ * ID System Universe — dark command-center theme. Deliberately always dark:
+ * this is an infrastructure control plane, not a content app with a
+ * light/dark preference.
+ */
+:root {
+  --background: #08090c;
+  --surface: #0f1117;
+  --surface-raised: #14171f;
+  --border: #1f232d;
+  --foreground: #e6e9f0;
+  --muted: #8890a3;
+  --accent: #38bdf8;
+  --accent-dim: #1b3a4d;
+  --status-running: #34d399;
+  --status-stopped: #6b7280;
+  --status-deploying: #38bdf8;
+  --status-error: #f87171;
+  --status-warning: #fbbf24;
+  --status-unknown: #8890a3;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-status-running: var(--status-running);
+  --color-status-stopped: var(--status-stopped);
+  --color-status-deploying: var(--status-deploying);
+  --color-status-error: var(--status-error);
+  --color-status-warning: var(--status-warning);
+  --color-status-unknown: var(--status-unknown);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+* {
+  scrollbar-color: var(--border) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

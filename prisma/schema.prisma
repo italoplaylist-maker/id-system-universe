@@ -1,0 +1,193 @@
+// ID System Universe — schema mínimo. O Coolify (e futuros providers) continuam
+// sendo a fonte da verdade da infraestrutura; aqui só cacheamos o necessário
+// para a UI e para auditoria.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+enum ProviderType {
+  COOLIFY
+  DOCKER
+  VERCEL
+  RAILWAY
+  RENDER
+  KUBERNETES
+}
+
+enum ProviderHealth {
+  ONLINE
+  DEGRADED
+  OFFLINE
+  UNKNOWN
+}
+
+enum ApplicationStatus {
+  RUNNING
+  STOPPED
+  DEPLOYING
+  ERROR
+  UNKNOWN
+}
+
+enum ViewMode {
+  UNIVERSE
+  LIST
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(ADMIN)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions    Session[]
+  auditEvents AuditEvent[]
+  preference  UserPreference?
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([userId])
+}
+
+model UserPreference {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reducedGraphics Boolean  @default(false)
+  defaultView     ViewMode @default(UNIVERSE)
+  updatedAt       DateTime @updatedAt
+}
+
+/// Uma instância/conta administrada (Coolify hoje; outros providers futuramente).
+model InfrastructureProvider {
+  id                  String         @id @default(cuid())
+  type                ProviderType   @default(COOLIFY)
+  name                String
+  baseUrl             String
+  encryptedToken      String
+  enabled             Boolean        @default(true)
+  color               String         @default("#38bdf8")
+  metadata            Json?
+  health              ProviderHealth @default(UNKNOWN)
+  latencyMs           Int?
+  lastCheckAt         DateTime?
+  lastSuccessAt       DateTime?
+  lastError           String?
+  consecutiveFailures Int            @default(0)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  applications   Application[]
+  auditEvents    AuditEvent[]
+  universeEvents UniverseEvent[]
+}
+
+/// Cache normalizado de uma aplicação de um provider. O id interno (cuid) é
+/// estável mesmo que a instância de origem mude; externalId é o UUID do
+/// Coolify e só é único dentro do provider, nunca globalmente.
+model Application {
+  id                          String                 @id @default(cuid())
+  externalId                  String
+  providerId                  String
+  provider                    InfrastructureProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  name                        String
+  description                 String?
+  status                      ApplicationStatus      @default(UNKNOWN)
+  fqdn                        String?
+  repository                  String?
+  branch                      String?
+  lastDeployedAt              DateTime?
+  lastSyncedAt                DateTime               @default(now())
+  pendingOperation            String?
+  pendingSince                DateTime?
+  pendingDeploymentExternalId String?
+  createdAt                   DateTime               @default(now())
+  updatedAt                   DateTime               @updatedAt
+
+  deployments    DeploymentCache[]
+  auditEvents    AuditEvent[]
+  universeEvents UniverseEvent[]
+
+  @@unique([providerId, externalId])
+  @@index([providerId])
+}
+
+model DeploymentCache {
+  id            String      @id @default(cuid())
+  externalId    String
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  status        String
+  commit        String?
+  commitMessage String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime    @default(now())
+
+  @@unique([applicationId, externalId])
+  @@index([applicationId])
+}
+
+/// Trilha de auditoria administrativa. Nunca guarda segredos.
+model AuditEvent {
+  id            String                  @id @default(cuid())
+  userId        String?
+  user          User?                   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  providerId    String?
+  provider      InfrastructureProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  applicationId String?
+  application   Application?            @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  action        String
+  status        String
+  metadata      Json?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime                @default(now())
+
+  @@index([createdAt])
+  @@index([applicationId])
+}
+
+/// Feed de eventos do Universe (barra inferior + Activity Center).
+model UniverseEvent {
+  id              String                  @id @default(cuid())
+  applicationId   String?
+  application     Application?            @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  applicationName String?
+  providerId      String?
+  provider        InfrastructureProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  type            String
+  message         String
+  createdAt       DateTime                @default(now())
+
+  @@index([createdAt])
+}
+
+/// Flags simples de sistema (ex.: bootstrap do primeiro admin já usado).
+model SystemSetting {
+  key   String @id
+  value String
+}
