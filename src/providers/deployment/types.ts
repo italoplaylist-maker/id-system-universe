@@ -14,6 +14,14 @@ export interface ConnectionResult {
   error?: string;
 }
 
+export interface ProviderProject {
+  /** Provider-native identifier (e.g. Coolify project UUID). Unique within the provider only. */
+  externalId: string;
+  name: string;
+  /** externalId of every application/service/database this provider considers part of the project. */
+  resourceExternalIds: string[];
+}
+
 export interface ProviderApplication {
   /** Provider-native identifier (e.g. Coolify UUID). Unique within the provider only. */
   externalId: string;
@@ -68,6 +76,14 @@ export interface ActionResult {
 export interface DeploymentProvider {
   testConnection(): Promise<ConnectionResult>;
   listApplications(): Promise<ProviderApplication[]>;
+  /**
+   * The provider's own project/grouping concept, if it has one — used to
+   * auto-link synced applications to an ID System `Project` that matches by
+   * name, so admins never have to manually recreate a grouping the
+   * infrastructure already knows. Providers without a project concept can
+   * resolve to an empty array.
+   */
+  listProjects(): Promise<ProviderProject[]>;
   getApplication(externalId: string): Promise<ProviderApplication>;
   getApplicationStatus(externalId: string): Promise<NormalizedApplicationStatus>;
   getApplicationLogs(externalId: string, options?: LogOptions): Promise<LogResult>;

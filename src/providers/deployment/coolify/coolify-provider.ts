@@ -7,8 +7,10 @@ import type {
   NormalizedApplicationStatus,
   ProviderApplication,
   ProviderDeployment,
+  ProviderProject,
 } from "../types";
 import { CoolifyClient } from "./coolify-client";
+import type { CoolifyProjectDetailRaw } from "./coolify-types";
 import { mapApplication, mapApplicationStatus, mapDeployment, mapLogs } from "./coolify-mapper";
 import { ProviderError } from "@/lib/errors";
 
@@ -79,5 +81,32 @@ export class CoolifyProvider implements DeploymentProvider {
     const response = await this.client.deploy(externalId, options?.force ?? false);
     const item = response.deployments?.[0];
     return { accepted: true, deploymentExternalId: item?.deployment_uuid, message: item?.message };
+  }
+
+  async listProjects(): Promise<ProviderProject[]> {
+    const stubs = await this.client.listProjects();
+    const details = await Promise.all(
+      stubs.map(async (stub) => {
+        try {
+          return await this.client.getProject(stub.uuid);
+        } catch {
+          // One project failing to load (permissions, a stale uuid) shouldn't
+          // abort linking for every other project this Coolify instance has.
+          return null;
+        }
+      }),
+    );
+
+    return details
+      .map((detail, index): CoolifyProjectDetailRaw => detail ?? stubs[index])
+      .map((project) => {
+        const environments = project.environments ?? [];
+        const resourceExternalIds = environments.flatMap((env) => [
+          ...(env.applications ?? []).map((r) => r.uuid),
+          ...(env.services ?? []).map((r) => r.uuid),
+          ...(env.databases ?? []).map((r) => r.uuid),
+        ]);
+        return { externalId: project.uuid, name: project.name, resourceExternalIds };
+      });
   }
 }

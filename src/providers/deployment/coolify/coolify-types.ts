@@ -19,6 +19,30 @@ export interface CoolifyApplicationRaw {
   git_branch?: string | null;
 }
 
+/** A resource stub as it appears nested inside a project's environment — only the fields needed to link it back to an already-synced Application. */
+export interface CoolifyEnvironmentResourceRaw {
+  uuid: string;
+  name?: string;
+}
+
+export interface CoolifyEnvironmentRaw {
+  name?: string;
+  applications?: CoolifyEnvironmentResourceRaw[];
+  services?: CoolifyEnvironmentResourceRaw[];
+  databases?: CoolifyEnvironmentResourceRaw[];
+}
+
+export interface CoolifyProjectRaw {
+  uuid: string;
+  name: string;
+  description?: string | null;
+}
+
+/** `GET /api/v1/projects/{uuid}` — nests the environments (and therefore resources) that belong to the project. */
+export interface CoolifyProjectDetailRaw extends CoolifyProjectRaw {
+  environments?: CoolifyEnvironmentRaw[];
+}
+
 export interface CoolifyLogsRaw {
   logs: string;
 }

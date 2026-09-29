@@ -15,7 +15,8 @@ export type UniverseEventType =
   | "PROVIDER_CONNECTION_RESTORED"
   | "SYNC_COMPLETED"
   | "RESOURCE_ASSIGNED"
-  | "RESOURCE_UNASSIGNED";
+  | "RESOURCE_UNASSIGNED"
+  | "PROJECT_AUTO_CREATED";
 
 export interface RecordUniverseEventInput {
   type: UniverseEventType;

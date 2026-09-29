@@ -8,6 +8,7 @@ import { TtlCache } from "@/server/cache/cache";
 import { NotFoundError, ProviderError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { toUniverseApplication, type ApplicationWithRelations } from "@/server/applications/application-mapper";
+import { linkUnassignedResourcesFromProviderProjects } from "@/server/projects/project-service";
 import type { UniverseApplication, UniverseApplicationStatus } from "@/types/domain";
 
 type ApplicationWithProvider = ApplicationWithRelations;
@@ -66,6 +67,17 @@ export async function syncProviderApplications(providerId: string): Promise<{ sy
     const removedIds = existing.filter((e) => !remoteIds.has(e.externalId)).map((e) => e.id);
     if (removedIds.length > 0) {
       await prisma.application.deleteMany({ where: { id: { in: removedIds } } });
+    }
+
+    // Auto-link resources to the project this provider already groups them
+    // under (e.g. Coolify's own Projects) — best-effort: a provider without a
+    // project concept, or one whose project endpoints fail, just skips this
+    // without failing the application sync that already succeeded above.
+    try {
+      const remoteProjects = await provider.listProjects();
+      await linkUnassignedResourcesFromProviderProjects(providerId, remoteProjects);
+    } catch (error) {
+      logger.warn("provider_project_sync_failed", { providerId, message: error instanceof Error ? error.message : String(error) });
     }
 
     return { synced: remoteApps.length };

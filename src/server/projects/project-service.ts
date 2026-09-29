@@ -76,7 +76,7 @@ export async function getProjectDetail(id: string): Promise<UniverseProjectDetai
   return { ...summary, resources: row.resources.map((r) => toUniverseApplication({ ...r, project: row })) };
 }
 
-function slugify(name: string): string {
+export function slugify(name: string): string {
   return name
     .toLowerCase()
     .normalize("NFD")
@@ -281,6 +281,84 @@ function guessStem(resourceName: string): string {
  * the admin to decide, per spec ("não associe automaticamente quando houver
  * ambiguidade").
  */
+const ACCENT_PALETTE = ["#38bdf8", "#f97316", "#34d399", "#a78bfa", "#f472b6", "#facc15", "#fb7185", "#2dd4bf"];
+
+function hashString(input: string): number {
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash << 5) - hash + input.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+/**
+ * Finds a Project matching a provider's own project name (case-insensitive)
+ * or creates one. Matching by name rather than provider id is what lets the
+ * same-named project on two different Coolify instances collapse into one
+ * Project spanning both — exactly the "a project can span providers" shape
+ * the rest of this domain already assumes.
+ */
+export async function findOrCreateProjectByExternalName(name: string): Promise<{ id: string; name: string }> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new ValidationError("Project name from provider must not be empty.");
+
+  const existing = await prisma.project.findFirst({ where: { name: { equals: trimmed, mode: "insensitive" } } });
+  if (existing) return { id: existing.id, name: existing.name };
+
+  const baseSlug = slugify(trimmed) || "project";
+  let slug = baseSlug;
+  for (let attempt = 1; await prisma.project.findUnique({ where: { slug } }); attempt++) {
+    slug = `${baseSlug}-${attempt + 1}`;
+  }
+
+  const row = await prisma.project.create({
+    data: { name: trimmed, slug, accent: ACCENT_PALETTE[hashString(trimmed) % ACCENT_PALETTE.length] },
+  });
+
+  await recordUniverseEvent({
+    type: "PROJECT_AUTO_CREATED",
+    message: `Project "${row.name}" created from Coolify.`,
+    projectId: row.id,
+    projectName: row.name,
+  });
+
+  return { id: row.id, name: row.name };
+}
+
+/**
+ * Links every currently-unassigned Application this provider reports as part
+ * of one of its own projects — the point of this whole feature: the admin
+ * never has to manually recreate a grouping Coolify already knows. Only
+ * touches resources with no project yet; a resource an admin has already
+ * placed (or moved) is never silently re-linked, so this is safe to call on
+ * every sync without fighting deliberate reorganization.
+ */
+export async function linkUnassignedResourcesFromProviderProjects(
+  providerId: string,
+  providerProjects: { name: string; resourceExternalIds: string[] }[],
+): Promise<void> {
+  for (const remote of providerProjects) {
+    if (remote.resourceExternalIds.length === 0) continue;
+
+    const candidates = await prisma.application.findMany({
+      where: { providerId, externalId: { in: remote.resourceExternalIds }, projectId: null },
+      select: { id: true },
+    });
+    if (candidates.length === 0) continue;
+
+    const project = await findOrCreateProjectByExternalName(remote.name);
+    await prisma.application.updateMany({ where: { id: { in: candidates.map((c) => c.id) } }, data: { projectId: project.id } });
+
+    await recordUniverseEvent({
+      type: "RESOURCE_ASSIGNED",
+      message: `${candidates.length} resource(s) auto-linked to ${project.name} from Coolify.`,
+      projectId: project.id,
+      projectName: project.name,
+    });
+  }
+}
+
 export async function suggestProjectAssignments(): Promise<ProjectSuggestion[]> {
   const unassigned = await prisma.application.findMany({ where: { projectId: null }, select: { id: true, name: true } });
   if (unassigned.length === 0) return [];

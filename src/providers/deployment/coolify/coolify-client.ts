@@ -6,6 +6,8 @@ import type {
   CoolifyDeployTriggerResponse,
   CoolifyDeploymentRaw,
   CoolifyLogsRaw,
+  CoolifyProjectDetailRaw,
+  CoolifyProjectRaw,
   CoolifyVersionResponse,
 } from "./coolify-types";
 
@@ -27,6 +29,8 @@ const ENDPOINTS = {
   deploy: () => "/api/v1/deploy",
   deployments: () => "/api/v1/deployments",
   deployment: (uuid: string) => `/api/v1/deployments/${encodeURIComponent(uuid)}`,
+  projects: () => "/api/v1/projects",
+  project: (uuid: string) => `/api/v1/projects/${encodeURIComponent(uuid)}`,
 } as const;
 
 interface RequestOptions {
@@ -150,5 +154,13 @@ export class CoolifyClient {
 
   async getDeployment(uuid: string): Promise<CoolifyDeploymentRaw> {
     return this.request(ENDPOINTS.deployment(uuid));
+  }
+
+  async listProjects(): Promise<CoolifyProjectRaw[]> {
+    return this.request(ENDPOINTS.projects());
+  }
+
+  async getProject(uuid: string): Promise<CoolifyProjectDetailRaw> {
+    return this.request(ENDPOINTS.project(uuid));
   }
 }
