@@ -2,13 +2,11 @@
 
 import { memo, useState } from "react";
 import { Html } from "@react-three/drei";
-import type { OpenSide } from "./hq-layout";
+import { WALL_HEIGHT, WALL_THICKNESS, type OpenSide } from "./hq-layout";
 
 // Deliberately below employee shoulder height (~1.5) rather than the "real"
 // door height — a full-height wall on the side facing the camera blocks the
 // one thing this diorama exists to show (briefing 14: "paredes cutaway").
-const WALL_HEIGHT = 1.3;
-const WALL_THICKNESS = 0.12;
 const NAMEPLATE_Y = WALL_HEIGHT + 0.32;
 
 interface WallSpec {

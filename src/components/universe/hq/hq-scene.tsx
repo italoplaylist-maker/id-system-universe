@@ -131,7 +131,7 @@ export function HqScene({
       )}
 
       <Suspense fallback={null}>
-        <CorridorScene corridor={layout.corridor} />
+        <CorridorScene corridor={layout.corridor} walls={layout.corridorWalls} doors={layout.corridorDoors} />
 
         {layout.rooms.map((room) => {
           if (room.kind === "reception") return <ReceptionScene key={room.id} room={room} />;

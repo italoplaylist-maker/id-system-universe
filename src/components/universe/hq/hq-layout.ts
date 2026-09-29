@@ -41,6 +41,8 @@ export interface HqLayout {
   rooms: RoomLayout[];
   corridor: CorridorLayout;
   serverRacks: { providerId: string; name: string; color: string; x: number; z: number }[];
+  corridorWalls: CorridorWallSegment[];
+  corridorDoors: CorridorDoor[];
   /** Real footprint of every room — the camera fits to this, never a magic constant (briefing: calculateWorldBounds). */
   bounds: WorldBounds;
   /** Center of `bounds`, on the ground plane — what the overview camera looks at. */
@@ -67,6 +69,67 @@ function computeWorldBounds(rooms: RoomLayout[]): WorldBounds {
 const CORRIDOR_WIDTH = 2.6;
 const ROOM_GAP = 1.1;
 const ROW_GAP = 1.5;
+
+export const WALL_HEIGHT = 1.3;
+export const WALL_THICKNESS = 0.12;
+const DOOR_WIDTH = 1.6;
+
+export interface CorridorWallSegment {
+  side: "left" | "right";
+  z: number;
+  length: number;
+}
+
+export interface CorridorDoor {
+  side: "left" | "right";
+  x: number;
+  z: number;
+  width: number;
+  accent: string;
+}
+
+/**
+ * Real hallway walls along both corridor edges, with a door-width gap cut
+ * wherever a room actually opens onto that edge — so you walk down an
+ * enclosed corridor and enter each room through a distinct doorway, instead
+ * of the whole room frontage being open floor. Center rooms (Reception,
+ * Command Center, Operations, Server Room, and any 3-project row's middle
+ * room) straddle the corridor spine itself and are wider than it, so both
+ * edges are left fully open across their depth — the room's own walls take
+ * over as the corridor boundary there.
+ */
+function computeCorridorWallsAndDoors(rooms: RoomLayout[], corridorLength: number, corridorWidth: number) {
+  const walls: CorridorWallSegment[] = [];
+  const doors: CorridorDoor[] = [];
+
+  for (const side of ["left", "right"] as const) {
+    const blocked: [number, number][] = [];
+    for (const room of rooms) {
+      if (room.side === "center") {
+        blocked.push([room.z - room.depth / 2 - 0.05, room.z + room.depth / 2 + 0.05]);
+      } else if (room.side === side) {
+        const doorSpan = Math.min(DOOR_WIDTH, room.depth);
+        blocked.push([room.z - doorSpan / 2, room.z + doorSpan / 2]);
+        doors.push({ side, x: (side === "left" ? -1 : 1) * (corridorWidth / 2), z: room.z, width: doorSpan, accent: room.accent });
+      }
+    }
+    blocked.sort((a, b) => a[0] - b[0]);
+    const merged: [number, number][] = [];
+    for (const range of blocked) {
+      const last = merged[merged.length - 1];
+      if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
+      else merged.push(range);
+    }
+    let cursor = 0;
+    for (const [start, end] of merged) {
+      if (start - cursor > 0.15) walls.push({ side, z: (cursor + start) / 2, length: start - cursor });
+      cursor = Math.max(cursor, end);
+    }
+    if (corridorLength - cursor > 0.15) walls.push({ side, z: (cursor + corridorLength) / 2, length: corridorLength - cursor });
+  }
+
+  return { walls, doors };
+}
 
 function roomSizeFor(resourceCount: number): { size: RoomSize; width: number; depth: number } {
   if (resourceCount <= 3) return { size: "SMALL", width: 5, depth: 4.5 };
@@ -277,8 +340,9 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
   // grows wider (more projects per row) gets the camera pulled back too, not
   // only one that grows longer.
   const radius = Math.max(Math.sqrt(halfWidth ** 2 + halfDepth ** 2), 6) + 2.5;
+  const { walls: corridorWalls, doors: corridorDoors } = computeCorridorWallsAndDoors(rooms, z, CORRIDOR_WIDTH);
 
-  return { rooms, corridor: { length: z, width: CORRIDOR_WIDTH }, serverRacks, bounds, center, radius };
+  return { rooms, corridor: { length: z, width: CORRIDOR_WIDTH }, serverRacks, corridorWalls, corridorDoors, bounds, center, radius };
 }
 
 /** A room's walkable "door" and "inside" points, for the waypoint path builder. */
