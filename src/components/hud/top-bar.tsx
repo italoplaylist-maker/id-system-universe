@@ -34,6 +34,7 @@ export function TopBar() {
   const online = applications?.filter((a) => a.status === "RUNNING").length ?? 0;
   const deploying = applications?.filter((a) => a.status === "DEPLOYING").length ?? 0;
   const incidents = applications?.filter((a) => a.status === "ERROR").length ?? 0;
+  const unassigned = applications?.filter((a) => !a.projectId).length ?? 0;
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -54,6 +55,15 @@ export function TopBar() {
           <StatusPill label="Online" value={online} dotClassName="bg-status-running" />
           <StatusPill label="Deploying" value={deploying} dotClassName="bg-status-deploying" />
           <StatusPill label="Incidents" value={incidents} dotClassName={incidents > 0 ? "bg-status-error" : "bg-status-unknown"} />
+          {unassigned > 0 && (
+            <button
+              onClick={() => router.push("/projects")}
+              className="flex items-center gap-2 rounded-full border border-status-warning/40 bg-status-warning/10 px-2.5 py-1 text-xs font-semibold text-status-warning hover:bg-status-warning/20"
+              title="Resources not yet grouped into a Project"
+            >
+              {unassigned} Unassigned
+            </button>
+          )}
         </div>
       </div>
 

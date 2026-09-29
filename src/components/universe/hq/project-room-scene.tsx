@@ -7,7 +7,11 @@ import type { RoomLayout } from "./hq-layout";
 import { computeWorkstationLocalPositions } from "./hq-layout";
 import { RoomShell } from "./room-shell";
 import { ResourceWorkstation } from "./resource-workstation";
-import { DigitalEmployee } from "./digital-employee";
+import { EmployeeModel } from "./assets/employee-model";
+import { WorldAsset } from "./assets/world-asset";
+import { ASSET_KEYS } from "./assets/asset-keys";
+import { PlantFallback } from "./assets/procedural-furniture";
+import { Html } from "@react-three/drei";
 import type { UniverseApplication } from "@/types/domain";
 
 interface ProjectRoomSceneProps {
@@ -20,27 +24,28 @@ interface ProjectRoomSceneProps {
 }
 
 /**
- * One idle employee per occupied project room, wandering a small loop near
- * the workstations. Kept to within-room wandering (not full cross-room
- * visits) — ambient life without the cost of a building-wide crowd sim.
+ * One or two idle employees per occupied project room, wandering a small
+ * loop near the workstations. Kept to within-room wandering (not full
+ * cross-room visits) — ambient life without the cost of a building-wide
+ * crowd sim.
  */
-function AmbientEmployee({ room }: { room: RoomLayout }) {
+function AmbientEmployee({ room, seedOffset = 0 }: { room: RoomLayout; seedOffset?: number }) {
   const ref = useRef<THREE.Group>(null);
-  const seed = useMemo(() => Math.abs(hashCode(room.id)) % 1000, [room.id]);
-  const radius = Math.min(room.width, room.depth) * 0.22;
+  const seed = useMemo(() => (Math.abs(hashCode(room.id)) % 1000) + seedOffset * 137, [room.id, seedOffset]);
+  const radius = Math.min(room.width, room.depth) * 0.2;
 
   useFrame(({ clock }) => {
     if (!ref.current) return;
-    const t = clock.elapsedTime * 0.25 + seed;
-    const x = Math.sin(t) * radius;
-    const z = Math.cos(t * 0.7) * radius * 0.6 - 0.5;
+    const t = clock.elapsedTime * 0.22 + seed;
+    const x = Math.sin(t) * radius + (seedOffset ? radius * 0.9 : -radius * 0.4);
+    const z = Math.cos(t * 0.7) * radius * 0.6 - 0.3;
     ref.current.position.set(x, 0, z);
     ref.current.rotation.y = Math.atan2(Math.cos(t) * -Math.sin(t) * 0.25, -Math.sin(t * 0.7) * 0.7 * radius * 0.6) || 0;
   });
 
   return (
     <group ref={ref}>
-      <DigitalEmployee accent={room.accent} />
+      <EmployeeModel accent={room.accent} pose="walking" activity="idle" seed={seed} />
     </group>
   );
 }
@@ -56,6 +61,8 @@ function hashCode(input: string): number {
 
 export function ProjectRoomScene({ room, resources, selectedResourceId, onSelectResource, onSelectNameplate, dimmed = false }: ProjectRoomSceneProps) {
   const positions = useMemo(() => computeWorkstationLocalPositions(room, resources.length), [room, resources.length]);
+  const employeeCount = resources.length === 0 ? 0 : resources.length > 3 ? 2 : 1;
+  const plantCorner: [number, number, number] = [room.width / 2 - 0.5, 0, -room.depth / 2 + 0.5];
 
   return (
     <group position={[room.x, 0, room.z]}>
@@ -77,7 +84,17 @@ export function ProjectRoomScene({ room, resources, selectedResourceId, onSelect
             onSelect={onSelectResource}
           />
         ))}
-        {resources.length > 0 && <AmbientEmployee room={room} />}
+        {Array.from({ length: employeeCount }).map((_, i) => (
+          <AmbientEmployee key={i} room={room} seedOffset={i} />
+        ))}
+        <WorldAsset asset={ASSET_KEYS.PLANT} fallback={<PlantFallback />} position={plantCorner} />
+        {resources.length === 0 && (
+          <Html center distanceFactor={8} style={{ pointerEvents: "none" }}>
+            <div style={{ textAlign: "center", fontFamily: "ui-sans-serif, system-ui" }}>
+              <p style={{ fontSize: 11, color: "#8890a3", letterSpacing: 1 }}>NO RESOURCES</p>
+            </div>
+          </Html>
+        )}
       </RoomShell>
     </group>
   );

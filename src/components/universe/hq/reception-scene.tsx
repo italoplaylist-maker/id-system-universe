@@ -2,20 +2,22 @@
 
 import type { RoomLayout } from "./hq-layout";
 import { RoomShell } from "./room-shell";
-import { DigitalEmployee } from "./digital-employee";
+import { EmployeeModel } from "./assets/employee-model";
+import { WorldAsset } from "./assets/world-asset";
+import { ASSET_KEYS } from "./assets/asset-keys";
+import { ReceptionDeskFallback, SofaFallback, PlantFallback } from "./assets/procedural-furniture";
 
-/** The building's front door — a desk and a standing greeter, nothing operational happens here. */
+/** The building's front door — reception desk, a greeter, a place to sit, nothing operational happens here. */
 export function ReceptionScene({ room }: { room: RoomLayout }) {
   return (
     <group position={[room.x, 0, room.z]}>
       <RoomShell width={room.width} depth={room.depth} name={room.name} accent={room.accent} openSides={room.openSides}>
-        <mesh position={[0, 0.4, -0.6]} castShadow>
-          <boxGeometry args={[1.6, 0.8, 0.4]} />
-          <meshStandardMaterial color="#181c24" roughness={0.5} />
-        </mesh>
-        <group position={[0, 0, -1.1]}>
-          <DigitalEmployee accent={room.accent} />
+        <WorldAsset asset={ASSET_KEYS.RECEPTION_DESK} fallback={<ReceptionDeskFallback accent={room.accent} />} position={[0, 0, -0.9]} />
+        <group position={[0, 0, -1.25]} rotation={[0, Math.PI, 0]}>
+          <EmployeeModel accent={room.accent} pose="standing" activity="idle" />
         </group>
+        <WorldAsset asset={ASSET_KEYS.SOFA} fallback={<SofaFallback />} position={[-room.width / 2 + 1, 0, room.depth / 2 - 0.7]} rotation={Math.PI / 2} />
+        <WorldAsset asset={ASSET_KEYS.PLANT} fallback={<PlantFallback />} position={[room.width / 2 - 0.5, 0, room.depth / 2 - 0.5]} />
       </RoomShell>
     </group>
   );

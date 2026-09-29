@@ -5,18 +5,43 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RoomLayout } from "./hq-layout";
 import { RoomShell } from "./room-shell";
-import { DigitalEmployee } from "./digital-employee";
+import { EmployeeModel } from "./assets/employee-model";
+import { WorldAsset } from "./assets/world-asset";
+import { ASSET_KEYS } from "./assets/asset-keys";
+import { DeskFallback, ChairFallback, MonitorFallback } from "./assets/procedural-furniture";
 
-/** A couple of employees on standby — Operations is the spawn point every task agent walks out from. */
-function StandbyEmployee({ offset }: { offset: number }) {
+const DESK_POSITIONS: [number, number][] = [
+  [-1.8, -0.7],
+  [-0.6, -0.7],
+  [0.6, -0.7],
+  [1.8, -0.7],
+];
+
+function OpsDesk({ x, z, manned }: { x: number; z: number; manned: boolean }) {
+  return (
+    <group position={[x, 0, z]}>
+      <WorldAsset asset={ASSET_KEYS.OFFICE_DESK} fallback={<DeskFallback />} />
+      <WorldAsset asset={ASSET_KEYS.MONITOR} fallback={<MonitorFallback color="#8890a3" pulse="none" />} />
+      <WorldAsset asset={ASSET_KEYS.OFFICE_CHAIR} fallback={<ChairFallback />} position={[0, 0, 0.32]} />
+      {manned && (
+        <group position={[0, 0, 0.32]}>
+          <StandbyEmployee />
+        </group>
+      )}
+    </group>
+  );
+}
+
+/** A standby employee at an Operations desk — this is the pool every task agent conceptually walks out from. */
+function StandbyEmployee() {
   const ref = useRef<THREE.Group>(null);
   useFrame(({ clock }) => {
     if (!ref.current) return;
-    ref.current.position.y = Math.sin(clock.elapsedTime * 1.2 + offset) * 0.015;
+    ref.current.position.y = Math.sin(clock.elapsedTime * 1.2) * 0.01;
   });
   return (
-    <group ref={ref} position={[offset, 0, -0.6]}>
-      <DigitalEmployee accent="#8890a3" />
+    <group ref={ref}>
+      <EmployeeModel accent="#8890a3" pose="seated" activity="working" />
     </group>
   );
 }
@@ -25,12 +50,9 @@ export function OperationsScene({ room, activeCount }: { room: RoomLayout; activ
   return (
     <group position={[room.x, 0, room.z]}>
       <RoomShell width={room.width} depth={room.depth} name={room.name} accent={room.accent} openSides={room.openSides}>
-        <mesh position={[0, 0.36, 0]} castShadow>
-          <boxGeometry args={[room.width * 0.5, 0.05, 1]} />
-          <meshStandardMaterial color="#181c24" roughness={0.5} />
-        </mesh>
-        {Math.max(0, 2 - activeCount) > 0 && <StandbyEmployee offset={-0.7} />}
-        {Math.max(0, 1 - activeCount) > 0 && <StandbyEmployee offset={0.7} />}
+        {DESK_POSITIONS.map(([x, z], i) => (
+          <OpsDesk key={i} x={x} z={z} manned={i < Math.max(1, 2 - activeCount)} />
+        ))}
       </RoomShell>
     </group>
   );

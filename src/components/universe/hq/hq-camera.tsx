@@ -36,16 +36,20 @@ export function HqCamera({ radius, centerZ, focusTarget }: HqCameraProps) {
 
   return (
     <>
-      <PerspectiveCamera makeDefault position={[radius * 0.7, radius * 0.68, centerZ + radius * 0.7]} fov={42} />
+      {/* The building is long and thin (a corridor of rooms), not round, so no single
+          distance frames all of it AND keeps furniture legible — default lands on the
+          Reception→Command Center core (the part that reads "this is a company" fastest),
+          and maxDistance is generous enough to pull back for the full footprint. */}
+      <PerspectiveCamera makeDefault position={[radius * 1.15, radius * 0.85, centerZ + radius * 1.15]} fov={38} near={0.1} far={radius * 8} />
       <OrbitControls
         ref={controlsRef}
         makeDefault
         enableDamping
         dampingFactor={0.08}
-        minDistance={radius * 0.15}
-        maxDistance={radius * 1.5}
+        minDistance={radius * 0.18}
+        maxDistance={radius * 2.4}
         minPolarAngle={Math.PI / 6}
-        maxPolarAngle={Math.PI / 2.3}
+        maxPolarAngle={Math.PI / 2.4}
       />
     </>
   );

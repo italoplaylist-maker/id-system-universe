@@ -9,6 +9,8 @@ import { useProviders } from "@/hooks/use-providers";
 import { useProjects } from "@/hooks/use-projects";
 import { useUiStore } from "@/store/ui-store";
 import { HqScene } from "./hq-scene";
+import { HqErrorBoundary } from "./hq-error-boundary";
+import { HqLoading } from "./hq-loading";
 import { detectWebglSupport } from "../webgl";
 import { DEMO_APPLICATIONS, DEMO_PROJECTS, DEMO_PROVIDERS } from "@/lib/demo-data";
 import { Button } from "@/components/ui/button";
@@ -44,7 +46,7 @@ export function HqView() {
     }
   }, [setViewMode]);
 
-  if (webglOk === null) return null;
+  if (webglOk === null) return <HqLoading />;
 
   const noRealProviders = !demoMode && (realProviders?.length ?? 0) === 0;
 
@@ -63,41 +65,36 @@ export function HqView() {
           </div>
         </div>
       ) : (
-        <HqScene
-          providers={providers}
-          projects={projects}
-          applications={applications}
-          selectedApplicationId={selectedApplicationId}
-          onSelectApplication={(id) => {
-            if (demoMode) {
-              toast.message("This is demo data. Connect a real Coolify instance to control resources.");
-              return;
-            }
-            selectApplication(id);
-          }}
-          onOpenProject={(projectId) => {
-            if (demoMode) {
-              toast.message("This is demo data. Connect a real Coolify instance to manage projects.");
-              return;
-            }
-            router.push(`/projects/${projectId}`);
-          }}
-          onOpenUnassigned={() => {
-            if (demoMode) {
-              toast.message("This is demo data. Connect a real Coolify instance to organize resources.");
-              return;
-            }
-            router.push("/projects");
-          }}
-          onOpenProvider={() => {
-            if (demoMode) {
-              toast.message("This is demo data. Connect a real Coolify instance to manage providers.");
-              return;
-            }
-            router.push("/settings/infrastructure");
-          }}
-          reducedGraphics={reducedGraphics}
-        />
+        <HqErrorBoundary onOpenListView={() => setViewMode("LIST")}>
+          <HqScene
+            providers={providers}
+            projects={projects}
+            applications={applications}
+            selectedApplicationId={selectedApplicationId}
+            onSelectApplication={(id) => {
+              if (demoMode) {
+                toast.message("This is demo data. Connect a real Coolify instance to control resources.");
+                return;
+              }
+              selectApplication(id);
+            }}
+            onOpenProject={(projectId) => {
+              if (demoMode) {
+                toast.message("This is demo data. Connect a real Coolify instance to manage projects.");
+                return;
+              }
+              router.push(`/projects/${projectId}`);
+            }}
+            onOpenProvider={() => {
+              if (demoMode) {
+                toast.message("This is demo data. Connect a real Coolify instance to manage providers.");
+                return;
+              }
+              router.push("/settings/infrastructure");
+            }}
+            reducedGraphics={reducedGraphics}
+          />
+        </HqErrorBoundary>
       )}
 
       {demoMode && (

@@ -2,6 +2,7 @@
 
 import { Suspense, useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
+import { ContactShadows } from "@react-three/drei";
 import { computeHqLayout, computeWorkstationWorldPositions } from "./hq-layout";
 import { HqCamera } from "./hq-camera";
 import { CorridorScene } from "./corridor-scene";
@@ -11,6 +12,7 @@ import { CommandCenterScene, type CommandCenterStats } from "./command-center-sc
 import { OperationsScene } from "./operations-scene";
 import { ServerRoomScene } from "./server-room-scene";
 import { TaskAgents } from "./task-agents";
+import { PALETTE } from "./palette";
 import type { UniverseApplication, UniverseProject, UniverseProviderSummary } from "@/types/domain";
 
 interface HqSceneProps {
@@ -21,7 +23,6 @@ interface HqSceneProps {
   onSelectApplication: (id: string) => void;
   onOpenProject: (projectId: string) => void;
   onOpenProvider: (providerId: string) => void;
-  onOpenUnassigned: () => void;
   reducedGraphics: boolean;
 }
 
@@ -33,25 +34,23 @@ export function HqScene({
   onSelectApplication,
   onOpenProject,
   onOpenProvider,
-  onOpenUnassigned,
   reducedGraphics,
 }: HqSceneProps) {
   const enabledProviders = useMemo(() => providers.filter((p) => p.enabled), [providers]);
   const activeProjects = useMemo(() => projects.filter((p) => !p.archivedAt), [projects]);
-  const unassignedCount = useMemo(() => applications.filter((a) => !a.projectId).length, [applications]);
 
-  const layout = useMemo(
-    () => computeHqLayout(activeProjects, enabledProviders, unassignedCount),
-    [activeProjects, enabledProviders, unassignedCount],
-  );
+  // Unassigned resources are an administrative state, not a room (briefing
+  // 42) — they never get a workstation in the building, only a HUD pill
+  // (top-bar.tsx) pointing at /projects.
+  const layout = useMemo(() => computeHqLayout(activeProjects, enabledProviders), [activeProjects, enabledProviders]);
 
   const resourcesByRoom = useMemo(() => {
     const map = new Map<string, UniverseApplication[]>();
     for (const app of applications) {
-      const key = app.projectId ?? "unassigned";
-      const list = map.get(key) ?? [];
+      if (!app.projectId) continue;
+      const list = map.get(app.projectId) ?? [];
       list.push(app);
-      map.set(key, list);
+      map.set(app.projectId, list);
     }
     for (const list of map.values()) list.sort((a, b) => a.id.localeCompare(b.id));
     return map;
@@ -74,19 +73,25 @@ export function HqScene({
 
   return (
     <Canvas shadows={!reducedGraphics} dpr={reducedGraphics ? 1 : [1, 1.6]} gl={{ antialias: !reducedGraphics }} className="bg-background">
-      <color attach="background" args={["#08090c"]} />
-      <fog attach="fog" args={["#08090c", layout.radius * 1.6, layout.radius * 3.2]} />
+      <color attach="background" args={[PALETTE.background]} />
+      <fog attach="fog" args={[PALETTE.background, layout.radius * 1.9, layout.radius * 3.6]} />
 
-      <hemisphereLight args={["#4a5a72", "#05060a", 0.65]} />
-      <ambientLight intensity={0.35} />
-      <directionalLight position={[10, 16, 8]} intensity={1.4} castShadow={!reducedGraphics} />
-      <directionalLight position={[-10, 10, centerZ - 6]} intensity={0.35} color="#8fd8ff" />
-      <pointLight position={[-6, 6, centerZ]} intensity={0.25} color="#38bdf8" />
+      {/* Premium-dark, not blackout: hemisphere gives even fill, one strong key light
+          models shadows/contrast, a soft cyan rim keeps the far side of the building readable. */}
+      <hemisphereLight args={["#5b6f88", "#0a0d12", 0.85] as const} />
+      <ambientLight intensity={0.5} />
+      <directionalLight position={[9, 14, 7]} intensity={1.6} castShadow={!reducedGraphics} shadow-mapSize={[1024, 1024]} />
+      <directionalLight position={[-8, 9, centerZ - 4]} intensity={0.5} color={PALETTE.glass} />
+      <pointLight position={[0, 5, centerZ]} intensity={0.35} color={PALETTE.screen} distance={layout.radius} />
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.06, centerZ]} receiveShadow>
-        <planeGeometry args={[layout.radius * 2.4, layout.radius * 2.6]} />
-        <meshStandardMaterial color="#0b0d12" roughness={1} />
+        <planeGeometry args={[layout.radius * 2.2, layout.radius * 2.4]} />
+        <meshStandardMaterial color="#0c0f14" roughness={1} />
       </mesh>
+
+      {!reducedGraphics && (
+        <ContactShadows position={[0, 0.001, centerZ]} opacity={0.45} scale={layout.radius * 2.4} blur={2} far={4} color="#000000" />
+      )}
 
       <Suspense fallback={null}>
         <CorridorScene corridor={layout.corridor} />
@@ -117,18 +122,6 @@ export function HqScene({
                 selectedResourceId={selectedApplicationId}
                 onSelectResource={onSelectApplication}
                 onSelectNameplate={() => onOpenProject(projectId)}
-              />
-            );
-          }
-          if (room.kind === "unassigned") {
-            return (
-              <ProjectRoomScene
-                key={room.id}
-                room={room}
-                resources={resourcesByRoom.get("unassigned") ?? []}
-                selectedResourceId={selectedApplicationId}
-                onSelectResource={onSelectApplication}
-                onSelectNameplate={onOpenUnassigned}
               />
             );
           }

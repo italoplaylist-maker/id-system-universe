@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { DigitalEmployee } from "./digital-employee";
+import { EmployeeModel } from "./assets/employee-model";
 
 export type TaskAgentState = "WORKING" | "DEPLOYING" | "WARNING" | "ERROR";
 
@@ -23,7 +23,7 @@ interface TaskAgentControllerProps {
 }
 
 /**
- * Walks a DigitalEmployee along a precomputed corridor-safe path from
+ * Walks an EmployeeModel along a precomputed corridor-safe path from
  * Operations to the busy resource's workstation, then works in place until
  * the parent unmounts it (the real operation resolved — this only ever
  * represents it, Coolify/the Control Plane decides the outcome). Never cuts
@@ -34,9 +34,10 @@ export function TaskAgentController({ waypoints, state }: TaskAgentControllerPro
   const groupRef = useRef<THREE.Group>(null);
   const indexRef = useRef(0);
   const initialized = useRef(false);
+  const [arrived, setArrived] = useState(false);
   const color = STATE_COLOR[state];
 
-  useFrame(({ clock }, delta) => {
+  useFrame((_, delta) => {
     const group = groupRef.current;
     if (!group || waypoints.length === 0) return;
 
@@ -57,8 +58,7 @@ export function TaskAgentController({ waypoints, state }: TaskAgentControllerPro
     }
 
     if (targetIdx === lastIndex && distance < 0.05) {
-      group.position.y = Math.sin(clock.elapsedTime * 4) * 0.03;
-      group.rotation.y += delta * (state === "ERROR" || state === "WARNING" ? 0.6 : 1.4);
+      if (!arrived) setArrived(true);
       return;
     }
 
@@ -72,7 +72,7 @@ export function TaskAgentController({ waypoints, state }: TaskAgentControllerPro
 
   return (
     <group ref={groupRef}>
-      <DigitalEmployee accent={color} />
+      <EmployeeModel accent={color} pose={arrived ? "standing" : "walking"} activity={arrived ? "working" : "idle"} />
       <pointLight color={color} intensity={0.6} distance={1.4} position={[0, 0.4, 0]} />
     </group>
   );

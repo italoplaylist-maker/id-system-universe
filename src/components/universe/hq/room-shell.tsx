@@ -4,8 +4,12 @@ import { memo } from "react";
 import { Html } from "@react-three/drei";
 import type { OpenSide } from "./hq-layout";
 
-const WALL_HEIGHT = 1.7;
+// Deliberately below employee shoulder height (~1.5) rather than the "real"
+// door height — a full-height wall on the side facing the camera blocks the
+// one thing this diorama exists to show (briefing 14: "paredes cutaway").
+const WALL_HEIGHT = 1.3;
 const WALL_THICKNESS = 0.12;
+const NAMEPLATE_Y = WALL_HEIGHT + 0.32;
 
 interface WallSpec {
   side: OpenSide;
@@ -74,12 +78,12 @@ function Nameplate({
   const edgeOffset = (isNS ? depth : width) / 2 + 0.08;
   const position: [number, number, number] =
     side === "north"
-      ? [0, 1.72, edgeOffset]
+      ? [0, NAMEPLATE_Y, edgeOffset]
       : side === "south"
-        ? [0, 1.72, -edgeOffset]
+        ? [0, NAMEPLATE_Y, -edgeOffset]
         : side === "east"
-          ? [edgeOffset, 1.72, 0]
-          : [-edgeOffset, 1.72, 0];
+          ? [edgeOffset, NAMEPLATE_Y, 0]
+          : [-edgeOffset, NAMEPLATE_Y, 0];
   const plateWidth = Math.min((isNS ? width : depth) * 0.75, name.length * 0.15 + 0.4);
 
   return (

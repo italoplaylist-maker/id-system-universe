@@ -3,6 +3,7 @@
 import type { HqLayout, RoomLayout } from "./hq-layout";
 import { RoomShell } from "./room-shell";
 import { ProviderRack } from "./provider-rack";
+import { EmployeeModel } from "./assets/employee-model";
 import type { UniverseProviderSummary } from "@/types/domain";
 
 interface ServerRoomSceneProps {
@@ -32,6 +33,11 @@ export function ServerRoomScene({ room, racks, providers, selectedProviderId, on
             />
           );
         })}
+        {racks.length > 0 && (
+          <group position={[0, 0, room.depth / 2 - 1]}>
+            <EmployeeModel accent={room.accent} pose="standing" activity="idle" />
+          </group>
+        )}
       </RoomShell>
     </group>
   );
