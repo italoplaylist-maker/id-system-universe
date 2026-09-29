@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { MapControls, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
@@ -23,6 +23,12 @@ const RESOURCE_DISTANCE = 2.2;
 const PROJECT_DISTANCE_FACTOR = 1.7;
 const KEY_ROTATE_SPEED = 1.4; // rad/s
 const LERP_RATE = 6.5; // exponential approach rate, frame-rate independent (see damp())
+
+// Module-level, not inline in JSX — a fresh object literal every render is
+// otherwise reassigned onto the controls instance on every render for no
+// reason (harmless on its own, but needless churn on the same hot path that
+// had a real bug — see MapControls's onStart/onEnd/onChange below).
+const MOUSE_BUTTONS = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE } as const;
 
 type Shot = { position: THREE.Vector3; target: THREE.Vector3 };
 
@@ -86,7 +92,7 @@ function isTypingTarget(el: Element | null): boolean {
  * ever calls `target.set(centerX, 0, centerZ)` as a standing rule.
  */
 export function UniverseCameraController({ overviewCenter, overviewRadius }: UniverseCameraControllerProps) {
-  const { camera, gl } = useThree();
+  const { camera } = useThree();
   const controlsRef = useRef<MapControlsImpl>(null);
 
   const overviewCenterRef = useRef<[number, number]>(overviewCenter);
@@ -126,6 +132,33 @@ export function UniverseCameraController({ overviewCenter, overviewRadius }: Uni
 
   const command = useCameraStore((s) => s.command);
   const setFree = useCameraStore((s) => s.setFree);
+
+  // Stable across renders on purpose (empty deps — only refs and
+  // useCameraStore.getState() inside, never a reactive selector value). drei's
+  // <MapControls> tears down and re-attaches EVERY pointer/wheel/touch
+  // listener in a useEffect keyed on [onChange, onStart, onEnd, ...] — an
+  // inline arrow prop here is a new reference every render, and HqScene
+  // re-renders on every TanStack Query poll (applications/projects refetch
+  // every few seconds), so that was disconnecting and reconnecting the
+  // controls constantly, including mid-gesture. Symptom in production:
+  // mouse dragging felt broken/stuck, touch was far worse (more frequent
+  // relative re-renders, and a torn-down listener mid-touch is more
+  // disruptive than mid-mouse-drag). This is the actual fix for that.
+  const handleStart = useCallback(() => {
+    userGestureActive.current = true;
+  }, []);
+  const handleEnd = useCallback(() => {
+    userGestureActive.current = false;
+  }, []);
+  const handleChange = useCallback(() => {
+    // Only a real user gesture (drag/wheel) should cancel a transition and
+    // drop into free mode — our own transition lerp also mutates
+    // position/target every frame, which would otherwise re-trigger this
+    // same "change" event and immediately cancel itself.
+    if (!userGestureActive.current) return;
+    transitioning.current = false;
+    useCameraStore.getState().setFree();
+  }, []);
 
   // Apply a new command the moment its token changes — never re-applies the
   // same command twice (e.g. on an unrelated re-render).
@@ -272,23 +305,10 @@ export function UniverseCameraController({ overviewCenter, overviewRadius }: Uni
         maxDistance={maxDistance}
         minPolarAngle={0.12}
         maxPolarAngle={Math.PI / 2.05}
-        mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE }}
-        domElement={gl.domElement}
-        onStart={() => {
-          userGestureActive.current = true;
-        }}
-        onEnd={() => {
-          userGestureActive.current = false;
-        }}
-        onChange={() => {
-          // Only a real user gesture (drag/wheel) should cancel a transition
-          // and drop into free mode — our own transition lerp also mutates
-          // position/target every frame, which would otherwise re-trigger
-          // this same "change" event and immediately cancel itself.
-          if (!userGestureActive.current) return;
-          transitioning.current = false;
-          setFree();
-        }}
+        mouseButtons={MOUSE_BUTTONS}
+        onStart={handleStart}
+        onEnd={handleEnd}
+        onChange={handleChange}
       />
       <CameraDebugOverlay controlsRef={controlsRef} />
     </>
