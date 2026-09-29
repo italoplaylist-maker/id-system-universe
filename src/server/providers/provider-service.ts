@@ -46,11 +46,12 @@ export interface SanitizedProvider {
   lastSuccessAt: Date | null;
   lastError: string | null;
   applicationCount: number;
+  projectCount: number;
   createdAt: Date;
   updatedAt: Date;
 }
 
-function sanitize(row: InfrastructureProvider & { _count?: { applications: number } }): SanitizedProvider {
+function sanitize(row: InfrastructureProvider & { _count?: { applications: number } }, projectCount = 0): SanitizedProvider {
   return {
     id: row.id,
     type: row.type,
@@ -65,6 +66,7 @@ function sanitize(row: InfrastructureProvider & { _count?: { applications: numbe
     lastSuccessAt: row.lastSuccessAt,
     lastError: row.lastError,
     applicationCount: row._count?.applications ?? 0,
+    projectCount,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -75,7 +77,18 @@ export async function listProviders(): Promise<SanitizedProvider[]> {
     orderBy: { createdAt: "asc" },
     include: { _count: { select: { applications: true } } },
   });
-  return rows.map(sanitize);
+
+  const projectLinks = await prisma.application.findMany({
+    where: { providerId: { in: rows.map((r) => r.id) }, projectId: { not: null } },
+    select: { providerId: true, projectId: true },
+    distinct: ["providerId", "projectId"],
+  });
+  const projectCounts = new Map<string, number>();
+  for (const link of projectLinks) {
+    projectCounts.set(link.providerId, (projectCounts.get(link.providerId) ?? 0) + 1);
+  }
+
+  return rows.map((row) => sanitize(row, projectCounts.get(row.id) ?? 0));
 }
 
 export async function getProviderRowOrThrow(id: string) {

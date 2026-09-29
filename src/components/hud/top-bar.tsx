@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, Settings, LogOut, LayoutGrid, Box, RefreshCw } from "lucide-react";
+import { Search, Settings, LogOut, LayoutGrid, Box, RefreshCw, Building2 } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/hooks/use-session";
 import { useApplications } from "@/hooks/use-applications";
 import { useSyncAll } from "@/hooks/use-applications";
+import { useProjects } from "@/hooks/use-projects";
 import { useUiStore } from "@/store/ui-store";
 import { Button } from "@/components/ui/button";
 
@@ -24,9 +25,11 @@ export function TopBar() {
   const router = useRouter();
   const { data: user } = useSession();
   const { data: applications } = useApplications();
+  const { data: projects } = useProjects();
   const sync = useSyncAll();
   const { viewMode, setViewMode, setCommandPaletteOpen } = useUiStore();
 
+  const projectCount = projects?.length ?? 0;
   const total = applications?.length ?? 0;
   const online = applications?.filter((a) => a.status === "RUNNING").length ?? 0;
   const deploying = applications?.filter((a) => a.status === "DEPLOYING").length ?? 0;
@@ -46,7 +49,8 @@ export function TopBar() {
           <p className="text-sm font-semibold">Universe</p>
         </div>
         <div className="hidden items-center gap-5 md:flex">
-          <StatusPill label="Applications" value={total} dotClassName="bg-accent" />
+          <StatusPill label="Projects" value={projectCount} dotClassName="bg-accent" />
+          <StatusPill label="Resources" value={total} dotClassName="bg-accent" />
           <StatusPill label="Online" value={online} dotClassName="bg-status-running" />
           <StatusPill label="Deploying" value={deploying} dotClassName="bg-status-deploying" />
           <StatusPill label="Incidents" value={incidents} dotClassName={incidents > 0 ? "bg-status-error" : "bg-status-unknown"} />
@@ -54,6 +58,10 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-2">
+        <Link href="/projects" className="rounded-md p-2 text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Projects">
+          <Building2 className="h-4 w-4" />
+        </Link>
+
         <button
           onClick={() => setCommandPaletteOpen(true)}
           className="flex items-center gap-2 rounded-md border border-border bg-surface-raised px-3 py-1.5 text-xs text-muted hover:text-foreground"

@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { Command } from "cmdk";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Activity, FileText, RotateCw, Rocket, Settings, ListChecks } from "lucide-react";
+import { Activity, FileText, RotateCw, Rocket, Settings, ListChecks, Building2 } from "lucide-react";
 import { useApplications, useRedeployApplication, useRestartApplication } from "@/hooks/use-applications";
+import { useProjects } from "@/hooks/use-projects";
 import { useUiStore } from "@/store/ui-store";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ApiClientError } from "@/lib/api-client";
@@ -15,6 +16,7 @@ export function CommandPalette() {
   const router = useRouter();
   const { commandPaletteOpen, setCommandPaletteOpen, selectApplication, requestTab } = useUiStore();
   const { data: applications } = useApplications();
+  const { data: projects } = useProjects();
   const restart = useRestartApplication();
   const redeploy = useRedeployApplication();
 
@@ -87,7 +89,7 @@ export function CommandPalette() {
       >
         <Command.Input
           autoFocus
-          placeholder={activeApp ? `${activeApp.name} — choose an action…` : "Search applications, or type a settings page…"}
+          placeholder={activeApp ? `${activeApp.name} — choose an action…` : "Search projects, resources, or a settings page…"}
           className="w-full border-b border-border bg-transparent px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted"
         />
         <Command.List className="max-h-80 overflow-y-auto p-2">
@@ -95,15 +97,32 @@ export function CommandPalette() {
 
           {!activeApp && (
             <>
-              <Command.Group heading="Applications" className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted">
+              <Command.Group heading="Projects" className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted">
+                {projects?.map((project) => (
+                  <Command.Item
+                    key={project.id}
+                    value={`project ${project.name} ${project.slug}`}
+                    onSelect={() => {
+                      router.push(`/projects/${project.id}`);
+                      closeAll();
+                    }}
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm data-[selected=true]:bg-surface"
+                  >
+                    <Building2 className="h-3.5 w-3.5" />
+                    <span>{project.name}</span>
+                    <span className="text-xs text-muted">{project.health}</span>
+                  </Command.Item>
+                ))}
+              </Command.Group>
+              <Command.Group heading="Resources" className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted">
                 {applications?.map((app) => (
                   <Command.Item
                     key={app.id}
-                    value={`${app.name} ${app.providerName} ${app.status} ${app.repository ?? ""}`}
+                    value={`${app.projectName ?? ""} ${app.name} ${app.providerName} ${app.status} ${app.repository ?? ""}`}
                     onSelect={() => setActiveApp(app)}
                     className="flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-sm data-[selected=true]:bg-surface"
                   >
-                    <span>{app.name}</span>
+                    <span>{app.projectName ? `${app.projectName} / ${app.name}` : app.name}</span>
                     <span className="text-xs text-muted">
                       {app.providerName} · {app.status}
                     </span>
@@ -111,6 +130,9 @@ export function CommandPalette() {
                 ))}
               </Command.Group>
               <Command.Group heading="Go to" className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted">
+                <Command.Item onSelect={() => { router.push("/projects"); closeAll(); }} className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm data-[selected=true]:bg-surface">
+                  <Building2 className="h-3.5 w-3.5" /> Projects
+                </Command.Item>
                 <Command.Item onSelect={() => { router.push("/settings/infrastructure"); closeAll(); }} className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm data-[selected=true]:bg-surface">
                   <Settings className="h-3.5 w-3.5" /> Infrastructure Settings
                 </Command.Item>

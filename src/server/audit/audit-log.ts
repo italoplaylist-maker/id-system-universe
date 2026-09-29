@@ -19,7 +19,14 @@ export type AuditAction =
   | "USER_ROLE_CHANGED"
   | "USER_DEACTIVATED"
   | "USER_REACTIVATED"
-  | "USER_PASSWORD_RESET";
+  | "USER_PASSWORD_RESET"
+  | "PROJECT_CREATED"
+  | "PROJECT_UPDATED"
+  | "PROJECT_ARCHIVED"
+  | "PROJECT_UNARCHIVED"
+  | "PROJECT_DELETED"
+  | "RESOURCE_ASSIGNED"
+  | "RESOURCE_UNASSIGNED";
 
 export type AuditStatus = "REQUESTED" | "RUNNING" | "SUCCESS" | "FAILED";
 
@@ -27,6 +34,7 @@ export interface RecordAuditEventInput {
   userId?: string;
   providerId?: string;
   applicationId?: string;
+  projectId?: string | null;
   action: AuditAction;
   status: AuditStatus;
   /** Must already be sanitized — never pass tokens, headers, or secrets here. */
@@ -41,6 +49,7 @@ export async function recordAuditEvent(input: RecordAuditEventInput): Promise<vo
       userId: input.userId,
       providerId: input.providerId,
       applicationId: input.applicationId,
+      projectId: input.projectId,
       action: input.action,
       status: input.status,
       metadata: input.metadata as Prisma.InputJsonValue | undefined,

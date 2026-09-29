@@ -71,7 +71,9 @@ export function ProviderCard({ provider }: { provider: UniverseProviderSummary }
       <CardContent className="space-y-3">
         <p className="truncate font-mono text-xs text-muted">{provider.baseUrl}</p>
         <div className="flex items-center justify-between text-sm">
-          <span>{provider.applicationCount} applications</span>
+          <span>
+            {provider.applicationCount} resources · {provider.projectCount} projects
+          </span>
           {provider.latencyMs !== null && <span className="text-muted">{provider.latencyMs}ms</span>}
         </div>
         {provider.lastError && <p className="text-xs text-status-error">{provider.lastError}</p>}

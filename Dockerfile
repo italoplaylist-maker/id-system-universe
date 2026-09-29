@@ -26,6 +26,10 @@ ENV DATABASE_URL="postgresql://build:build@localhost:5432/build" \
     CREDENTIAL_ENCRYPTION_KEY="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" \
     NEXT_TELEMETRY_DISABLED=1
 RUN npx prisma generate --schema=prisma/schema.prisma
+# `npm run build` forces webpack (see package.json) — Turbopack's production
+# bundler (Next 16's default) emits a chunk reference for the three.js/drei
+# graph that never gets written to disk, so the 3D view 404s on a fresh page
+# load in production while working fine under `next dev`.
 RUN npm run build
 
 # The Next.js standalone bundle includes the Prisma *query* engine but not

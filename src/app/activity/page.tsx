@@ -48,7 +48,8 @@ export default function ActivityPage() {
                 </div>
                 <p className="mt-0.5 text-xs text-muted">
                   {event.user?.email ?? "system"}
-                  {event.application ? ` · ${event.application.name}` : ""}
+                  {event.project ? ` · ${event.project.name}` : ""}
+                  {event.application ? ` / ${event.application.name}` : ""}
                   {event.provider ? ` · ${event.provider.name}` : ""}
                 </p>
                 <p className="text-[11px] text-muted/70">{new Date(event.createdAt).toLocaleString()}</p>

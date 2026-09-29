@@ -7,10 +7,10 @@ import { recordUniverseEvent } from "@/server/events/universe-events";
 import { TtlCache } from "@/server/cache/cache";
 import { NotFoundError, ProviderError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
-import type { Application, InfrastructureProvider } from "@prisma/client";
+import { toUniverseApplication, type ApplicationWithRelations } from "@/server/applications/application-mapper";
 import type { UniverseApplication, UniverseApplicationStatus } from "@/types/domain";
 
-type ApplicationWithProvider = Application & { provider: InfrastructureProvider };
+type ApplicationWithProvider = ApplicationWithRelations;
 
 const STATUS_CACHE_TTL_MS = 5_000;
 const statusCache = new TtlCache<UniverseApplicationStatus>(STATUS_CACHE_TTL_MS);
@@ -19,33 +19,6 @@ export interface ActorContext {
   userId: string;
   ip?: string;
   userAgent?: string;
-}
-
-function toUniverseApplication(row: ApplicationWithProvider, effectiveStatus: UniverseApplicationStatus): UniverseApplication {
-  return {
-    id: row.id,
-    externalId: row.externalId,
-    providerId: row.providerId,
-    providerType: row.provider.type,
-    providerName: row.provider.name,
-    providerColor: row.provider.color,
-    name: row.name,
-    description: row.description,
-    status: effectiveStatus,
-    fqdn: row.fqdn,
-    repository: row.repository,
-    branch: row.branch,
-    lastDeployedAt: row.lastDeployedAt?.toISOString() ?? null,
-    lastSyncedAt: row.lastSyncedAt.toISOString(),
-    pendingOperation: row.pendingOperation,
-  };
-}
-
-/** Pending redeploys resolve to DEPLOYING regardless of the cached raw status. */
-function effectiveStatusFromRow(row: Application): UniverseApplicationStatus {
-  if (row.pendingOperation === "REDEPLOY" || row.pendingOperation === "FORCE_REDEPLOY") return "DEPLOYING";
-  if (row.pendingOperation) return "DEPLOYING";
-  return row.status as UniverseApplicationStatus;
 }
 
 /**
@@ -111,6 +84,9 @@ export async function syncAllProviders(): Promise<void> {
 
 export interface ListApplicationsFilter {
   providerId?: string;
+  projectId?: string;
+  /** True to list only resources with no project assigned yet. */
+  unassignedOnly?: boolean;
   query?: string;
   status?: UniverseApplicationStatus;
 }
@@ -119,6 +95,7 @@ export async function listApplications(filter: ListApplicationsFilter = {}): Pro
   const rows = await prisma.application.findMany({
     where: {
       providerId: filter.providerId,
+      projectId: filter.unassignedOnly ? null : filter.projectId,
       ...(filter.query
         ? {
             OR: [
@@ -127,20 +104,21 @@ export async function listApplications(filter: ListApplicationsFilter = {}): Pro
               { branch: { contains: filter.query, mode: "insensitive" } },
               { fqdn: { contains: filter.query, mode: "insensitive" } },
               { provider: { name: { contains: filter.query, mode: "insensitive" } } },
+              { project: { name: { contains: filter.query, mode: "insensitive" } } },
             ],
           }
         : {}),
     },
-    include: { provider: true },
+    include: { provider: true, project: true },
     orderBy: { name: "asc" },
   });
 
-  const mapped = rows.map((row) => toUniverseApplication(row, effectiveStatusFromRow(row)));
+  const mapped = rows.map((row) => toUniverseApplication(row));
   return filter.status ? mapped.filter((a) => a.status === filter.status) : mapped;
 }
 
 async function getRowOrThrow(applicationId: string): Promise<ApplicationWithProvider> {
-  const row = await prisma.application.findUnique({ where: { id: applicationId }, include: { provider: true } });
+  const row = await prisma.application.findUnique({ where: { id: applicationId }, include: { provider: true, project: true } });
   if (!row) throw new NotFoundError("Application not found.");
   return row;
 }
@@ -168,22 +146,25 @@ async function reconcilePendingDeployment(row: ApplicationWithProvider): Promise
       const updated = await prisma.application.update({
         where: { id: row.id },
         data: { status: finalStatus, pendingOperation: null, pendingSince: null, pendingDeploymentExternalId: null, lastDeployedAt: new Date() },
-        include: { provider: true },
+        include: { provider: true, project: true },
       });
 
       await recordAuditEvent({
         applicationId: row.id,
         providerId: row.providerId,
+        projectId: row.projectId,
         action: row.pendingOperation === "FORCE_REDEPLOY" ? "APPLICATION_FORCE_REDEPLOY" : "APPLICATION_REDEPLOY",
         status: deployment.status === "SUCCESS" ? "SUCCESS" : "FAILED",
         metadata: { deploymentId: row.pendingDeploymentExternalId },
       });
       await recordUniverseEvent({
         type: deployment.status === "SUCCESS" ? "DEPLOYMENT_COMPLETED" : "DEPLOYMENT_FAILED",
-        message: `${row.name} deployment ${deployment.status === "SUCCESS" ? "completed" : "failed"}.`,
+        message: `${row.project ? `${row.project.name} / ` : ""}${row.name} deployment ${deployment.status === "SUCCESS" ? "completed" : "failed"}.`,
         applicationId: row.id,
         applicationName: row.name,
         providerId: row.providerId,
+        projectId: row.projectId,
+        projectName: row.project?.name,
       });
 
       return updated;
@@ -198,7 +179,7 @@ async function reconcilePendingDeployment(row: ApplicationWithProvider): Promise
 export async function getApplicationDetail(applicationId: string): Promise<UniverseApplication> {
   let row = await getRowOrThrow(applicationId);
   row = await reconcilePendingDeployment(row);
-  return toUniverseApplication(row, effectiveStatusFromRow(row));
+  return toUniverseApplication(row);
 }
 
 const ACTION_TO_AUDIT: Record<PendingOperation, AuditAction> = {
@@ -209,19 +190,26 @@ const ACTION_TO_AUDIT: Record<PendingOperation, AuditAction> = {
   FORCE_REDEPLOY: "APPLICATION_FORCE_REDEPLOY",
 };
 
+/** "Project / Resource" when the resource is assigned, just "Resource" when unassigned. */
+function eventLabel(row: Pick<ApplicationWithProvider, "name" | "project">): string {
+  return row.project ? `${row.project.name} / ${row.name}` : row.name;
+}
+
 async function runImmediateAction(
   row: ApplicationWithProvider,
   operation: "START" | "STOP" | "RESTART",
   actor: ActorContext,
 ): Promise<UniverseApplication> {
   await acquireOperationLock(row.id, operation, row.name);
-  await recordAuditEvent({ userId: actor.userId, applicationId: row.id, providerId: row.providerId, action: ACTION_TO_AUDIT[operation], status: "REQUESTED", ipAddress: actor.ip, userAgent: actor.userAgent });
+  await recordAuditEvent({ userId: actor.userId, applicationId: row.id, providerId: row.providerId, projectId: row.projectId, action: ACTION_TO_AUDIT[operation], status: "REQUESTED", ipAddress: actor.ip, userAgent: actor.userAgent });
   await recordUniverseEvent({
     type: operation === "START" ? "START_REQUESTED" : operation === "STOP" ? "STOP_REQUESTED" : "RESTART_REQUESTED",
-    message: `${row.name} ${operation.toLowerCase()} requested.`,
+    message: `${eventLabel(row)} ${operation.toLowerCase()} requested.`,
     applicationId: row.id,
     applicationName: row.name,
     providerId: row.providerId,
+    projectId: row.projectId,
+    projectName: row.project?.name,
   });
 
   try {
@@ -234,21 +222,22 @@ async function runImmediateAction(
     const updated = await prisma.application.update({
       where: { id: row.id },
       data: { status: liveStatus, pendingOperation: null, pendingSince: null },
-      include: { provider: true },
+      include: { provider: true, project: true },
     });
 
-    await recordAuditEvent({ userId: actor.userId, applicationId: row.id, providerId: row.providerId, action: ACTION_TO_AUDIT[operation], status: "SUCCESS", ipAddress: actor.ip, userAgent: actor.userAgent });
+    await recordAuditEvent({ userId: actor.userId, applicationId: row.id, providerId: row.providerId, projectId: row.projectId, action: ACTION_TO_AUDIT[operation], status: "SUCCESS", ipAddress: actor.ip, userAgent: actor.userAgent });
     if (operation === "RESTART") {
-      await recordUniverseEvent({ type: "RESTART_COMPLETED", message: `${row.name} restarted.`, applicationId: row.id, applicationName: row.name, providerId: row.providerId });
+      await recordUniverseEvent({ type: "RESTART_COMPLETED", message: `${eventLabel(row)} restarted.`, applicationId: row.id, applicationName: row.name, providerId: row.providerId, projectId: row.projectId, projectName: row.project?.name });
     }
 
-    return toUniverseApplication(updated, effectiveStatusFromRow(updated));
+    return toUniverseApplication(updated);
   } catch (error) {
     await clearOperationLock(row.id);
     await recordAuditEvent({
       userId: actor.userId,
       applicationId: row.id,
       providerId: row.providerId,
+      projectId: row.projectId,
       action: ACTION_TO_AUDIT[operation],
       status: "FAILED",
       metadata: { error: error instanceof Error ? error.message : "Unknown error" },
@@ -276,8 +265,8 @@ export async function redeployApplication(applicationId: string, force: boolean,
   const operation: PendingOperation = force ? "FORCE_REDEPLOY" : "REDEPLOY";
 
   await acquireOperationLock(row.id, operation, row.name);
-  await recordAuditEvent({ userId: actor.userId, applicationId: row.id, providerId: row.providerId, action: ACTION_TO_AUDIT[operation], status: "REQUESTED", ipAddress: actor.ip, userAgent: actor.userAgent });
-  await recordUniverseEvent({ type: "REDEPLOY_REQUESTED", message: `${row.name} redeploy requested${force ? " (no cache)" : ""}.`, applicationId: row.id, applicationName: row.name, providerId: row.providerId });
+  await recordAuditEvent({ userId: actor.userId, applicationId: row.id, providerId: row.providerId, projectId: row.projectId, action: ACTION_TO_AUDIT[operation], status: "REQUESTED", ipAddress: actor.ip, userAgent: actor.userAgent });
+  await recordUniverseEvent({ type: "REDEPLOY_REQUESTED", message: `${eventLabel(row)} redeploy requested${force ? " (no cache)" : ""}.`, applicationId: row.id, applicationName: row.name, providerId: row.providerId, projectId: row.projectId, projectName: row.project?.name });
 
   try {
     const provider = createDeploymentProvider(row.provider);
@@ -286,19 +275,20 @@ export async function redeployApplication(applicationId: string, force: boolean,
     const updated = await prisma.application.update({
       where: { id: row.id },
       data: { status: "DEPLOYING", pendingDeploymentExternalId: result.deploymentExternalId },
-      include: { provider: true },
+      include: { provider: true, project: true },
     });
 
-    await recordAuditEvent({ userId: actor.userId, applicationId: row.id, providerId: row.providerId, action: ACTION_TO_AUDIT[operation], status: "RUNNING", metadata: { deploymentId: result.deploymentExternalId }, ipAddress: actor.ip, userAgent: actor.userAgent });
-    await recordUniverseEvent({ type: "DEPLOYMENT_STARTED", message: `${row.name} deployment started.`, applicationId: row.id, applicationName: row.name, providerId: row.providerId });
+    await recordAuditEvent({ userId: actor.userId, applicationId: row.id, providerId: row.providerId, projectId: row.projectId, action: ACTION_TO_AUDIT[operation], status: "RUNNING", metadata: { deploymentId: result.deploymentExternalId }, ipAddress: actor.ip, userAgent: actor.userAgent });
+    await recordUniverseEvent({ type: "DEPLOYMENT_STARTED", message: `${eventLabel(row)} deployment started.`, applicationId: row.id, applicationName: row.name, providerId: row.providerId, projectId: row.projectId, projectName: row.project?.name });
 
-    return toUniverseApplication(updated, "DEPLOYING");
+    return toUniverseApplication(updated);
   } catch (error) {
     await clearOperationLock(row.id);
     await recordAuditEvent({
       userId: actor.userId,
       applicationId: row.id,
       providerId: row.providerId,
+      projectId: row.projectId,
       action: ACTION_TO_AUDIT[operation],
       status: "FAILED",
       metadata: { error: error instanceof Error ? error.message : "Unknown error" },

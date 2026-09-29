@@ -5,7 +5,9 @@
  */
 
 export type UniverseApplicationStatus = "RUNNING" | "STOPPED" | "DEPLOYING" | "ERROR" | "UNKNOWN";
+export type UniverseResourceType = "APPLICATION" | "SERVICE" | "DATABASE";
 
+/** A resource: one deployable unit inside a Project (Web, API, Database, ...). */
 export interface UniverseApplication {
   id: string;
   externalId: string;
@@ -13,6 +15,10 @@ export interface UniverseApplication {
   providerType: string;
   providerName: string;
   providerColor: string;
+  projectId: string | null;
+  projectName: string | null;
+  projectAccent: string | null;
+  resourceType: UniverseResourceType;
   name: string;
   description: string | null;
   status: UniverseApplicationStatus;
@@ -22,6 +28,38 @@ export interface UniverseApplication {
   lastDeployedAt: string | null;
   lastSyncedAt: string;
   pendingOperation: string | null;
+}
+
+export type UniverseProjectHealth = "HEALTHY" | "DEGRADED" | "DEPLOYING" | "OFFLINE" | "UNKNOWN";
+
+export interface UniverseProject {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  icon: string | null;
+  accent: string;
+  enabled: boolean;
+  archivedAt: string | null;
+  health: UniverseProjectHealth;
+  resourceCount: number;
+  providerCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UniverseProjectDetail extends UniverseProject {
+  resources: UniverseApplication[];
+}
+
+export interface ProjectSuggestion {
+  /** Common name "stem" the unassigned resources share, e.g. "italoc". */
+  stem: string;
+  resourceIds: string[];
+  resourceNames: string[];
+  /** Set only when an existing project's name/slug matches the stem exactly. */
+  matchedProjectId: string | null;
+  matchedProjectName: string | null;
 }
 
 export interface UniverseDeployment {
@@ -53,4 +91,5 @@ export interface UniverseProviderSummary {
   lastSuccessAt: string | null;
   lastError: string | null;
   applicationCount: number;
+  projectCount: number;
 }

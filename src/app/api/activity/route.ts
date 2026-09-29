@@ -11,14 +11,21 @@ export async function GET(request: Request) {
 
     const url = new URL(request.url);
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 50), 1), 200);
+    const projectId = url.searchParams.get("projectId") ?? undefined;
 
     const [auditEvents, universeEvents] = await Promise.all([
       prisma.auditEvent.findMany({
+        where: projectId ? { projectId } : undefined,
         orderBy: { createdAt: "desc" },
         take: limit,
-        include: { user: { select: { email: true } }, provider: { select: { name: true } }, application: { select: { name: true } } },
+        include: {
+          user: { select: { email: true } },
+          provider: { select: { name: true } },
+          application: { select: { name: true } },
+          project: { select: { name: true } },
+        },
       }),
-      listRecentUniverseEvents(limit),
+      listRecentUniverseEvents(limit, projectId),
     ]);
 
     return NextResponse.json({ auditEvents, universeEvents });

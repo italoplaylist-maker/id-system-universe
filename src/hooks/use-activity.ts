@@ -12,6 +12,7 @@ export interface AuditEventRow {
   user: { email: string } | null;
   provider: { name: string } | null;
   application: { name: string } | null;
+  project: { name: string } | null;
 }
 
 export interface UniverseEventRow {
@@ -19,13 +20,17 @@ export interface UniverseEventRow {
   type: string;
   message: string;
   applicationName: string | null;
+  projectName: string | null;
   createdAt: string;
 }
 
-export function useActivity(limit = 50) {
+export function useActivity(limit = 50, projectId?: string) {
   return useQuery({
-    queryKey: ["activity", limit],
-    queryFn: () => apiFetch<{ auditEvents: AuditEventRow[]; universeEvents: UniverseEventRow[] }>(`/api/activity?limit=${limit}`),
+    queryKey: ["activity", limit, projectId],
+    queryFn: () =>
+      apiFetch<{ auditEvents: AuditEventRow[]; universeEvents: UniverseEventRow[] }>(
+        `/api/activity?limit=${limit}${projectId ? `&projectId=${projectId}` : ""}`,
+      ),
     refetchInterval: 15_000,
   });
 }

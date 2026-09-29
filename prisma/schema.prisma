@@ -46,6 +46,16 @@ enum ViewMode {
   LIST
 }
 
+/// What kind of thing a resource is. Only types we actually sync from a
+/// provider today — expand this enum when a real integration for the next
+/// type (Redis, worker, cron, storage, domain, repository...) exists, never
+/// before.
+enum ResourceType {
+  APPLICATION
+  SERVICE
+  DATABASE
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -82,6 +92,28 @@ model UserPreference {
   updatedAt       DateTime @updatedAt
 }
 
+/// A product/SaaS in the ID System portfolio (Italoc, FinFlow, ...). A Universe
+/// concept, not a Coolify one — a project's resources can span multiple
+/// providers, and a provider hosts resources from multiple projects. Never
+/// hardcoded: rows are created by an admin or by accepting an assignment
+/// suggestion for unassigned resources.
+model Project {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  description String?
+  icon        String?
+  accent      String    @default("#38bdf8")
+  enabled     Boolean   @default(true)
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  resources      Application[]
+  auditEvents    AuditEvent[]
+  universeEvents UniverseEvent[]
+}
+
 /// Uma instância/conta administrada (Coolify hoje; outros providers futuramente).
 model InfrastructureProvider {
   id                  String         @id @default(cuid())
@@ -114,6 +146,11 @@ model Application {
   externalId                  String
   providerId                  String
   provider                    InfrastructureProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  /// Nullable on purpose — a freshly synced resource starts unassigned until
+  /// an admin assigns it to a Project (see "Unassigned Resources").
+  projectId                   String?
+  project                     Project?               @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  resourceType                ResourceType           @default(APPLICATION)
   name                        String
   description                 String?
   status                      ApplicationStatus      @default(UNKNOWN)
@@ -134,6 +171,7 @@ model Application {
 
   @@unique([providerId, externalId])
   @@index([providerId])
+  @@index([projectId])
 }
 
 model DeploymentCache {
@@ -161,6 +199,8 @@ model AuditEvent {
   provider      InfrastructureProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
   applicationId String?
   application   Application?            @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  projectId     String?
+  project       Project?                @relation(fields: [projectId], references: [id], onDelete: SetNull)
   action        String
   status        String
   metadata      Json?
@@ -170,6 +210,7 @@ model AuditEvent {
 
   @@index([createdAt])
   @@index([applicationId])
+  @@index([projectId])
 }
 
 /// Feed de eventos do Universe (barra inferior + Activity Center).
@@ -180,6 +221,9 @@ model UniverseEvent {
   applicationName String?
   providerId      String?
   provider        InfrastructureProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  projectId       String?
+  project         Project?                @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectName     String?
   type            String
   message         String
   createdAt       DateTime                @default(now())

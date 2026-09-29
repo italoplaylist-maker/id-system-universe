@@ -2,24 +2,34 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useApplications } from "@/hooks/use-applications";
 import { useProviders } from "@/hooks/use-providers";
+import { useProjects } from "@/hooks/use-projects";
 import { useUiStore } from "@/store/ui-store";
-import { UniverseScene } from "./universe-scene";
-import { detectWebglSupport } from "./webgl";
-import { DEMO_APPLICATIONS, DEMO_PROVIDERS } from "@/lib/demo-data";
+import { HqScene } from "./hq-scene";
+import { detectWebglSupport } from "../webgl";
+import { DEMO_APPLICATIONS, DEMO_PROJECTS, DEMO_PROVIDERS } from "@/lib/demo-data";
 import { Button } from "@/components/ui/button";
 
-export function UniverseView() {
+/**
+ * Replaces the old sphere/cluster universe with the ID SYSTEM HQ diorama —
+ * same data sources, same Demo Mode / Reduced Graphics / WebGL fallback
+ * contract as before, just a different building on top of it.
+ */
+export function HqView() {
   const [webglOk, setWebglOk] = useState<boolean | null>(null);
+  const router = useRouter();
   const { selectedApplicationId, selectApplication, reducedGraphics, setReducedGraphics, demoMode, setDemoMode, setViewMode } = useUiStore();
 
   const { data: realProviders } = useProviders();
   const { data: realApplications } = useApplications();
+  const { data: realProjects } = useProjects();
 
   const providers = demoMode ? DEMO_PROVIDERS : (realProviders ?? []);
   const applications = demoMode ? DEMO_APPLICATIONS : (realApplications ?? []);
+  const projects = demoMode ? DEMO_PROJECTS : (realProjects ?? []);
 
   useEffect(() => {
     // WebGL support can only be known client-side (canvas probing needs
@@ -48,21 +58,36 @@ export function UniverseView() {
               <Button variant="primary">Connect Coolify</Button>
             </Link>
             <Button variant="secondary" onClick={() => setDemoMode(true)}>
-              Explore Demo Universe
+              Explore Demo Headquarters
             </Button>
           </div>
         </div>
       ) : (
-        <UniverseScene
+        <HqScene
           providers={providers}
+          projects={projects}
           applications={applications}
-          selectedId={selectedApplicationId}
-          onSelect={(id) => {
+          selectedApplicationId={selectedApplicationId}
+          onSelectApplication={(id) => {
             if (demoMode) {
-              toast.message("This is demo data. Connect a real Coolify instance to control applications.");
+              toast.message("This is demo data. Connect a real Coolify instance to control resources.");
               return;
             }
             selectApplication(id);
+          }}
+          onOpenProject={(projectId) => {
+            if (demoMode) {
+              toast.message("This is demo data. Connect a real Coolify instance to manage projects.");
+              return;
+            }
+            router.push(`/projects/${projectId}`);
+          }}
+          onOpenProvider={() => {
+            if (demoMode) {
+              toast.message("This is demo data. Connect a real Coolify instance to manage providers.");
+              return;
+            }
+            router.push("/settings/infrastructure");
           }}
           reducedGraphics={reducedGraphics}
         />

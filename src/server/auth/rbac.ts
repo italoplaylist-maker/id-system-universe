@@ -18,7 +18,9 @@ export type Permission =
   | "application:force-redeploy"
   | "activity:read"
   | "settings:write"
-  | "user:manage";
+  | "user:manage"
+  | "project:read"
+  | "project:write";
 
 const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   ADMIN: new Set([
@@ -35,6 +37,8 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "activity:read",
     "settings:write",
     "user:manage",
+    "project:read",
+    "project:write",
   ]),
   OPERATOR: new Set([
     "provider:read",
@@ -45,8 +49,9 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "application:restart",
     "application:redeploy",
     "activity:read",
+    "project:read",
   ]),
-  VIEWER: new Set(["provider:read", "application:read", "application:logs", "activity:read"]),
+  VIEWER: new Set(["provider:read", "application:read", "application:logs", "activity:read", "project:read"]),
 };
 
 export function can(role: Role, permission: Permission): boolean {

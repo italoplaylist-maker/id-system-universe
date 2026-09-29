@@ -6,6 +6,8 @@ import type { UniverseApplication, UniverseDeployment, UniverseLogLine } from "@
 
 export interface ApplicationFilter {
   providerId?: string;
+  projectId?: string;
+  unassigned?: boolean;
   query?: string;
   status?: UniverseApplication["status"];
 }
@@ -13,6 +15,8 @@ export interface ApplicationFilter {
 function toQueryString(filter: ApplicationFilter): string {
   const params = new URLSearchParams();
   if (filter.providerId) params.set("providerId", filter.providerId);
+  if (filter.projectId) params.set("projectId", filter.projectId);
+  if (filter.unassigned) params.set("unassigned", "true");
   if (filter.query) params.set("q", filter.query);
   if (filter.status) params.set("status", filter.status);
   const qs = params.toString();

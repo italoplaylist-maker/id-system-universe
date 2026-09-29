@@ -13,11 +13,13 @@ export async function GET(request: Request) {
 
     const url = new URL(request.url);
     const providerId = url.searchParams.get("providerId") ?? undefined;
+    const projectId = url.searchParams.get("projectId") ?? undefined;
+    const unassignedOnly = url.searchParams.get("unassigned") === "true";
     const query = url.searchParams.get("q") ?? undefined;
     const statusParam = url.searchParams.get("status");
     const status = statusParam && VALID_STATUSES.includes(statusParam as UniverseApplicationStatus) ? (statusParam as UniverseApplicationStatus) : undefined;
 
-    const applications = await listApplications({ providerId, query, status });
+    const applications = await listApplications({ providerId, projectId, unassignedOnly, query, status });
     return NextResponse.json({ applications });
   } catch (error) {
     return apiError(error);
