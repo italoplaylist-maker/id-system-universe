@@ -151,6 +151,11 @@ model Application {
   projectId                   String?
   project                     Project?               @relation(fields: [projectId], references: [id], onDelete: SetNull)
   resourceType                ResourceType           @default(APPLICATION)
+  /// The provider's own grouping key for this resource (Coolify: the
+  /// Environment UUID it lives in) — null for a provider without this
+  /// concept. Used only to auto-link a freshly-synced resource to the
+  /// Project matching its provider-side grouping; never shown in the UI.
+  groupExternalId              String?
   name                        String
   description                 String?
   status                      ApplicationStatus      @default(UNKNOWN)
@@ -172,6 +177,7 @@ model Application {
   @@unique([providerId, externalId])
   @@index([providerId])
   @@index([projectId])
+  @@index([providerId, groupExternalId])
 }
 
 model DeploymentCache {

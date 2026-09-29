@@ -3,11 +3,13 @@ import { buildProviderRequestUrl } from "@/server/security/ssrf";
 import type {
   CoolifyActionResponse,
   CoolifyApplicationRaw,
+  CoolifyDatabaseRaw,
   CoolifyDeployTriggerResponse,
   CoolifyDeploymentRaw,
   CoolifyLogsRaw,
   CoolifyProjectDetailRaw,
   CoolifyProjectRaw,
+  CoolifyServiceRaw,
   CoolifyVersionResponse,
 } from "./coolify-types";
 
@@ -31,6 +33,18 @@ const ENDPOINTS = {
   deployment: (uuid: string) => `/api/v1/deployments/${encodeURIComponent(uuid)}`,
   projects: () => "/api/v1/projects",
   project: (uuid: string) => `/api/v1/projects/${encodeURIComponent(uuid)}`,
+  services: () => "/api/v1/services",
+  service: (uuid: string) => `/api/v1/services/${encodeURIComponent(uuid)}`,
+  serviceStart: (uuid: string) => `/api/v1/services/${encodeURIComponent(uuid)}/start`,
+  serviceStop: (uuid: string) => `/api/v1/services/${encodeURIComponent(uuid)}/stop`,
+  serviceRestart: (uuid: string) => `/api/v1/services/${encodeURIComponent(uuid)}/restart`,
+  serviceLogs: (uuid: string) => `/api/v1/services/${encodeURIComponent(uuid)}/logs`,
+  databases: () => "/api/v1/databases",
+  database: (uuid: string) => `/api/v1/databases/${encodeURIComponent(uuid)}`,
+  databaseStart: (uuid: string) => `/api/v1/databases/${encodeURIComponent(uuid)}/start`,
+  databaseStop: (uuid: string) => `/api/v1/databases/${encodeURIComponent(uuid)}/stop`,
+  databaseRestart: (uuid: string) => `/api/v1/databases/${encodeURIComponent(uuid)}/restart`,
+  databaseLogs: (uuid: string) => `/api/v1/databases/${encodeURIComponent(uuid)}/logs`,
 } as const;
 
 interface RequestOptions {
@@ -127,15 +141,21 @@ export class CoolifyClient {
   }
 
   async startApplication(uuid: string): Promise<CoolifyActionResponse> {
-    return this.request(ENDPOINTS.applicationStart(uuid));
+    // Coolify registers a separate GET route on this same path that only
+    // responds "POST required" (routes/api.php) — sending GET here (the
+    // bug prior to this fix) silently hit that guard instead of the real
+    // action every single time, against a real instance. The bundled fake
+    // Coolify test fixture never caught it because it was written to match
+    // the same wrong assumption.
+    return this.request(ENDPOINTS.applicationStart(uuid), { method: "POST" });
   }
 
   async stopApplication(uuid: string): Promise<CoolifyActionResponse> {
-    return this.request(ENDPOINTS.applicationStop(uuid));
+    return this.request(ENDPOINTS.applicationStop(uuid), { method: "POST" });
   }
 
   async restartApplication(uuid: string): Promise<CoolifyActionResponse> {
-    return this.request(ENDPOINTS.applicationRestart(uuid));
+    return this.request(ENDPOINTS.applicationRestart(uuid), { method: "POST" });
   }
 
   async deploy(uuid: string, force: boolean): Promise<CoolifyDeployTriggerResponse> {
@@ -162,5 +182,53 @@ export class CoolifyClient {
 
   async getProject(uuid: string): Promise<CoolifyProjectDetailRaw> {
     return this.request(ENDPOINTS.project(uuid));
+  }
+
+  async listServices(): Promise<CoolifyServiceRaw[]> {
+    return this.request(ENDPOINTS.services());
+  }
+
+  async getService(uuid: string): Promise<CoolifyServiceRaw> {
+    return this.request(ENDPOINTS.service(uuid));
+  }
+
+  async startService(uuid: string): Promise<CoolifyActionResponse> {
+    return this.request(ENDPOINTS.serviceStart(uuid), { method: "POST" });
+  }
+
+  async stopService(uuid: string): Promise<CoolifyActionResponse> {
+    return this.request(ENDPOINTS.serviceStop(uuid), { method: "POST" });
+  }
+
+  async restartService(uuid: string): Promise<CoolifyActionResponse> {
+    return this.request(ENDPOINTS.serviceRestart(uuid), { method: "POST" });
+  }
+
+  async getServiceLogs(uuid: string, lines = 500): Promise<CoolifyLogsRaw> {
+    return this.request(ENDPOINTS.serviceLogs(uuid), { query: { lines } });
+  }
+
+  async listDatabases(): Promise<CoolifyDatabaseRaw[]> {
+    return this.request(ENDPOINTS.databases());
+  }
+
+  async getDatabase(uuid: string): Promise<CoolifyDatabaseRaw> {
+    return this.request(ENDPOINTS.database(uuid));
+  }
+
+  async startDatabase(uuid: string): Promise<CoolifyActionResponse> {
+    return this.request(ENDPOINTS.databaseStart(uuid), { method: "POST" });
+  }
+
+  async stopDatabase(uuid: string): Promise<CoolifyActionResponse> {
+    return this.request(ENDPOINTS.databaseStop(uuid), { method: "POST" });
+  }
+
+  async restartDatabase(uuid: string): Promise<CoolifyActionResponse> {
+    return this.request(ENDPOINTS.databaseRestart(uuid), { method: "POST" });
+  }
+
+  async getDatabaseLogs(uuid: string, lines = 500): Promise<CoolifyLogsRaw> {
+    return this.request(ENDPOINTS.databaseLogs(uuid), { query: { lines } });
   }
 }

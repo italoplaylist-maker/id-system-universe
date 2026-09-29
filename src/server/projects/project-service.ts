@@ -333,16 +333,23 @@ export async function findOrCreateProjectByExternalName(name: string): Promise<{
  * touches resources with no project yet; a resource an admin has already
  * placed (or moved) is never silently re-linked, so this is safe to call on
  * every sync without fighting deliberate reorganization.
+ *
+ * Matches on `groupExternalId` (Coolify: the resource's Environment uuid),
+ * not on the resource's own externalId — the earlier version matched
+ * `providerProjects[].resourceExternalIds` directly, which assumed Coolify's
+ * project detail endpoint nests resource uuids under the project. It doesn't
+ * (verified against Coolify's own source); that field was always empty
+ * against a real instance, so this never linked anything in production.
  */
 export async function linkUnassignedResourcesFromProviderProjects(
   providerId: string,
-  providerProjects: { name: string; resourceExternalIds: string[] }[],
+  providerProjects: { name: string; groupExternalIds: string[] }[],
 ): Promise<void> {
   for (const remote of providerProjects) {
-    if (remote.resourceExternalIds.length === 0) continue;
+    if (remote.groupExternalIds.length === 0) continue;
 
     const candidates = await prisma.application.findMany({
-      where: { providerId, externalId: { in: remote.resourceExternalIds }, projectId: null },
+      where: { providerId, groupExternalId: { in: remote.groupExternalIds }, projectId: null },
       select: { id: true },
     });
     if (candidates.length === 0) continue;

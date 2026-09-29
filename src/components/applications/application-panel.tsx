@@ -74,11 +74,18 @@ export function ApplicationPanel() {
 
   const role = user?.role;
   const busy = app?.pendingOperation != null;
+  // Redeploy/logs/deployment history only make sense for a git-deployed
+  // Application — a Service or Database is "redeployed" by restarting it,
+  // and Coolify doesn't expose a build/deploy history for either.
+  const isDeployable = app?.resourceType === "APPLICATION";
   const canStart = role && can(role, "application:start");
   const canStop = role && can(role, "application:stop");
   const canRestart = role && can(role, "application:restart");
-  const canRedeploy = role && can(role, "application:redeploy");
-  const canForceRedeploy = role && can(role, "application:force-redeploy");
+  const canRedeploy = isDeployable && role && can(role, "application:redeploy");
+  const canForceRedeploy = isDeployable && role && can(role, "application:force-redeploy");
+  const tabs = isDeployable ? (["overview", "logs", "deployments"] as const) : (["overview", "logs"] as const);
+  // Switching from an Application to a Service/Database while "Deployments" is open shouldn't render a tab that no longer exists.
+  const activeTab = tab === "deployments" && !isDeployable ? "overview" : tab;
 
   return (
     <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l border-border bg-surface-raised shadow-2xl">
@@ -100,11 +107,11 @@ export function ApplicationPanel() {
       </div>
 
       <div className="flex border-b border-border text-sm">
-        {(["overview", "logs", "deployments"] as const).map((t) => (
+        {tabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={cn("flex-1 border-b-2 px-3 py-2 capitalize", tab === t ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground")}
+            className={cn("flex-1 border-b-2 px-3 py-2 capitalize", activeTab === t ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground")}
           >
             {t === "logs" ? "Runtime Logs" : t}
           </button>
@@ -112,7 +119,7 @@ export function ApplicationPanel() {
       </div>
 
       <div className="flex-1 overflow-hidden">
-        {tab === "overview" && app && (
+        {activeTab === "overview" && app && (
           <div className="space-y-4 overflow-y-auto p-4">
             <dl className="grid grid-cols-2 gap-3 text-sm">
               <div>
@@ -185,8 +192,8 @@ export function ApplicationPanel() {
           </div>
         )}
 
-        {tab === "logs" && <LogsTerminal applicationId={selectedApplicationId} />}
-        {tab === "deployments" && <DeploymentList applicationId={selectedApplicationId} />}
+        {activeTab === "logs" && <LogsTerminal applicationId={selectedApplicationId} />}
+        {activeTab === "deployments" && isDeployable && <DeploymentList applicationId={selectedApplicationId} />}
       </div>
 
       <ConfirmDialog

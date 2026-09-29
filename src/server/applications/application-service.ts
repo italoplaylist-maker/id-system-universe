@@ -5,7 +5,7 @@ import { acquireOperationLock, clearOperationLock, type PendingOperation } from 
 import { recordAuditEvent, type AuditAction } from "@/server/audit/audit-log";
 import { recordUniverseEvent } from "@/server/events/universe-events";
 import { TtlCache } from "@/server/cache/cache";
-import { NotFoundError, ProviderError } from "@/lib/errors";
+import { NotFoundError, ProviderError, ValidationError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { toUniverseApplication, type ApplicationWithRelations } from "@/server/applications/application-mapper";
 import { linkUnassignedResourcesFromProviderProjects } from "@/server/projects/project-service";
@@ -33,7 +33,7 @@ export async function syncProviderApplications(providerId: string): Promise<{ sy
 
   try {
     const provider = createDeploymentProvider(providerRow);
-    const remoteApps = await provider.listApplications();
+    const remoteApps = await provider.listResources();
 
     for (const remote of remoteApps) {
       await prisma.application.upsert({
@@ -41,6 +41,8 @@ export async function syncProviderApplications(providerId: string): Promise<{ sy
         create: {
           providerId,
           externalId: remote.externalId,
+          resourceType: remote.resourceType,
+          groupExternalId: remote.groupExternalId,
           name: remote.name,
           description: remote.description,
           status: remote.status,
@@ -57,6 +59,8 @@ export async function syncProviderApplications(providerId: string): Promise<{ sy
           fqdn: remote.fqdn,
           repository: remote.repository,
           branch: remote.branch,
+          resourceType: remote.resourceType,
+          groupExternalId: remote.groupExternalId,
           lastSyncedAt: new Date(),
         },
       });
@@ -93,13 +97,16 @@ export async function syncAllProviders(): Promise<void> {
   await Promise.all(providers.map((p) => syncProviderApplications(p.id)));
   await recordUniverseEvent({ type: "SYNC_COMPLETED", message: `Synced ${providers.length} provider(s).` });
 
-  // Diagnostic summary — cheap (three counts), never logs secrets, and is
-  // the fastest way to tell "no Projects because none exist yet" apart from
-  // "no Projects because something upstream is silently failing."
-  const [projectCount, resourceCount, unassignedCount] = await Promise.all([
+  // Diagnostic summary — cheap (a handful of counts), never logs secrets, and
+  // is the fastest way to tell "no Projects because none exist yet" apart
+  // from "no Projects because something upstream is silently failing," and
+  // "no Services/Databases because there are none" apart from "sync isn't
+  // discovering them" (the exact class of bug this summary is here for).
+  const [projectCount, resourceCount, unassignedCount, byType] = await Promise.all([
     prisma.project.count(),
     prisma.application.count(),
     prisma.application.count({ where: { projectId: null } }),
+    prisma.application.groupBy({ by: ["resourceType"], _count: true }),
   ]);
   logger.info("universe_sync_summary", {
     providers: providers.length,
@@ -107,6 +114,7 @@ export async function syncAllProviders(): Promise<void> {
     resources: resourceCount,
     assigned: resourceCount - unassignedCount,
     unassigned: unassignedCount,
+    byType: Object.fromEntries(byType.map((row) => [row.resourceType, row._count])),
   });
 }
 
@@ -242,11 +250,11 @@ async function runImmediateAction(
 
   try {
     const provider = createDeploymentProvider(row.provider);
-    if (operation === "START") await provider.startApplication(row.externalId);
-    else if (operation === "STOP") await provider.stopApplication(row.externalId);
-    else await provider.restartApplication(row.externalId);
+    if (operation === "START") await provider.startApplication(row.externalId, row.resourceType);
+    else if (operation === "STOP") await provider.stopApplication(row.externalId, row.resourceType);
+    else await provider.restartApplication(row.externalId, row.resourceType);
 
-    const liveStatus = await provider.getApplicationStatus(row.externalId);
+    const liveStatus = await provider.getApplicationStatus(row.externalId, row.resourceType);
     const updated = await prisma.application.update({
       where: { id: row.id },
       data: { status: liveStatus, pendingOperation: null, pendingSince: null },
@@ -290,6 +298,9 @@ export async function restartApplication(applicationId: string, actor: ActorCont
 
 export async function redeployApplication(applicationId: string, force: boolean, actor: ActorContext): Promise<UniverseApplication> {
   const row = await getRowOrThrow(applicationId);
+  // Only a git-deployed Application has a build/deploy history — a Service
+  // or Database is "redeployed" by restarting it (see restartApplication).
+  if (row.resourceType !== "APPLICATION") throw new ValidationError("Only applications support redeploy.");
   const operation: PendingOperation = force ? "FORCE_REDEPLOY" : "REDEPLOY";
 
   await acquireOperationLock(row.id, operation, row.name);
@@ -330,11 +341,12 @@ export async function redeployApplication(applicationId: string, force: boolean,
 export async function getApplicationLogs(applicationId: string, lines: number) {
   const row = await getRowOrThrow(applicationId);
   const provider = createDeploymentProvider(row.provider);
-  return provider.getApplicationLogs(row.externalId, { lines });
+  return provider.getApplicationLogs(row.externalId, row.resourceType, { lines });
 }
 
 export async function listApplicationDeployments(applicationId: string) {
   const row = await getRowOrThrow(applicationId);
+  if (row.resourceType !== "APPLICATION") throw new ValidationError("Only applications have a deployment history.");
   const provider = createDeploymentProvider(row.provider);
   return provider.listDeployments(row.externalId);
 }

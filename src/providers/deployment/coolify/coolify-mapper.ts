@@ -1,7 +1,9 @@
 import type {
   CoolifyApplicationRaw,
+  CoolifyDatabaseRaw,
   CoolifyDeploymentRaw,
   CoolifyLogsRaw,
+  CoolifyServiceRaw,
 } from "./coolify-types";
 import type {
   DeploymentStatus,
@@ -21,7 +23,10 @@ export function mapApplicationStatus(rawStatus: string | undefined | null): Norm
   return "UNKNOWN";
 }
 
-export function mapApplication(raw: CoolifyApplicationRaw): ProviderApplication {
+/** Coolify's own numeric Environment id, mapped ahead of time to that environment's external uuid — see CoolifyProvider. Undefined when the id couldn't be resolved (never blocks the resource from syncing, just leaves it unlinked to a Project). */
+type EnvironmentIdResolver = (environmentId: number | undefined) => string | undefined;
+
+export function mapApplication(raw: CoolifyApplicationRaw, resolveEnvironment: EnvironmentIdResolver): ProviderApplication {
   return {
     externalId: raw.uuid,
     name: raw.name,
@@ -30,6 +35,30 @@ export function mapApplication(raw: CoolifyApplicationRaw): ProviderApplication 
     fqdn: raw.fqdn ?? undefined,
     repository: raw.git_repository ?? undefined,
     branch: raw.git_branch ?? undefined,
+    resourceType: "APPLICATION",
+    groupExternalId: resolveEnvironment(raw.environment_id),
+  };
+}
+
+export function mapService(raw: CoolifyServiceRaw, resolveEnvironment: EnvironmentIdResolver): ProviderApplication {
+  return {
+    externalId: raw.uuid,
+    name: raw.name,
+    description: raw.description ?? undefined,
+    status: mapApplicationStatus(raw.status),
+    resourceType: "SERVICE",
+    groupExternalId: resolveEnvironment(raw.environment_id),
+  };
+}
+
+export function mapDatabase(raw: CoolifyDatabaseRaw, resolveEnvironment: EnvironmentIdResolver): ProviderApplication {
+  return {
+    externalId: raw.uuid,
+    name: raw.name,
+    description: raw.description ?? undefined,
+    status: mapApplicationStatus(raw.status),
+    resourceType: "DATABASE",
+    groupExternalId: resolveEnvironment(raw.environment_id),
   };
 }
 
