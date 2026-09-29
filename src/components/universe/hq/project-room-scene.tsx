@@ -19,6 +19,8 @@ interface ProjectRoomSceneProps {
   resources: UniverseApplication[];
   selectedResourceId: string | null;
   onSelectResource: (id: string) => void;
+  /** Double-click a workstation — camera focuses on that resource. World position (not room-local). */
+  onFocusResource?: (resourceId: string, worldPosition: [number, number, number], name: string) => void;
   onSelectNameplate?: () => void;
   dimmed?: boolean;
   /** Room-level selection/focus, distinct from selecting a resource inside it. */
@@ -69,6 +71,7 @@ export function ProjectRoomScene({
   resources,
   selectedResourceId,
   onSelectResource,
+  onFocusResource,
   onSelectNameplate,
   dimmed = false,
   selected = false,
@@ -95,15 +98,19 @@ export function ProjectRoomScene({
         onSelectRoom={onSelectRoom}
         onFocusRoom={onFocusRoom}
       >
-        {resources.map((resource, index) => (
-          <ResourceWorkstation
-            key={resource.id}
-            resource={resource}
-            position={[positions[index]?.[0] ?? 0, 0.1, positions[index]?.[1] ?? 0]}
-            selected={resource.id === selectedResourceId}
-            onSelect={onSelectResource}
-          />
-        ))}
+        {resources.map((resource, index) => {
+          const local = positions[index] ?? [0, 0];
+          return (
+            <ResourceWorkstation
+              key={resource.id}
+              resource={resource}
+              position={[local[0], 0.1, local[1]]}
+              selected={resource.id === selectedResourceId}
+              onSelect={onSelectResource}
+              onFocus={onFocusResource ? () => onFocusResource(resource.id, [room.x + local[0], 0.7, room.z + local[1]], resource.name) : undefined}
+            />
+          );
+        })}
         {Array.from({ length: employeeCount }).map((_, i) => (
           <AmbientEmployee key={i} room={room} seedOffset={i} />
         ))}

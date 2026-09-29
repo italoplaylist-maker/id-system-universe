@@ -12,9 +12,11 @@ interface ServerRoomSceneProps {
   providers: UniverseProviderSummary[];
   selectedProviderId: string | null;
   onSelectProvider: (id: string) => void;
+  /** Double-click a rack — camera focuses close on it. */
+  onFocusProvider?: (providerId: string, name: string) => void;
 }
 
-export function ServerRoomScene({ room, racks, providers, selectedProviderId, onSelectProvider }: ServerRoomSceneProps) {
+export function ServerRoomScene({ room, racks, providers, selectedProviderId, onSelectProvider, onFocusProvider }: ServerRoomSceneProps) {
   const providerById = new Map(providers.map((p) => [p.id, p]));
 
   return (
@@ -30,6 +32,7 @@ export function ServerRoomScene({ room, racks, providers, selectedProviderId, on
               position={[rack.x, rack.z - room.z]}
               selected={rack.providerId === selectedProviderId}
               onSelect={onSelectProvider}
+              onFocus={onFocusProvider ? () => onFocusProvider(rack.providerId, provider.name) : undefined}
             />
           );
         })}

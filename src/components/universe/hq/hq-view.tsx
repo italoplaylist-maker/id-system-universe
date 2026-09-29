@@ -8,6 +8,7 @@ import { useApplications } from "@/hooks/use-applications";
 import { useProviders } from "@/hooks/use-providers";
 import { useProjects } from "@/hooks/use-projects";
 import { useUiStore } from "@/store/ui-store";
+import { useCameraStore } from "@/store/camera-store";
 import { HqScene } from "./hq-scene";
 import { HqErrorBoundary } from "./hq-error-boundary";
 import { HqLoading } from "./hq-loading";
@@ -24,10 +25,11 @@ import { ProjectManagerDrawer } from "@/components/projects/project-manager-draw
  */
 export function HqView() {
   const [webglOk, setWebglOk] = useState<boolean | null>(null);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [focusedProjectId, setFocusedProjectId] = useState<string | null>(null);
   const router = useRouter();
   const { selectedApplicationId, selectApplication, reducedGraphics, setReducedGraphics, demoMode, setDemoMode, setViewMode } = useUiStore();
+  const cameraMode = useCameraStore((s) => s.mode);
+  const focusLabel = useCameraStore((s) => s.focusLabel);
+  const resetCamera = useCameraStore((s) => s.reset);
 
   const { data: realProviders } = useProviders();
   const { data: realApplications } = useApplications();
@@ -36,11 +38,10 @@ export function HqView() {
   const providers = demoMode ? DEMO_PROVIDERS : (realProviders ?? []);
   const applications = demoMode ? DEMO_APPLICATIONS : (realApplications ?? []);
   const projects = demoMode ? DEMO_PROJECTS : (realProjects ?? []);
-  const focusedProject = focusedProjectId ? projects.find((p) => p.id === focusedProjectId) : undefined;
 
   // ESC steps back one level at a time: closes the resource panel first (if
-  // open), else zooms the camera back out to the overview — never both at
-  // once (briefing: "ESC novamente: Italoc -> HQ").
+  // open), else returns the camera to the overview — never both at once
+  // (briefing: "ESC novamente: Italoc -> HQ").
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
@@ -48,14 +49,11 @@ export function HqView() {
         selectApplication(null);
         return;
       }
-      if (focusedProjectId) {
-        setFocusedProjectId(null);
-        setSelectedProjectId(null);
-      }
+      if (cameraMode !== "overview") resetCamera();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedApplicationId, selectApplication, focusedProjectId]);
+  }, [selectedApplicationId, selectApplication, cameraMode, resetCamera]);
 
   useEffect(() => {
     // WebGL support can only be known client-side (canvas probing needs
@@ -135,28 +133,18 @@ export function HqView() {
               router.push("/settings/infrastructure");
             }}
             reducedGraphics={reducedGraphics}
-            selectedProjectId={selectedProjectId}
-            onSelectProject={setSelectedProjectId}
-            focusedProjectId={focusedProjectId}
-            onFocusProject={(projectId) => {
-              setFocusedProjectId(projectId);
-              setSelectedProjectId(projectId);
-            }}
           />
         </HqErrorBoundary>
       )}
 
       <div className="absolute left-4 top-4 flex flex-col items-start gap-2">
-        {focusedProject && (
+        {focusLabel && cameraMode !== "overview" && cameraMode !== "free" && (
           <div className="flex items-center gap-2 rounded-full border border-border bg-surface-raised/80 px-3 py-1.5 text-xs backdrop-blur">
-            <button onClick={() => setFocusedProjectId(null)} className="text-muted hover:text-foreground">
+            <button onClick={() => resetCamera()} className="text-muted hover:text-foreground">
               ← Universe
             </button>
             <span className="text-muted">/</span>
-            <span className="flex items-center gap-1.5 font-semibold text-foreground">
-              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: focusedProject.accent }} aria-hidden />
-              {focusedProject.name}
-            </span>
+            <span className="font-semibold text-foreground">{focusLabel}</span>
           </div>
         )}
 
@@ -170,12 +158,23 @@ export function HqView() {
         )}
       </div>
 
-      <button
-        onClick={() => setReducedGraphics(!reducedGraphics)}
-        className="absolute bottom-4 right-4 rounded-full border border-border bg-surface-raised/80 px-3 py-1.5 text-xs text-muted backdrop-blur hover:text-foreground"
-      >
-        {reducedGraphics ? "Reduced Graphics: On" : "Reduced Graphics: Off"}
-      </button>
+      <div className="absolute bottom-4 right-4 flex items-center gap-2">
+        {cameraMode !== "overview" && (
+          <button
+            onClick={() => resetCamera()}
+            title="Reset View (Home)"
+            className="flex items-center gap-1.5 rounded-full border border-border bg-surface-raised/80 px-3 py-1.5 text-xs text-muted backdrop-blur hover:text-foreground"
+          >
+            <span aria-hidden>⌂</span> Reset View
+          </button>
+        )}
+        <button
+          onClick={() => setReducedGraphics(!reducedGraphics)}
+          className="rounded-full border border-border bg-surface-raised/80 px-3 py-1.5 text-xs text-muted backdrop-blur hover:text-foreground"
+        >
+          {reducedGraphics ? "Reduced Graphics: On" : "Reduced Graphics: Off"}
+        </button>
+      </div>
     </div>
   );
 }

@@ -21,10 +21,12 @@ interface ProviderRackProps {
   position: [number, number];
   selected: boolean;
   onSelect: (id: string) => void;
+  /** Double-click — camera focuses close on this rack. */
+  onFocus?: () => void;
 }
 
 /** One physical rack per InfrastructureProvider — the server room never has more or fewer racks than configured providers. */
-export const ProviderRack = memo(function ProviderRack({ provider, position, selected, onSelect }: ProviderRackProps) {
+export const ProviderRack = memo(function ProviderRack({ provider, position, selected, onSelect, onFocus }: ProviderRackProps) {
   const [hovered, setHovered] = useState(false);
   const color = HEALTH_COLOR[provider.health];
 
@@ -35,11 +37,19 @@ export const ProviderRack = memo(function ProviderRack({ provider, position, sel
         e.stopPropagation();
         onSelect(provider.id);
       }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onFocus?.();
+      }}
       onPointerOver={(e) => {
         e.stopPropagation();
         setHovered(true);
+        document.body.style.cursor = "pointer";
       }}
-      onPointerOut={() => setHovered(false)}
+      onPointerOut={() => {
+        setHovered(false);
+        document.body.style.cursor = "auto";
+      }}
     >
       {selected && (
         <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>

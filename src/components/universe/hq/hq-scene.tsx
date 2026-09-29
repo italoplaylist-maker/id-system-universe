@@ -1,10 +1,11 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { ContactShadows } from "@react-three/drei";
 import { computeHqLayout, computeWorkstationWorldPositions } from "./hq-layout";
-import { HqCamera } from "./hq-camera";
+import { UniverseCameraController } from "./camera/universe-camera-controller";
+import { useCameraStore } from "@/store/camera-store";
 import { CorridorScene } from "./corridor-scene";
 import { ReceptionScene } from "./reception-scene";
 import { ProjectRoomScene } from "./project-room-scene";
@@ -24,12 +25,6 @@ interface HqSceneProps {
   onOpenProject: (projectId: string) => void;
   onOpenProvider: (providerId: string) => void;
   reducedGraphics: boolean;
-  /** Room-level selection (single click) — highlights without moving the camera. */
-  selectedProjectId: string | null;
-  onSelectProject: (projectId: string | null) => void;
-  /** Room-level focus (double click) — camera eases toward this project's room, or the overview when null. */
-  focusedProjectId: string | null;
-  onFocusProject: (projectId: string) => void;
 }
 
 const HEALTH_LABEL: Record<UniverseProject["health"], string> = {
@@ -49,11 +44,17 @@ export function HqScene({
   onOpenProject,
   onOpenProvider,
   reducedGraphics,
-  selectedProjectId,
-  onSelectProject,
-  focusedProjectId,
-  onFocusProject,
 }: HqSceneProps) {
+  // Room highlight is a lightweight visual concern, not a camera one — the
+  // camera itself is only ever driven by useCameraStore commands dispatched
+  // straight from the room/resource/rack components below.
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const focusProject = useCameraStore((s) => s.focusProject);
+  const focusResource = useCameraStore((s) => s.focusResource);
+  const focusProvider = useCameraStore((s) => s.focusProvider);
+  const focusPoint = useCameraStore((s) => s.focusPoint);
+  const focusId = useCameraStore((s) => s.focusId);
+
   const enabledProviders = useMemo(() => providers.filter((p) => p.enabled), [providers]);
   const activeProjects = useMemo(() => projects.filter((p) => !p.archivedAt), [projects]);
 
@@ -78,12 +79,6 @@ export function HqScene({
 
   const projectById = useMemo(() => new Map(activeProjects.map((p) => [p.id, p])), [activeProjects]);
 
-  const focusTarget = useMemo((): [number, number] | null => {
-    if (!focusedProjectId) return null;
-    const room = layout.rooms.find((r) => r.kind === "project" && r.projectId === focusedProjectId);
-    return room ? [room.x, room.z] : null;
-  }, [focusedProjectId, layout.rooms]);
-
   const stats: CommandCenterStats = useMemo(
     () => ({
       projectCount: activeProjects.length,
@@ -103,7 +98,7 @@ export function HqScene({
       dpr={reducedGraphics ? 1 : [1, 1.6]}
       gl={{ antialias: !reducedGraphics }}
       className="bg-background"
-      onPointerMissed={() => selectedProjectId && onSelectProject(null)}
+      onPointerMissed={() => selectedProjectId && setSelectedProjectId(null)}
     >
       <color attach="background" args={[PALETTE.background]} />
       <fog attach="fog" args={[PALETTE.background, layout.radius * 1.9, layout.radius * 3.6]} />
@@ -116,7 +111,17 @@ export function HqScene({
       <directionalLight position={[centerX - 8, 9, centerZ - 4]} intensity={0.5} color={PALETTE.glass} />
       <pointLight position={[centerX, 5, centerZ]} intensity={0.35} color={PALETTE.screen} distance={layout.radius} />
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[centerX, -0.06, centerZ]} receiveShadow>
+      {/* Double-click empty floor = "look here" (focusPoint) — a free, natural
+          way to slide the view somewhere without changing zoom/angle. */}
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[centerX, -0.06, centerZ]}
+        receiveShadow
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          focusPoint([e.point.x, 0.6, e.point.z]);
+        }}
+      >
         <planeGeometry args={[layout.radius * 2.2, layout.radius * 2.4]} />
         <meshStandardMaterial color="#0c0f14" roughness={1} />
       </mesh>
@@ -139,8 +144,13 @@ export function HqScene({
                 room={room}
                 racks={layout.serverRacks}
                 providers={enabledProviders}
-                selectedProviderId={null}
+                selectedProviderId={focusId}
                 onSelectProvider={onOpenProvider}
+                onFocusProvider={(providerId, name) => {
+                  const rack = layout.serverRacks.find((r) => r.providerId === providerId);
+                  if (!rack) return;
+                  focusProvider(providerId, [rack.x, 1, rack.z], 2.5, name);
+                }}
               />
             );
           }
@@ -152,6 +162,9 @@ export function HqScene({
               `${resourceCount} Resource${resourceCount === 1 ? "" : "s"}`,
               project ? HEALTH_LABEL[project.health] : "Unknown",
             ];
+            // Half-diagonal of the room's own footprint — same idea as the
+            // building-wide radius in hq-layout.ts, just scoped to one room.
+            const roomRadius = Math.sqrt((room.width / 2) ** 2 + (room.depth / 2) ** 2);
             return (
               <ProjectRoomScene
                 key={room.id}
@@ -159,11 +172,12 @@ export function HqScene({
                 resources={resourcesByRoom.get(projectId) ?? []}
                 selectedResourceId={selectedApplicationId}
                 onSelectResource={onSelectApplication}
+                onFocusResource={(resourceId, worldPos, name) => focusResource(resourceId, worldPos, name)}
                 onSelectNameplate={() => onOpenProject(projectId)}
-                selected={selectedProjectId === projectId || focusedProjectId === projectId}
+                selected={selectedProjectId === projectId || focusId === projectId}
                 tooltipLines={tooltipLines}
-                onSelectRoom={() => onSelectProject(projectId)}
-                onFocusRoom={() => onFocusProject(projectId)}
+                onSelectRoom={() => setSelectedProjectId(projectId)}
+                onFocusRoom={() => focusProject(projectId, [room.x, 1, room.z], roomRadius, project?.name ?? room.name)}
               />
             );
           }
@@ -173,7 +187,7 @@ export function HqScene({
         <TaskAgents layout={layout} applications={applications} workstationPositions={workstationPositions} />
       </Suspense>
 
-      <HqCamera radius={layout.radius} centerX={centerX} centerZ={centerZ} focusTarget={focusTarget} />
+      <UniverseCameraController overviewCenter={layout.center} overviewRadius={layout.radius} />
     </Canvas>
   );
 }

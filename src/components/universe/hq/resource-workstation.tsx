@@ -24,9 +24,11 @@ interface ResourceWorkstationProps {
   position: [number, number, number];
   selected: boolean;
   onSelect: (id: string) => void;
+  /** Double-click — camera focuses close on this workstation. */
+  onFocus?: () => void;
 }
 
-export const ResourceWorkstation = memo(function ResourceWorkstation({ resource, position, selected, onSelect }: ResourceWorkstationProps) {
+export const ResourceWorkstation = memo(function ResourceWorkstation({ resource, position, selected, onSelect, onFocus }: ResourceWorkstationProps) {
   const [hovered, setHovered] = useState(false);
   const color = STATUS_COLOR[resource.status];
   const pulse = resource.status === "DEPLOYING" ? "slow" : resource.status === "ERROR" ? "fast" : "none";
@@ -40,11 +42,19 @@ export const ResourceWorkstation = memo(function ResourceWorkstation({ resource,
         e.stopPropagation();
         onSelect(resource.id);
       }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onFocus?.();
+      }}
       onPointerOver={(e) => {
         e.stopPropagation();
         setHovered(true);
+        document.body.style.cursor = "pointer";
       }}
-      onPointerOut={() => setHovered(false)}
+      onPointerOut={() => {
+        setHovered(false);
+        document.body.style.cursor = "auto";
+      }}
     >
       {selected && (
         <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
