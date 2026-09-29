@@ -67,7 +67,7 @@ function computeWorldBounds(rooms: RoomLayout[]): WorldBounds {
 }
 
 const CORRIDOR_WIDTH = 2.6;
-const ROOM_GAP = 1.1;
+export const ROOM_GAP = 1.1;
 const ROW_GAP = 1.5;
 
 export const WALL_HEIGHT = 1.3;

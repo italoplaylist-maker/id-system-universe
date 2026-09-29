@@ -63,6 +63,7 @@ function Nameplate({
   width,
   depth,
   side,
+  doorDistance = 0.08,
   onSelect,
 }: {
   name: string;
@@ -70,10 +71,15 @@ function Nameplate({
   width: number;
   depth: number;
   side: OpenSide;
+  /** How far past the room's own wall the sign sits — for a room set back from the
+      corridor by a vestibule, this should reach the real corridor door, not stop
+      at the room's own (closer) wall, so there's exactly one door per room instead
+      of two that don't line up as the camera moves. */
+  doorDistance?: number;
   onSelect?: () => void;
 }) {
   const isNS = side === "north" || side === "south";
-  const edgeOffset = (isNS ? depth : width) / 2 + 0.08;
+  const edgeOffset = (isNS ? depth : width) / 2 + doorDistance;
   const position: [number, number, number] =
     side === "north"
       ? [0, NAMEPLATE_Y, edgeOffset]
@@ -126,6 +132,8 @@ export interface RoomShellProps {
   selected?: boolean;
   /** e.g. ["5 Resources", "Healthy"] — shown in the hover tooltip under the room name. */
   tooltipLines?: string[];
+  /** Passed straight to Nameplate — how far past the room's own wall its door (and sign) sits. */
+  doorDistance?: number;
   onSelectNameplate?: () => void;
   /** Single click anywhere in the room — select without moving the camera. */
   onSelectRoom?: () => void;
@@ -144,6 +152,7 @@ export const RoomShell = memo(function RoomShell({
   dimmed = false,
   selected = false,
   tooltipLines,
+  doorDistance,
   onSelectNameplate,
   onSelectRoom,
   onFocusRoom,
@@ -249,7 +258,15 @@ export const RoomShell = memo(function RoomShell({
         <GlassRail key={side} side={side} width={width} depth={depth} />
       ))}
 
-      <Nameplate name={name} accent={accent} width={width} depth={depth} side={openSides[0] ?? "south"} onSelect={onSelectNameplate} />
+      <Nameplate
+        name={name}
+        accent={accent}
+        width={width}
+        depth={depth}
+        side={openSides[0] ?? "south"}
+        doorDistance={doorDistance}
+        onSelect={onSelectNameplate}
+      />
 
       {children}
     </group>

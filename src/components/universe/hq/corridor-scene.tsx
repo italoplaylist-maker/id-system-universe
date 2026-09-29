@@ -31,27 +31,14 @@ export function CorridorScene({ corridor, walls, doors }: CorridorSceneProps) {
         </mesh>
       ))}
 
-      {/* Door frame: two accent posts at the opening's edges plus a lintel bar above — the
-          "you're entering a room" cue a bare gap in the wall doesn't give on its own. */}
+      {/* Door threshold: a flat accent strip across the floor at the opening — reads clearly
+          as "the door is here" from any angle, unlike free-standing thin vertical posts (tried
+          first; from a shallow viewing angle their transparency blended into an ugly smear). */}
       {doors.map((door) => (
-        <group key={`${door.side}-${door.z}`}>
-          <mesh position={[door.x, WALL_HEIGHT / 2, door.z - door.width / 2]}>
-            <boxGeometry args={[0.1, WALL_HEIGHT, 0.1]} />
-            <meshBasicMaterial color={door.accent} transparent opacity={0.85} />
-          </mesh>
-          <mesh position={[door.x, WALL_HEIGHT / 2, door.z + door.width / 2]}>
-            <boxGeometry args={[0.1, WALL_HEIGHT, 0.1]} />
-            <meshBasicMaterial color={door.accent} transparent opacity={0.85} />
-          </mesh>
-          <mesh position={[door.x, WALL_HEIGHT + 0.02, door.z]}>
-            <boxGeometry args={[0.08, 0.04, door.width]} />
-            <meshBasicMaterial color={door.accent} transparent opacity={0.65} />
-          </mesh>
-          <mesh position={[door.x, 0.03, door.z]}>
-            <boxGeometry args={[0.1, 0.02, door.width]} />
-            <meshBasicMaterial color={door.accent} transparent opacity={0.5} />
-          </mesh>
-        </group>
+        <mesh key={`${door.side}-${door.z}`} position={[door.x, 0.03, door.z]}>
+          <boxGeometry args={[0.14, 0.02, door.width]} />
+          <meshBasicMaterial color={door.accent} transparent opacity={0.75} />
+        </mesh>
       ))}
     </group>
   );
