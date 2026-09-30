@@ -200,8 +200,10 @@ function chunkIntoRows(projects: UniverseProject[]): ProjectRow[] {
 }
 
 /** Every room on a floor sits in one row, side by side, each with its own front-facing
-    opening (south) — every project room faces the same way, none opens toward another
-    across a gap. Thin PROJECT_ROOM_GAP reveals separate adjacent rooms, nothing more. */
+    opening ("north" — the side whose outward normal actually faces the default camera
+    direction; a static open side on the opposite face reads as "the door is around the
+    back" no matter how the room itself is lit). Thin PROJECT_ROOM_GAP reveals separate
+    adjacent rooms, nothing more. */
 function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number, y: number, floorIndex: number): number {
   const sizes = row.projects.map((p) => roomSizeFor(p.resourceCount));
   const rowDepth = Math.max(...sizes.map((s) => s.depth));
@@ -226,9 +228,9 @@ function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number, y: number, fl
       z: rowCenterZ,
       width,
       depth,
-      doorPoint: [roomX, rowCenterZ - depth / 2],
+      doorPoint: [roomX, rowCenterZ + depth / 2],
       side: slot,
-      openSides: ["south"],
+      openSides: ["north"],
       resourceCount: project.resourceCount,
       floorIndex,
     });
@@ -263,44 +265,56 @@ function buildGroundFloor() {
   });
   z += LANDING_DEPTH + ROW_GAP;
 
-  const commandDepth = 4.5;
+  // Command Center and Operations sit side by side, like a project floor's row, instead of
+  // one behind the other down a hallway — both front-facing (north), separated by the same
+  // thin reveal, no corridor between them.
+  const commandSize = { width: 6.5, depth: 4.5 };
+  const opsSize = { width: 6, depth: 4 };
+  const rowDepth = Math.max(commandSize.depth, opsSize.depth);
+  const rowCenterZ = z + rowDepth / 2;
+  const totalWidth = commandSize.width + opsSize.width + PROJECT_ROOM_GAP;
+
+  let cursorX = -totalWidth / 2;
+  const commandX = cursorX + commandSize.width / 2;
+  cursorX += commandSize.width + PROJECT_ROOM_GAP;
+  const opsX = cursorX + opsSize.width / 2;
+
   rooms.push({
     id: "command-center",
     kind: "command-center",
     name: "COMMAND CENTER",
     accent: "#38bdf8",
     size: "MEDIUM",
-    x: 0,
+    x: commandX,
     y: 0,
-    z: z + commandDepth / 2,
-    width: 6.5,
-    depth: commandDepth,
-    doorPoint: [0, z],
-    side: "center",
-    openSides: ["north", "south"],
+    z: rowCenterZ,
+    width: commandSize.width,
+    depth: commandSize.depth,
+    doorPoint: [commandX, rowCenterZ + commandSize.depth / 2],
+    side: "left",
+    openSides: ["north"],
     resourceCount: 0,
     floorIndex: 0,
   });
-  z += commandDepth + ROW_GAP;
 
-  const opsDepth = 4;
   rooms.push({
     id: "operations",
     kind: "operations",
     name: "OPERATIONS",
     accent: "#8890a3",
     size: "MEDIUM",
-    x: 0,
+    x: opsX,
     y: 0,
-    z: z + opsDepth / 2,
-    width: 6,
-    depth: opsDepth,
-    doorPoint: [0, z],
-    side: "center",
-    openSides: ["north", "south"],
+    z: rowCenterZ,
+    width: opsSize.width,
+    depth: opsSize.depth,
+    doorPoint: [opsX, rowCenterZ + opsSize.depth / 2],
+    side: "right",
+    openSides: ["north"],
     resourceCount: 0,
     floorIndex: 0,
   });
+
   return { rooms };
 }
 
@@ -383,7 +397,9 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
   addFloor(basement.rooms, -1, -FLOOR_HEIGHT, "B1 — INFRASTRUCTURE", CORRIDOR_WIDTH, true);
 
   const ground = buildGroundFloor();
-  addFloor(ground.rooms, 0, 0, "1F — OPERATIONS", CORRIDOR_WIDTH, true);
+  // Reception is a single front room, Command Center/Operations a side-by-side pair — no
+  // hallway edge shared between rooms anymore, same as every project floor.
+  addFloor(ground.rooms, 0, 0, "1F — OPERATIONS", CORRIDOR_WIDTH, false);
 
   rows.forEach((row, i) => {
     const floorIndex = i + 1;
