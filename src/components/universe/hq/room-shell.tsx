@@ -179,7 +179,7 @@ function Nameplate({
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
       )}
-      <Html center distanceFactor={8} style={{ pointerEvents: "none" }}>
+      <Html center distanceFactor={8} occlude style={{ pointerEvents: "none" }}>
         <div
           style={{
             display: "flex",

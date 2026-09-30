@@ -177,10 +177,17 @@ export function HqScene({
           ));
       })()}
 
-      {/* Floor titles anchored to the front edge (z=0 on every floor), large and legible —
-          never on the floor itself. */}
-      {layout.corridors.map((c) => (
-        <Html key={`floor-title-${c.floorIndex}`} position={[0, c.y + 1.7, -0.7]} center style={{ pointerEvents: "none" }}>
+      {/* Floor titles anchored to the front of THAT floor's own rooms (not the shared corridor
+          z=0 landing zone, which for a project floor is empty space well behind where its
+          rooms actually start — anchoring there left the title floating far from its floor,
+          reading as if it were stuck behind a different floor's wall). `occlude` hides it for
+          real, via a raycast against the scene, whenever a wall genuinely sits between it and
+          the camera, instead of always drawing on top regardless of depth. */}
+      {layout.corridors.map((c) => {
+        const floorRooms = layout.rooms.filter((r) => r.floorIndex === c.floorIndex);
+        const frontZ = floorRooms.length > 0 ? Math.min(...floorRooms.map((r) => r.z - r.depth / 2)) : 0;
+        return (
+          <Html key={`floor-title-${c.floorIndex}`} position={[0, c.y + 1.7, frontZ - 0.7]} center occlude style={{ pointerEvents: "none" }}>
           <div
             style={{
               fontFamily: "ui-sans-serif, system-ui",
@@ -194,8 +201,9 @@ export function HqScene({
           >
             {c.label}
           </div>
-        </Html>
-      ))}
+          </Html>
+        );
+      })}
 
       <Suspense fallback={null}>
         <CorridorScene corridors={layout.corridors} walls={layout.corridorWalls} doors={layout.corridorDoors} />
