@@ -4,7 +4,7 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RoomLayout } from "./hq-layout";
-import { computeWorkstationLocalPositions, ROOM_GAP } from "./hq-layout";
+import { computeWorkstationLocalPositions } from "./hq-layout";
 import { RoomShell, type NameplateLod } from "./room-shell";
 import { ResourceWorkstation } from "./resource-workstation";
 import { EmployeeModel } from "./assets/employee-model";
@@ -100,9 +100,6 @@ export function ProjectRoomScene({
         dimmed={dimmed}
         selected={selected}
         tooltipLines={tooltipLines}
-        // Every project room sits a full vestibule back from the corridor's real door —
-        // there's no more center/pass-through project room, so this is always the case now.
-        doorDistance={ROOM_GAP - 0.05}
         statusLabel={statusLabel}
         statusColor={statusColor}
         resourceCount={resources.length}
