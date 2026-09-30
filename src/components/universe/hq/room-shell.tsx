@@ -179,7 +179,10 @@ function Nameplate({
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
       )}
-      <Html center distanceFactor={8} occlude style={{ pointerEvents: "none" }}>
+      {/* No `occlude`: a raycast-based occlusion check here flickered as the room's own
+          FadingWall toggled opacity/depthWrite underneath it — the nameplate should read
+          through a wall anyway, the same way a real building directory sign does. */}
+      <Html center distanceFactor={8} style={{ pointerEvents: "none" }}>
         <div
           style={{
             display: "flex",

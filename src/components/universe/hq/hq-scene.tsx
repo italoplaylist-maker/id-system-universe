@@ -2,7 +2,7 @@
 
 import { Suspense, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { ContactShadows, Html } from "@react-three/drei";
+import { ContactShadows } from "@react-three/drei";
 import { computeHqLayout, computeWorkstationWorldPositions } from "./hq-layout";
 import { UniverseCameraController } from "./camera/universe-camera-controller";
 import { useCameraStore } from "@/store/camera-store";
@@ -176,33 +176,6 @@ export function HqScene({
             </mesh>
           ));
       })()}
-
-      {/* Floor titles anchored to the front of THAT floor's own rooms (not the shared corridor
-          z=0 landing zone, which for a project floor is empty space well behind where its
-          rooms actually start — anchoring there left the title floating far from its floor,
-          reading as if it were stuck behind a different floor's wall). `occlude` hides it for
-          real, via a raycast against the scene, whenever a wall genuinely sits between it and
-          the camera, instead of always drawing on top regardless of depth. */}
-      {layout.corridors.map((c) => {
-        const frontZ = layout.floorFootprints.find((f) => f.floorIndex === c.floorIndex)?.minZ ?? 0;
-        return (
-          <Html key={`floor-title-${c.floorIndex}`} position={[0, c.y + 1.7, frontZ - 0.7]} center occlude style={{ pointerEvents: "none" }}>
-          <div
-            style={{
-              fontFamily: "ui-sans-serif, system-ui",
-              fontSize: 15,
-              fontWeight: 800,
-              letterSpacing: 2,
-              color: "#e7ecf5",
-              whiteSpace: "nowrap",
-              textShadow: "0 1px 3px rgba(0,0,0,0.8)",
-            }}
-          >
-            {c.label}
-          </div>
-          </Html>
-        );
-      })}
 
       <Suspense fallback={null}>
         <CorridorScene corridors={layout.corridors} walls={layout.corridorWalls} doors={layout.corridorDoors} />
