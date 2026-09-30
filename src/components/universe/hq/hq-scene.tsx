@@ -7,10 +7,8 @@ import { computeHqLayout, computeWorkstationWorldPositions, SLAB_THICKNESS } fro
 import { UniverseCameraController } from "./camera/universe-camera-controller";
 import { useCameraStore } from "@/store/camera-store";
 import { CorridorScene } from "./corridor-scene";
-import { ReceptionScene } from "./reception-scene";
 import { ProjectRoomScene } from "./project-room-scene";
-import { CommandCenterScene, type CommandCenterStats } from "./command-center-scene";
-import { OperationsScene } from "./operations-scene";
+import { ControlRoomScene, type CommandCenterStats } from "./control-room-scene";
 import { ServerRoomScene } from "./server-room-scene";
 import { TaskAgents } from "./task-agents";
 import { PALETTE } from "./palette";
@@ -127,18 +125,19 @@ export function HqScene({
       <color attach="background" args={[PALETTE.background]} />
       <fog attach="fog" args={[PALETTE.background, layout.radius * 1.9, layout.radius * 3.6]} />
 
-      {/* Premium-dark, not blackout: hemisphere gives even fill, one strong key light
-          models shadows/contrast, a soft cyan rim keeps the far side of the building readable. */}
-      <hemisphereLight args={["#6b83a0", "#0e131c", 1.05] as const} />
-      <ambientLight intensity={0.68} />
+      {/* Bright and colorful, not a blackout: hemisphere gives even fill, one strong key light
+          models shadows/contrast, a warm amber rim gives the far side of the building real
+          color instead of just another shade of blue. */}
+      <hemisphereLight args={["#a8c4e8", "#1c2740", 2.0] as const} />
+      <ambientLight intensity={1.4} />
       <directionalLight
         position={[centerX + 9, Math.max(14, layout.bounds.maxY + 8), centerZ + 7]}
-        intensity={1.6}
+        intensity={2.8}
         castShadow={!reducedGraphics}
         shadow-mapSize={[1024, 1024]}
       />
-      <directionalLight position={[centerX - 8, Math.max(9, layout.bounds.maxY + 4), centerZ - 4]} intensity={0.5} color={PALETTE.glass} />
-      <pointLight position={[centerX, 5, centerZ]} intensity={0.35} color={PALETTE.screen} distance={layout.radius} />
+      <directionalLight position={[centerX - 8, Math.max(9, layout.bounds.maxY + 4), centerZ - 4]} intensity={1.3} color="#ffb46b" />
+      <pointLight position={[centerX, 5, centerZ]} intensity={0.9} color={PALETTE.screen} distance={layout.radius} />
 
       {/* Double-click empty floor = "look here" (focusPoint) — a free, natural
           way to slide the view somewhere without changing zoom/angle. */}
@@ -152,7 +151,7 @@ export function HqScene({
         }}
       >
         <planeGeometry args={[layout.radius * 2.2, layout.radius * 2.4]} />
-        <meshStandardMaterial color="#0c0f14" roughness={1} />
+        <meshStandardMaterial color="#141c28" roughness={1} />
       </mesh>
 
       {!reducedGraphics && (
@@ -172,7 +171,7 @@ export function HqScene({
           .map((f) => (
             <mesh key={`slab-${f.floorIndex}`} position={[(f.minX + f.maxX) / 2, f.y - SLAB_THICKNESS / 2, (f.minZ + f.maxZ) / 2]} receiveShadow>
               <boxGeometry args={[f.maxX - f.minX + 0.2, SLAB_THICKNESS, f.maxZ - f.minZ + 0.2]} />
-              <meshStandardMaterial color="#12151d" roughness={0.95} />
+              <meshStandardMaterial color="#1c2531" roughness={0.95} />
             </mesh>
           ));
       })()}
@@ -181,9 +180,18 @@ export function HqScene({
         <CorridorScene corridors={layout.corridors} walls={layout.corridorWalls} doors={layout.corridorDoors} />
 
         {layout.rooms.map((room) => {
-          if (room.kind === "reception") return <ReceptionScene key={room.id} room={room} />;
-          if (room.kind === "command-center") return <CommandCenterScene key={room.id} room={room} stats={stats} />;
-          if (room.kind === "operations") return <OperationsScene key={room.id} room={room} activeCount={stats.deployingCount} />;
+          if (room.kind === "control-room") {
+            const roomRadius = Math.sqrt((room.width / 2) ** 2 + (room.depth / 2) ** 2);
+            return (
+              <ControlRoomScene
+                key={room.id}
+                room={room}
+                stats={stats}
+                onSelectRoom={() => setSelectedProjectId(null)}
+                onFocusRoom={() => focusProject(room.id, [room.x, room.y + 1, room.z], roomRadius, room.name)}
+              />
+            );
+          }
           if (room.kind === "server-room") {
             return (
               <ServerRoomScene

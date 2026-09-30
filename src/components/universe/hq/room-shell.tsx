@@ -102,7 +102,10 @@ export type NameplateLod = "tower" | "floor" | "project";
  * HTML (not drei's `Text`, which pulls a unicode-font-resolver fallback from a remote CDN, a
  * dependency this self-hosted app shouldn't have and one that hangs the whole Suspense tree
  * when that host is unreachable), so it always stays upright and legible as the camera orbits.
- * Click selects, double-click focuses — same as the room body, just reachable from the sign too.
+ * Click selects AND focuses the camera on it — same as the room body, just reachable from the
+ * sign too. No `distanceFactor`: the card renders at a fixed screen size regardless of camera
+ * distance, so a project's name stays readable from the overview shot instead of shrinking
+ * into an unreadable speck the farther the camera sits.
  */
 function Nameplate({
   name,
@@ -160,9 +163,6 @@ function Nameplate({
           onClick={(e) => {
             e.stopPropagation();
             onSelect?.();
-          }}
-          onDoubleClick={(e) => {
-            e.stopPropagation();
             onFocus?.();
           }}
           onPointerOver={(e) => {
@@ -181,26 +181,29 @@ function Nameplate({
       )}
       {/* No `occlude`: a raycast-based occlusion check here flickered as the room's own
           FadingWall toggled opacity/depthWrite underneath it — the nameplate should read
-          through a wall anyway, the same way a real building directory sign does. */}
-      <Html center distanceFactor={8} style={{ pointerEvents: "none" }}>
+          through a wall anyway, the same way a real building directory sign does. No
+          `distanceFactor` either: a fixed screen-space size, not one that shrinks with
+          camera distance, so the name stays readable from the overview shot. */}
+      <Html center style={{ pointerEvents: "none" }}>
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 6,
-            padding: "4px 10px",
-            borderRadius: 6,
-            background: hovered ? "rgba(22,27,36,0.92)" : "rgba(12,15,20,0.8)",
-            border: `1px solid ${hovered ? accent : "rgba(255,255,255,0.14)"}`,
+            gap: 8,
+            padding: "7px 14px",
+            borderRadius: 7,
+            background: hovered ? "rgba(24,32,44,0.95)" : "rgba(14,19,27,0.9)",
+            border: `1.5px solid ${accent}`,
+            boxShadow: `0 0 14px 1px ${accent}55`,
             fontFamily: "ui-sans-serif, system-ui",
             whiteSpace: "nowrap",
           }}
         >
-          <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "#f2f5fa" }}>{name.toUpperCase()}</span>
-          {statusColor && <span style={{ width: 6, height: 6, borderRadius: 99, background: statusColor, flexShrink: 0 }} />}
-          {lod !== "tower" && statusLabel && <span style={{ fontSize: 11, color: "#aab3c5" }}>{statusLabel}</span>}
+          <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: 1.1, color: "#ffffff" }}>{name.toUpperCase()}</span>
+          {statusColor && <span style={{ width: 7, height: 7, borderRadius: 99, background: statusColor, flexShrink: 0 }} />}
+          {lod !== "tower" && statusLabel && <span style={{ fontSize: 12, color: "#c3ccdc" }}>{statusLabel}</span>}
           {lod === "project" && resourceCount != null && (
-            <span style={{ fontSize: 11, color: "#7b8496" }}>· {resourceCount} RES</span>
+            <span style={{ fontSize: 12, color: "#93a0b8" }}>· {resourceCount} RES</span>
           )}
         </div>
       </Html>
@@ -228,9 +231,9 @@ export interface RoomShellProps {
   nameplateLod?: NameplateLod;
   onSelectNameplate?: () => void;
   onFocusNameplate?: () => void;
-  /** Single click anywhere in the room — select without moving the camera. */
+  /** Click anywhere in the room — select it. */
   onSelectRoom?: () => void;
-  /** Double click anywhere in the room — camera focuses on it (briefing: "double click → focus"). */
+  /** Click anywhere in the room — camera focuses on it, fired alongside onSelectRoom. */
   onFocusRoom?: () => void;
   children?: React.ReactNode;
 }
@@ -241,7 +244,7 @@ export const RoomShell = memo(function RoomShell({
   name,
   accent,
   openSides,
-  floorColor = "#151923",
+  floorColor = "#232e3d",
   dimmed = false,
   selected = false,
   tooltipLines,
@@ -275,9 +278,6 @@ export const RoomShell = memo(function RoomShell({
           onClick={(e) => {
             e.stopPropagation();
             onSelectRoom?.();
-          }}
-          onDoubleClick={(e) => {
-            e.stopPropagation();
             onFocusRoom?.();
           }}
           onPointerOver={(e) => {
@@ -304,7 +304,7 @@ export const RoomShell = memo(function RoomShell({
                 {line}
               </p>
             ))}
-            <p className="mt-0.5 text-[10px] text-muted">Double-click to focus</p>
+            <p className="mt-0.5 text-[10px] text-muted">Click to focus</p>
           </div>
         </Html>
       )}
@@ -338,7 +338,7 @@ export const RoomShell = memo(function RoomShell({
       )}
 
       {walls.map((wall) => (
-        <FadingWall key={wall.side} side={wall.side} position={wall.position} args={wall.args} color="#31384a" />
+        <FadingWall key={wall.side} side={wall.side} position={wall.position} args={wall.args} color="#404f64" />
       ))}
 
       {/* A thin emissive cap along each wall's top edge — the "lit up at night" read that sells the isometric diorama look. */}

@@ -17,7 +17,7 @@ export function CorridorScene({ corridors, walls, doors }: CorridorSceneProps) {
       {corridors.map((corridor) => (
         <mesh key={corridor.y} position={[0, corridor.y, (corridor.minZ + corridor.maxZ) / 2]} receiveShadow>
           <boxGeometry args={[corridor.width, 0.08, corridor.maxZ - corridor.minZ]} />
-          <meshStandardMaterial color="#1c212c" roughness={1} metalness={0} />
+          <meshStandardMaterial color="#28323f" roughness={1} metalness={0} />
         </mesh>
       ))}
 
@@ -31,7 +31,7 @@ export function CorridorScene({ corridors, walls, doors }: CorridorSceneProps) {
             receiveShadow
           >
             <boxGeometry args={[WALL_THICKNESS, WALL_HEIGHT, wall.length]} />
-            <meshStandardMaterial color="#262c3a" roughness={0.8} metalness={0.05} />
+            <meshStandardMaterial color="#3a475a" roughness={0.8} metalness={0.05} />
           </mesh>
         );
       })}

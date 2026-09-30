@@ -24,7 +24,7 @@ interface ResourceWorkstationProps {
   position: [number, number, number];
   selected: boolean;
   onSelect: (id: string) => void;
-  /** Double-click — camera focuses close on this workstation. */
+  /** Click — camera focuses close on this workstation, fired alongside onSelect. */
   onFocus?: () => void;
 }
 
@@ -41,9 +41,6 @@ export const ResourceWorkstation = memo(function ResourceWorkstation({ resource,
       onClick={(e) => {
         e.stopPropagation();
         onSelect(resource.id);
-      }}
-      onDoubleClick={(e) => {
-        e.stopPropagation();
         onFocus?.();
       }}
       onPointerOver={(e) => {

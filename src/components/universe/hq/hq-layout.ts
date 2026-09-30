@@ -1,6 +1,6 @@
 import type { UniverseProject, UniverseProviderSummary } from "@/types/domain";
 
-export type RoomKind = "reception" | "project" | "command-center" | "operations" | "server-room";
+export type RoomKind = "project" | "control-room" | "server-room";
 export type RoomSize = "SMALL" | "MEDIUM" | "LARGE";
 export type OpenSide = "north" | "south" | "east" | "west";
 
@@ -239,83 +239,39 @@ function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number, y: number, fl
   return z + rowDepth + ROW_GAP;
 }
 
-/** The building's staff floor — Reception, Command Center and Operations — placed at the
-    TOP of the stack (see computeHqLayout), not the ground: projects get their own floors
-    below it, the Server Room its own floor at the very bottom (B1). */
-function buildGroundFloor(floorIndex: number, y: number) {
-  const rooms: RoomLayout[] = [];
-  let z = 0;
+const CONTROL_ROOM_WIDTH = 14;
+const CONTROL_ROOM_DEPTH = 8;
 
-  rooms.push({
-    id: "reception",
-    kind: "reception",
-    name: "ID SYSTEM",
-    accent: "#38bdf8",
-    size: "SMALL",
-    x: 0,
-    y,
-    z: z + LANDING_DEPTH / 2,
-    width: 4.5,
-    depth: LANDING_DEPTH,
-    doorPoint: [0, z + LANDING_DEPTH],
-    side: "center",
-    openSides: ["north"],
-    resourceCount: 0,
-    floorIndex,
-  });
-  z += LANDING_DEPTH + ROW_GAP;
+/** The building's single unified control room — front desk, the big information screen
+    and the operations desks all in one complete room — placed at the TOP of the stack
+    (see computeHqLayout), not the ground: projects get their own floors below it, the
+    Server Room its own floor at the very bottom (B1). Same landing+row offset every
+    other floor uses, so its front (door) face stays aligned with the floors below it. */
+function buildControlRoom(floorIndex: number, y: number): { rooms: RoomLayout[] } {
+  const z = LANDING_DEPTH + ROW_GAP;
+  const centerZ = z + CONTROL_ROOM_DEPTH / 2;
 
-  // Command Center and Operations sit side by side, like a project floor's row, instead of
-  // one behind the other down a hallway — both front-facing (north), separated by the same
-  // thin reveal, no corridor between them.
-  const commandSize = { width: 6.5, depth: 4.5 };
-  const opsSize = { width: 6, depth: 4 };
-  const rowDepth = Math.max(commandSize.depth, opsSize.depth);
-  const rowCenterZ = z + rowDepth / 2;
-  const totalWidth = commandSize.width + opsSize.width + PROJECT_ROOM_GAP;
-
-  let cursorX = -totalWidth / 2;
-  const commandX = cursorX + commandSize.width / 2;
-  cursorX += commandSize.width + PROJECT_ROOM_GAP;
-  const opsX = cursorX + opsSize.width / 2;
-
-  rooms.push({
-    id: "command-center",
-    kind: "command-center",
-    name: "COMMAND CENTER",
-    accent: "#38bdf8",
-    size: "MEDIUM",
-    x: commandX,
-    y,
-    z: rowCenterZ,
-    width: commandSize.width,
-    depth: commandSize.depth,
-    doorPoint: [commandX, rowCenterZ + commandSize.depth / 2],
-    side: "left",
-    openSides: ["north"],
-    resourceCount: 0,
-    floorIndex,
-  });
-
-  rooms.push({
-    id: "operations",
-    kind: "operations",
-    name: "OPERATIONS",
-    accent: "#8890a3",
-    size: "MEDIUM",
-    x: opsX,
-    y,
-    z: rowCenterZ,
-    width: opsSize.width,
-    depth: opsSize.depth,
-    doorPoint: [opsX, rowCenterZ + opsSize.depth / 2],
-    side: "right",
-    openSides: ["north"],
-    resourceCount: 0,
-    floorIndex,
-  });
-
-  return { rooms };
+  return {
+    rooms: [
+      {
+        id: "control-room",
+        kind: "control-room",
+        name: "CONTROL ROOM",
+        accent: "#38bdf8",
+        size: "LARGE",
+        x: 0,
+        y,
+        z: centerZ,
+        width: CONTROL_ROOM_WIDTH,
+        depth: CONTROL_ROOM_DEPTH,
+        doorPoint: [0, centerZ + CONTROL_ROOM_DEPTH / 2],
+        side: "center",
+        openSides: ["north"],
+        resourceCount: 0,
+        floorIndex,
+      },
+    ],
+  };
 }
 
 /** B1: the Server Room, directly beneath 1F (same x, same landing-aligned z) — a real
@@ -355,9 +311,9 @@ function buildBasementFloor(providers: UniverseProviderSummary[]) {
 }
 
 /**
- * A real multi-story building, architectural-cutaway style: B1 is the Server Room, 1F is
- * Reception/Command Center/Operations, and every row of up to 3 projects gets its own
- * floor stacked straight above, all sharing one fixed (x,z) vertical alignment point
+ * A real multi-story building, architectural-cutaway style: B1 is the Server Room, the top
+ * floor is the single unified Control Room, and every row of up to 3 projects gets its own
+ * floor stacked in between, all sharing one fixed (x,z) vertical alignment point
  * (used only for cross-floor pathing, not rendered as any structure). Sorting projects by
  * id keeps floor assignment stable across refreshes for the same data.
  */
@@ -396,9 +352,9 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
   const basement = buildBasementFloor(providers);
   addFloor(basement.rooms, -1, -FLOOR_HEIGHT, "B1 — INFRASTRUCTURE", CORRIDOR_WIDTH, true);
 
-  // Project floors stack directly above the basement (floorIndex 0..rows.length-1) — Reception,
-  // Command Center and Operations move to the TOP of the stack instead of the ground, one more
-  // floor above the last project row (see the `addFloor` call for `ground` after this loop).
+  // Project floors stack directly above the basement (floorIndex 0..rows.length-1) — the
+  // Control Room moves to the TOP of the stack instead of the ground, one more floor above
+  // the last project row (see the `addFloor` call for `controlFloor` after this loop).
   rows.forEach((row, i) => {
     const floorIndex = i;
     const y = floorIndex * FLOOR_HEIGHT;
@@ -411,10 +367,10 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
 
   const floorCount = rows.length;
   const topFloorIndex = floorCount;
-  const ground = buildGroundFloor(topFloorIndex, topFloorIndex * FLOOR_HEIGHT);
-  // Reception is a single front room, Command Center/Operations a side-by-side pair — no
-  // hallway edge shared between rooms anymore, same as every project floor.
-  addFloor(ground.rooms, topFloorIndex, topFloorIndex * FLOOR_HEIGHT, "TOPO — OPERAÇÕES", CORRIDOR_WIDTH, false);
+  const controlFloor = buildControlRoom(topFloorIndex, topFloorIndex * FLOOR_HEIGHT);
+  // One single room straddling the corridor spine — no hallway edge shared with anything,
+  // same as every project floor.
+  addFloor(controlFloor.rooms, topFloorIndex, topFloorIndex * FLOOR_HEIGHT, "TOPO — CONTROL ROOM", CORRIDOR_WIDTH, false);
 
   const elevator = { x: 0, z: LANDING_DEPTH / 2, topY: (topFloorIndex + 1) * FLOOR_HEIGHT + WALL_HEIGHT + 0.6 };
 

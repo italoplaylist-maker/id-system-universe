@@ -21,7 +21,7 @@ interface ProviderRackProps {
   position: [number, number];
   selected: boolean;
   onSelect: (id: string) => void;
-  /** Double-click — camera focuses close on this rack. */
+  /** Click — camera focuses close on this rack, fired alongside onSelect. */
   onFocus?: () => void;
 }
 
@@ -36,9 +36,6 @@ export const ProviderRack = memo(function ProviderRack({ provider, position, sel
       onClick={(e) => {
         e.stopPropagation();
         onSelect(provider.id);
-      }}
-      onDoubleClick={(e) => {
-        e.stopPropagation();
         onFocus?.();
       }}
       onPointerOver={(e) => {

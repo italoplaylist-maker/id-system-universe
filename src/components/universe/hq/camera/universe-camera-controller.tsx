@@ -13,10 +13,14 @@ interface UniverseCameraControllerProps {
   overviewRadius: number;
 }
 
-// Same isometric-leaning direction used for the default overview shot and
+// Same flatter, more frontal direction used for the default overview shot and
 // every "canned" focus shot (Project/Provider) — focusing something flies
-// closer along the same angle instead of cutting to a different one.
-const VIEW_DIRECTION = new THREE.Vector3(1.05, 0.8, 1.05).normalize();
+// closer along the same angle instead of cutting to a different one. Biased
+// toward +z (the side every room's door/nameplate actually opens onto, since
+// project rooms are front-facing "north") rather than an even 45° corner, and
+// lower in Y than a steep isometric look, so the building reads front-on
+// instead of as a corner diorama.
+const VIEW_DIRECTION = new THREE.Vector3(0.65, 0.55, 1.35).normalize();
 
 const MIN_DISTANCE = 1.2;
 const RESOURCE_DISTANCE = 2.2;

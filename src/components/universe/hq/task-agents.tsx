@@ -39,7 +39,7 @@ export function TaskAgents({ layout, applications, workstationPositions }: TaskA
         const targetRoomId = app.projectId ?? "unassigned";
         const workstation = workstationPositions.get(app.id);
         if (!workstation) return null;
-        const path = buildCorridorPath(layout, "operations", targetRoomId);
+        const path = buildCorridorPath(layout, "control-room", targetRoomId);
         if (path.length === 0) return null;
         const waypoints: [number, number, number][] = [...path.slice(0, -1), workstation];
         return <TaskAgentController key={app.id} waypoints={waypoints} state={state} />;

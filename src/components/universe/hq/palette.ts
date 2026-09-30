@@ -4,12 +4,12 @@
  * inventing a new hex value.
  */
 export const PALETTE = {
-  background: "#06090d",
-  floor: "#151c24",
-  floorAccentTrim: "#1c2530",
-  corridor: "#1b2530",
-  wall: "#2a3745",
-  wallCap: "#3a4a5c",
+  background: "#0b1220",
+  floor: "#1a222d",
+  floorAccentTrim: "#212b39",
+  corridor: "#212d3a",
+  wall: "#334254",
+  wallCap: "#46596e",
   furniture: "#202a35",
   furnitureDark: "#171e26",
   metal: "#303c49",

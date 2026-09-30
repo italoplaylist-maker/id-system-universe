@@ -19,7 +19,7 @@ interface ProjectRoomSceneProps {
   resources: UniverseApplication[];
   selectedResourceId: string | null;
   onSelectResource: (id: string) => void;
-  /** Double-click a workstation — camera focuses on that resource. World position (not room-local). */
+  /** Click a workstation — camera focuses on that resource. World position (not room-local). */
   onFocusResource?: (resourceId: string, worldPosition: [number, number, number], name: string) => void;
   onSelectNameplate?: () => void;
   dimmed?: boolean;

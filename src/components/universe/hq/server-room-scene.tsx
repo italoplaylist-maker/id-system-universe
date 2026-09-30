@@ -12,7 +12,7 @@ interface ServerRoomSceneProps {
   providers: UniverseProviderSummary[];
   selectedProviderId: string | null;
   onSelectProvider: (id: string) => void;
-  /** Double-click a rack — camera focuses close on it. */
+  /** Click a rack — camera focuses close on it. */
   onFocusProvider?: (providerId: string, name: string) => void;
 }
 
