@@ -100,6 +100,10 @@ function computeWorldBounds(rooms: RoomLayout[]): WorldBounds {
 const CORRIDOR_WIDTH = 2.6;
 export const ROOM_GAP = 1.1;
 const ROW_GAP = 1.5;
+// The two project rooms on a floor sit right next to each other, separated only by this
+// thin reveal — no open hallway between them (that read as a corridor shaft running down
+// the middle of every floor, stacked all the way up the building).
+const PROJECT_ROOM_GAP = 0.5;
 
 export const WALL_HEIGHT = 1.3;
 export const WALL_THICKNESS = 0.12;
@@ -205,7 +209,7 @@ function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number, y: number, fl
   row.projects.forEach((project, idx) => {
     const { size, width, depth } = sizes[idx];
     const slot: "left" | "right" = idx === 0 ? "left" : "right";
-    const roomX = (slot === "left" ? -1 : 1) * (CORRIDOR_WIDTH / 2 + ROOM_GAP + width / 2);
+    const roomX = (slot === "left" ? -1 : 1) * (PROJECT_ROOM_GAP / 2 + width / 2);
     rooms.push({
       id: project.id,
       kind: "project",
@@ -218,7 +222,7 @@ function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number, y: number, fl
       z: rowCenterZ,
       width,
       depth,
-      doorPoint: [(slot === "left" ? -1 : 1) * (CORRIDOR_WIDTH / 2), rowCenterZ],
+      doorPoint: [(slot === "left" ? -1 : 1) * (PROJECT_ROOM_GAP / 2), rowCenterZ],
       side: slot,
       openSides: [slot === "left" ? "east" : "west"],
       resourceCount: project.resourceCount,
@@ -349,7 +353,7 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
   const corridorDoors: CorridorDoor[] = [];
   const floorFootprints: FloorFootprint[] = [];
 
-  function addFloor(floorRooms: RoomLayout[], floorIndex: number, y: number, label: string) {
+  function addFloor(floorRooms: RoomLayout[], floorIndex: number, y: number, label: string, corridorWidth: number) {
     rooms.push(...floorRooms);
     // Flush to the rooms themselves, never a shared nominal corridor length — a project
     // floor's rooms start well past z=0 (that leading stretch is the empty landing zone
@@ -359,25 +363,27 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
     const maxX = Math.max(...floorRooms.map((r) => r.x + r.width / 2));
     const minZ = Math.min(...floorRooms.map((r) => r.z - r.depth / 2));
     const maxZ = Math.max(...floorRooms.map((r) => r.z + r.depth / 2));
-    corridors.push({ minZ, maxZ, width: CORRIDOR_WIDTH, y, floorIndex, label });
-    const { walls, doors } = computeCorridorWallsAndDoors(floorRooms, minZ, maxZ, CORRIDOR_WIDTH, y);
+    corridors.push({ minZ, maxZ, width: corridorWidth, y, floorIndex, label });
+    const { walls, doors } = computeCorridorWallsAndDoors(floorRooms, minZ, maxZ, corridorWidth, y);
     corridorWalls.push(...walls);
     corridorDoors.push(...doors);
     floorFootprints.push({ floorIndex, y, minX, maxX, minZ, maxZ });
   }
 
   const basement = buildBasementFloor(providers);
-  addFloor(basement.rooms, -1, -FLOOR_HEIGHT, "B1 — INFRASTRUCTURE");
+  addFloor(basement.rooms, -1, -FLOOR_HEIGHT, "B1 — INFRASTRUCTURE", CORRIDOR_WIDTH);
 
   const ground = buildGroundFloor();
-  addFloor(ground.rooms, 0, 0, "1F — OPERATIONS");
+  addFloor(ground.rooms, 0, 0, "1F — OPERATIONS", CORRIDOR_WIDTH);
 
   rows.forEach((row, i) => {
     const floorIndex = i + 1;
     const y = floorIndex * FLOOR_HEIGHT;
     const floorRooms: RoomLayout[] = [];
     placeRow(floorRooms, row, LANDING_DEPTH + ROW_GAP, y, floorIndex);
-    addFloor(floorRooms, floorIndex, y, `${floorIndex + 1}F — PROJECTS`);
+    // Project floors use the tight PROJECT_ROOM_GAP, not the ground floor's real hallway
+    // width — there's no walking corridor between the two rooms anymore, just a reveal.
+    addFloor(floorRooms, floorIndex, y, `${floorIndex + 1}F — PROJECTS`, PROJECT_ROOM_GAP);
   });
 
   const floorCount = rows.length;
