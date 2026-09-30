@@ -18,6 +18,7 @@ import {
   SofaFallback,
   PlantFallback,
 } from "./assets/procedural-furniture";
+import { WallArt, AccentPanel } from "./assets/office-decor";
 import { PALETTE } from "./palette";
 
 export interface CommandCenterStats {
@@ -153,11 +154,28 @@ export function ControlRoomScene({
         name={room.name}
         accent={room.accent}
         openSides={room.openSides}
+        floorKind="command"
+        glowTint="cool"
         nameplateEmphasis
         onSelectRoom={onSelectRoom}
         onFocusRoom={onFocusRoom}
       >
         <BigScreen width={room.width} stats={stats} />
+
+        {/* Slim side panels — the closest a cutaway room gets to "painéis laterais" without a wall blocking the view in. */}
+        <group position={[-room.width / 2 + 0.05, 1.3, -1]}>
+          <AccentPanel accent={room.accent} />
+        </group>
+        <group position={[room.width / 2 - 0.05, 1.3, -1]}>
+          <AccentPanel accent={room.accent} />
+        </group>
+        {/* Flanking the big screen, clear of its own footprint (screenWidth ≈ width*0.62). */}
+        <group position={[-5.8, 1.4, -3.63]}>
+          <WallArt variant="diagram" accent={room.accent} seed={11} width={0.5} height={0.34} />
+        </group>
+        <group position={[5.8, 1.4, -3.63]}>
+          <WallArt variant="graph" accent={room.accent} seed={23} width={0.5} height={0.34} />
+        </group>
 
         {DESK_POSITIONS.map(([x, z], i) => (
           <OpsDesk key={i} x={x} z={z} manned={i < mannedCount} accent={room.accent} seed={i} />

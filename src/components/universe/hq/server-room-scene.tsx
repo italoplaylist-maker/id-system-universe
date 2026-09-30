@@ -21,7 +21,15 @@ export function ServerRoomScene({ room, racks, providers, selectedProviderId, on
 
   return (
     <group position={[room.x, room.y, room.z]}>
-      <RoomShell width={room.width} depth={room.depth} name={room.name} accent={room.accent} openSides={room.openSides}>
+      <RoomShell
+        width={room.width}
+        depth={room.depth}
+        name={room.name}
+        accent={room.accent}
+        openSides={room.openSides}
+        floorKind="server"
+        glowTint="cool"
+      >
         {racks.map((rack) => {
           const provider = providerById.get(rack.providerId);
           if (!provider) return null;

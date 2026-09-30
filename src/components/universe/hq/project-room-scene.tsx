@@ -4,13 +4,14 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RoomLayout } from "./hq-layout";
-import { computeWorkstationLocalPositions } from "./hq-layout";
+import { computeWorkstationLocalPositions, WALL_THICKNESS } from "./hq-layout";
 import { RoomShell, type NameplateLod } from "./room-shell";
 import { ResourceWorkstation } from "./resource-workstation";
 import { EmployeeModel } from "./assets/employee-model";
 import { WorldAsset } from "./assets/world-asset";
 import { ASSET_KEYS } from "./assets/asset-keys";
 import { PlantFallback } from "./assets/procedural-furniture";
+import { WallArt, ART_VARIANTS, WallClock, Whiteboard, Shelf, StorageBoxDecor, BookStack, SideTable, seededRandom, pick } from "./assets/office-decor";
 import { Html } from "@react-three/drei";
 import type { UniverseApplication } from "@/types/domain";
 
@@ -69,6 +70,58 @@ function hashCode(input: string): number {
   return hash;
 }
 
+/**
+ * Wall art, a corner piece and an optional clock — composition picked once
+ * per room from its own id, so it's stable across re-renders/refreshes and
+ * every room doesn't end up looking like the same office (briefing: no 12
+ * identical offices). Density follows room.size: small rooms stay sparse.
+ */
+function RoomDecor({ room, dimmed }: { room: RoomLayout; dimmed: boolean }) {
+  const seed = Math.abs(hashCode(room.id)) || 1;
+  const rand = seededRandom(seed);
+  const artCount = room.size === "SMALL" ? 1 : room.size === "MEDIUM" ? 2 : 3;
+  const backZ = -room.depth / 2 + WALL_THICKNESS / 2 + 0.03;
+  const artSpan = room.width * 0.55;
+  const artXs = Array.from({ length: artCount }, (_, i) => (artCount === 1 ? 0 : -artSpan / 2 + (artSpan * i) / (artCount - 1)));
+  const cornerVariant = room.size !== "SMALL" ? pick(rand, ["shelf", "storage", "books"] as const) : null;
+  const showClock = room.size !== "SMALL" && rand() > 0.5;
+  const showWhiteboard = room.size === "LARGE" && rand() > 0.5;
+
+  return (
+    <group>
+      {artXs.map((x, i) => (
+        <group key={i} position={[x, 1.5, backZ]}>
+          <WallArt variant={pick(rand, ART_VARIANTS)} accent={room.accent} seed={seed + i} dim={dimmed} />
+        </group>
+      ))}
+      {showClock && (
+        <group position={[room.width / 2 - 0.55, 2.05, backZ]}>
+          <WallClock accent={room.accent} />
+        </group>
+      )}
+      {cornerVariant && (
+        <group position={[-(room.width / 2 - 0.35), 0, -(room.depth / 2 - 0.35)]}>
+          {cornerVariant === "shelf" && <Shelf />}
+          {cornerVariant === "storage" && <StorageBoxDecor />}
+          {cornerVariant === "books" && (
+            <SideTable />
+          )}
+          {cornerVariant === "books" && (
+            <group position={[0, 0.3, 0]}>
+              <BookStack />
+            </group>
+          )}
+        </group>
+      )}
+      {showWhiteboard && (
+        <group position={[-(room.width / 2 - 0.04), 1.3, -room.depth / 4]} rotation={[0, Math.PI / 2, 0]}>
+          <Whiteboard accent={room.accent} />
+        </group>
+      )}
+    </group>
+  );
+}
+
 export function ProjectRoomScene({
   room,
   resources,
@@ -89,6 +142,7 @@ export function ProjectRoomScene({
   // Nobody's staffing a room that's shut down — every resource in it stopped.
   const employeeCount = dimmed || resources.length === 0 ? 0 : resources.length > 3 ? 2 : 1;
   const plantCorner: [number, number, number] = [room.width / 2 - 0.5, 0, -room.depth / 2 + 0.5];
+  const plantScale = [0.65, 0.85, 1, 1.2][Math.abs(hashCode(room.id)) % 4];
 
   return (
     <group position={[room.x, room.y, room.z]}>
@@ -98,6 +152,8 @@ export function ProjectRoomScene({
         name={room.name}
         accent={room.accent}
         openSides={room.openSides}
+        floorKind="project"
+        backWallAccent
         dimmed={dimmed}
         selected={selected}
         tooltipLines={tooltipLines}
@@ -126,7 +182,10 @@ export function ProjectRoomScene({
         {Array.from({ length: employeeCount }).map((_, i) => (
           <AmbientEmployee key={i} room={room} seedOffset={i} />
         ))}
-        <WorldAsset asset={ASSET_KEYS.PLANT} fallback={<PlantFallback />} position={plantCorner} />
+        <RoomDecor room={room} dimmed={dimmed} />
+        <group position={plantCorner} scale={plantScale}>
+          <WorldAsset asset={ASSET_KEYS.PLANT} fallback={<PlantFallback />} />
+        </group>
         {resources.length === 0 && (
           <Html center distanceFactor={8} style={{ pointerEvents: "none" }}>
             <div style={{ textAlign: "center", fontFamily: "ui-sans-serif, system-ui" }}>

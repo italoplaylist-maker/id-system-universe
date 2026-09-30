@@ -1,10 +1,14 @@
 "use client";
 
-import { memo, useRef, useState } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import { WALL_HEIGHT, WALL_THICKNESS, type OpenSide } from "./hq-layout";
+import { getOfficeFloorTexture, type FloorKind } from "./assets/office-decor";
+
+const GLOW_TINT: Record<"neutral" | "cool" | "warm", string> = { neutral: "#e8ecf5", cool: "#bcd7ff", warm: "#ffe3bc" };
+const FLOOR_TINT: Record<FloorKind, string> = { project: "#252d3a", command: "#1c222c", server: "#171d25" };
 
 const OUTWARD_NORMAL: Record<OpenSide, [number, number, number]> = {
   north: [0, 0, 1],
@@ -245,6 +249,12 @@ export interface RoomShellProps {
   accent: string;
   openSides: OpenSide[];
   floorColor?: string;
+  /** Which procedural floor texture to use — carpet, command-room graphite, or server-room raised-floor. */
+  floorKind?: FloorKind;
+  /** A thin accent line on the back wall in the room's own color — a detail, not a repaint. */
+  backWallAccent?: boolean;
+  /** Tint of the soft ceiling-glow wash — neutral office light, or a cooler/warmer read for special rooms. */
+  glowTint?: "neutral" | "cool" | "warm";
   dimmed?: boolean;
   selected?: boolean;
   /** e.g. ["5 Resources", "Healthy"] — shown in the hover tooltip under the room name. */
@@ -273,7 +283,10 @@ export const RoomShell = memo(function RoomShell({
   name,
   accent,
   openSides,
-  floorColor = "#232e3d",
+  floorColor,
+  floorKind = "project",
+  backWallAccent = false,
+  glowTint = "neutral",
   dimmed = false,
   selected = false,
   tooltipLines,
@@ -295,12 +308,16 @@ export const RoomShell = memo(function RoomShell({
   // A dark, unstaffed albedo reads as "the lights are off" under any scene lighting —
   // darkening the material itself, not just its accents, is what actually sells it.
   const wallColor = dimmed ? "#20262f" : "#404f64";
+  // Shared, cached per floorKind — never rebuilt per room (see office-decor.tsx).
+  const floorTexture = useMemo(() => getOfficeFloorTexture(floorKind), [floorKind]);
+  const southWall = walls.find((w) => w.side === "south");
+  const resolvedFloorColor = floorColor ?? FLOOR_TINT[floorKind];
 
   return (
     <group>
       <mesh position={[0, 0, 0]} receiveShadow>
         <boxGeometry args={[width, 0.1, depth]} />
-        <meshStandardMaterial color={dimmed ? "#11151b" : floorColor} roughness={0.9} />
+        <meshStandardMaterial map={floorTexture} color={dimmed ? "#11151b" : resolvedFloorColor} roughness={0.85} />
       </mesh>
 
       {/* Full-floor hitbox — the whole room is the click target, not just the
@@ -374,6 +391,22 @@ export const RoomShell = memo(function RoomShell({
         <FadingWall key={wall.side} side={wall.side} position={wall.position} args={wall.args} color={wallColor} />
       ))}
 
+      {/* Discreet baseboard along every solid wall's foot. */}
+      {walls.map((wall) => (
+        <mesh key={`${wall.side}-base`} position={[wall.position[0], 0.09, wall.position[2]]}>
+          <boxGeometry args={[wall.args[0], 0.09, wall.args[2]]} />
+          <meshStandardMaterial color={dimmed ? "#171c23" : "#2a323e"} roughness={0.65} />
+        </mesh>
+      ))}
+
+      {/* One subtle accent line on the back wall, in the room's own color — never the whole wall. */}
+      {backWallAccent && southWall && (
+        <mesh position={[southWall.position[0], WALL_HEIGHT * 0.42, southWall.position[2] + WALL_THICKNESS / 2 + 0.005]}>
+          <boxGeometry args={[southWall.args[0] * 0.86, 0.03, 0.01]} />
+          <meshBasicMaterial color={accent} transparent opacity={dimmed ? 0.15 : 0.38} />
+        </mesh>
+      )}
+
       {/* A thin emissive cap along each wall's top edge — the "lit up at night" read that sells the isometric diorama look. Barely there when the room's shut down. */}
       {walls.map((wall) => (
         <mesh key={`${wall.side}-cap`} position={[wall.position[0], WALL_HEIGHT + 0.005, wall.position[2]]}>
@@ -381,6 +414,19 @@ export const RoomShell = memo(function RoomShell({
           <meshBasicMaterial color={accent} transparent opacity={dimmed ? 0.06 : 0.5} />
         </mesh>
       ))}
+
+      {/* Soft, unlit ceiling wash — the "office lighting" read without any physical ceiling
+          or a real Light per room (cheap: no lighting calc, just an additive-blended plane). */}
+      <mesh position={[0, WALL_HEIGHT - 0.03, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[width * 0.9, depth * 0.9]} />
+        <meshBasicMaterial
+          color={GLOW_TINT[glowTint]}
+          transparent
+          opacity={dimmed ? 0.015 : 0.05}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
 
       {openSides.map((side) => (
         <GlassRail key={side} side={side} width={width} depth={depth} />

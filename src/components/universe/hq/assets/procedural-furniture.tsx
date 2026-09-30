@@ -36,6 +36,11 @@ export function DeskFallback() {
         <boxGeometry args={[0.24, 0.015, 0.09]} />
         <meshStandardMaterial color={PALETTE.furnitureDark} roughness={0.6} />
       </mesh>
+      {/* mouse */}
+      <mesh position={[0.16, SCALE.DESK_HEIGHT + 0.021, 0.1]}>
+        <boxGeometry args={[0.03, 0.015, 0.05]} />
+        <meshStandardMaterial color={PALETTE.furnitureDark} roughness={0.5} />
+      </mesh>
     </group>
   );
 }
