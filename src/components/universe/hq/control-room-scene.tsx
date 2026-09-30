@@ -1,8 +1,7 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import { WALL_HEIGHT, type RoomLayout } from "./hq-layout";
 import { RoomShell } from "./room-shell";
@@ -27,64 +26,105 @@ export interface CommandCenterStats {
   onlineCount: number;
   deployingCount: number;
   incidentCount: number;
+  employeeCount: number;
 }
 
-function StatBlock({ label, value, tone, divider }: { label: string; value: number; tone: "default" | "good" | "warn" | "bad"; divider: boolean }) {
-  const color = tone === "good" ? "#34d399" : tone === "warn" ? "#38bdf8" : tone === "bad" ? "#f87171" : "#e6e9f0";
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        padding: "10px 6px 14px",
-        borderLeft: divider ? "1px solid rgba(255,255,255,0.08)" : "none",
-        position: "relative",
-      }}
-    >
-      <span style={{ fontSize: 42, fontWeight: 800, color, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{value}</span>
-      <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: 1.6, color: "#9aa4b8", textTransform: "uppercase" }}>{label}</span>
-      <div style={{ position: "absolute", bottom: 0, left: "26%", right: "26%", height: 3, borderRadius: 2, background: color }} />
-    </div>
-  );
+const CANVAS_W = 1024;
+const CANVAS_H = 460;
+
+/** Draws the whole screen fresh — called only when the displayed numbers actually change. */
+function paintScreen(ctx: CanvasRenderingContext2D, stats: CommandCenterStats) {
+  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+  ctx.fillStyle = "#0a0c11";
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = PALETTE.screen;
+  ctx.font = "700 30px ui-sans-serif, system-ui";
+  ctx.fillText("ID SYSTEM UNIVERSE", CANVAS_W / 2, 58);
+
+  const cols: { label: string; value: number; color: string }[] = [
+    { label: "PROJETOS", value: stats.projectCount, color: "#e6e9f0" },
+    { label: "RECURSOS", value: stats.resourceCount, color: "#e6e9f0" },
+    { label: "ONLINE", value: stats.onlineCount, color: "#34d399" },
+    { label: "FUNCIONÁRIOS", value: stats.employeeCount, color: "#e6e9f0" },
+    { label: "IMPLANTANDO", value: stats.deployingCount, color: "#38bdf8" },
+    { label: "ALERTAS", value: stats.incidentCount, color: stats.incidentCount > 0 ? "#f87171" : "#e6e9f0" },
+  ];
+  const pad = 56;
+  const colWidth = (CANVAS_W - pad * 2) / cols.length;
+  cols.forEach((c, i) => {
+    const cx = pad + colWidth * i + colWidth / 2;
+    ctx.fillStyle = c.color;
+    ctx.font = "800 60px ui-sans-serif, system-ui";
+    ctx.fillText(String(c.value), cx, 220);
+    ctx.fillStyle = "#8890a3";
+    ctx.font = "600 15px ui-sans-serif, system-ui";
+    ctx.fillText(c.label, cx, 254);
+    ctx.fillStyle = c.color;
+    ctx.fillRect(cx - 26, 268, 52, 3);
+  });
+
+  const ok = stats.incidentCount === 0;
+  const dotX = CANVAS_W / 2 - 118;
+  ctx.fillStyle = ok ? "#34d399" : "#f87171";
+  ctx.beginPath();
+  ctx.arc(dotX, 340, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#e6e9f0";
+  ctx.font = "700 20px ui-sans-serif, system-ui";
+  ctx.fillText(ok ? "OPERAÇÃO NORMAL" : "ATENÇÃO NECESSÁRIA", dotX + 18, 347);
 }
 
 /**
- * The building's big screen — real aggregate numbers from the same data
- * every other view uses, never a separately invented figure.
+ * The building's big screen — a real object in the 3D world (CanvasTexture on the screen's
+ * own mesh), not a floating HTML overlay: it stays physically attached to the wall as the
+ * camera moves, and only redraws when the numbers it shows actually change.
  */
 function BigScreen({ width, stats }: { width: number; stats: CommandCenterStats }) {
   const screenWidth = width * 0.62;
   const screenHeight = 1.55;
+  const materialRef = useRef<THREE.MeshBasicMaterial>(null);
+  const textureRef = useRef<THREE.CanvasTexture | null>(null);
+
+  // Created once, attached to the (always-rendered) material's ref from inside an effect —
+  // never read a ref during render, and a real object like this belongs in a ref, not
+  // useState/useMemo, since its whole point is to be mutated imperatively afterward.
+  useEffect(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = CANVAS_W;
+    canvas.height = CANVAS_H;
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    textureRef.current = texture;
+    if (materialRef.current) {
+      materialRef.current.map = texture;
+      materialRef.current.needsUpdate = true;
+    }
+    return () => texture.dispose();
+  }, []);
+
+  const statsKey = `${stats.projectCount}|${stats.resourceCount}|${stats.onlineCount}|${stats.deployingCount}|${stats.incidentCount}|${stats.employeeCount}`;
+  useEffect(() => {
+    const texture = textureRef.current;
+    if (!texture) return;
+    const canvas = texture.image as HTMLCanvasElement;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    paintScreen(ctx, stats);
+    texture.needsUpdate = true;
+    // Redraw only when the displayed numbers change, never on every polling tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statsKey]);
+
   return (
     <group position={[0, WALL_HEIGHT * 0.62, -3.65]}>
       <WallScreenFrame width={screenWidth} height={screenHeight} />
-      <Html occlude distanceFactor={6} position={[0, 0, 0.03]}>
-        <div
-          style={{
-            width: Math.round(screenWidth * 100),
-            padding: "20px 28px 16px",
-            borderRadius: 10,
-            background: "linear-gradient(180deg, #10131a, #090b10)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            fontFamily: "ui-sans-serif, system-ui",
-            position: "relative",
-          }}
-        >
-          <div style={{ position: "absolute", top: -32, left: 0, right: 0, textAlign: "center", fontSize: 12, fontWeight: 600, letterSpacing: 4, color: PALETTE.screen }}>
-            ID SYSTEM UNIVERSE
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)" }}>
-            <StatBlock label="Projetos" value={stats.projectCount} tone="default" divider={false} />
-            <StatBlock label="Recursos" value={stats.resourceCount} tone="default" divider />
-            <StatBlock label="Online" value={stats.onlineCount} tone="good" divider />
-            <StatBlock label="Implantando" value={stats.deployingCount} tone="warn" divider />
-            <StatBlock label="Incidentes" value={stats.incidentCount} tone={stats.incidentCount > 0 ? "bad" : "default"} divider />
-          </div>
-        </div>
-      </Html>
+      <mesh position={[0, 0, 0.03]}>
+        <planeGeometry args={[screenWidth - 0.06, screenHeight - 0.06]} />
+        <meshBasicMaterial ref={materialRef} toneMapped={false} />
+      </mesh>
     </group>
   );
 }

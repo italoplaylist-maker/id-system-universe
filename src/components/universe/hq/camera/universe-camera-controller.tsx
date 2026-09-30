@@ -27,6 +27,24 @@ const RESOURCE_DISTANCE = 2.2;
 const PROJECT_DISTANCE_FACTOR = 1.7;
 const KEY_ROTATE_SPEED = 1.4; // rad/s
 const LERP_RATE = 6.5; // exponential approach rate, frame-rate independent (see damp())
+const FOV_DEG = 45;
+
+// The desktop aspect the original radius*1.05 distance was tuned and visually approved
+// against, across many rounds of screenshot review — never thrown away, only adapted.
+const REFERENCE_ASPECT = 1.6;
+const REFERENCE_MARGIN = 1.05;
+
+/** The building's silhouette from the fixed oblique VIEW_DIRECTION is nowhere near as tall
+    as its full 3D bounding sphere in every direction — fitting to that sphere with real
+    trigonometry (as a naive "fit a sphere in the frustum" formula would) pulls the camera
+    absurdly far back. Instead: keep the desktop distance exactly as tuned, and only pull
+    back further for an aspect NARROWER than desktop (tablet/mobile portrait), where the
+    horizontal frustum genuinely is the tighter constraint — scaled by how much narrower. */
+function fitDistance(radius: number, aspect: number): number {
+  const base = radius * REFERENCE_MARGIN;
+  if (aspect >= REFERENCE_ASPECT) return base;
+  return base * (REFERENCE_ASPECT / Math.max(aspect, 0.35));
+}
 
 // Module-level, not inline in JSX — a fresh object literal every render is
 // otherwise reassigned onto the controls instance on every render for no
@@ -36,11 +54,11 @@ const MOUSE_BUTTONS = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: T
 
 type Shot = { position: THREE.Vector3; target: THREE.Vector3 };
 
-function overviewShot(center: [number, number, number], radius: number): Shot {
+function overviewShot(center: [number, number, number], radius: number, aspect: number): Shot {
   const target = new THREE.Vector3(center[0], center[1], center[2]);
   return {
     target,
-    position: target.clone().addScaledVector(VIEW_DIRECTION, radius * 1.05),
+    position: target.clone().addScaledVector(VIEW_DIRECTION, fitDistance(radius, aspect)),
   };
 }
 
@@ -97,19 +115,45 @@ function isTypingTarget(el: Element | null): boolean {
  * ever calls `target.set(centerX, 0, centerZ)` as a standing rule.
  */
 export function UniverseCameraController({ overviewCenter, overviewRadius }: UniverseCameraControllerProps) {
-  const { camera } = useThree();
+  const { camera, size } = useThree();
   const controlsRef = useRef<MapControlsImpl>(null);
+  const aspectRef = useRef(size.width / Math.max(size.height, 1));
+  useEffect(() => {
+    aspectRef.current = size.width / Math.max(size.height, 1);
+  }, [size.width, size.height]);
+  const mode = useCameraStore((s) => s.mode);
+  // Overview is a locked, fixed maquette — the only way its framing changes
+  // is an explicit reset()/fitBuildingToViewport, never the user's own
+  // drag/wheel/keyboard. Every other mode (project/resource/provider/free)
+  // leaves full orbit/pan/zoom control to the user, as before.
+  const locked = mode === "overview";
 
   const overviewCenterRef = useRef<[number, number, number]>(overviewCenter);
   const overviewRadiusRef = useRef(overviewRadius);
-  useEffect(() => {
-    overviewCenterRef.current = overviewCenter;
-    overviewRadiusRef.current = overviewRadius;
-  }, [overviewCenter, overviewRadius]);
-
+  const lastFitRadiusRef = useRef(overviewRadius);
   const desiredPosition = useRef(new THREE.Vector3());
   const desiredTarget = useRef(new THREE.Vector3());
   const transitioning = useRef(false);
+  useEffect(() => {
+    overviewCenterRef.current = overviewCenter;
+    overviewRadiusRef.current = overviewRadius;
+    // Polling refreshes projects/applications constantly, which recomputes the layout
+    // (and this array/number) on every tick — but the radius itself only actually
+    // changes when a real structural change happens (a Project/room added or resized),
+    // never from a status update alone. So: re-fit ONLY when the number genuinely
+    // moved, and only while locked in Overview — this is what lets item 2 ("Overview
+    // adapts as Projects/floors are added") coexist with item 14 ("polling never
+    // resets the camera").
+    if (Math.abs(overviewRadius - lastFitRadiusRef.current) > 0.01) {
+      lastFitRadiusRef.current = overviewRadius;
+      if (useCameraStore.getState().mode === "overview" && controlsRef.current) {
+        const shot = overviewShot(overviewCenterRef.current, overviewRadiusRef.current, aspectRef.current);
+        desiredPosition.current.copy(shot.position);
+        desiredTarget.current.copy(shot.target);
+        transitioning.current = true;
+      }
+    }
+  }, [overviewCenter, overviewRadius]);
   const lastAppliedToken = useRef(0);
   const userGestureActive = useRef(false);
 
@@ -174,7 +218,7 @@ export function UniverseCameraController({ overviewCenter, overviewRadius }: Uni
     if (!controls) return;
 
     let shot: Shot;
-    if (command.kind === "reset") shot = overviewShot(overviewCenterRef.current, overviewRadiusRef.current);
+    if (command.kind === "reset") shot = overviewShot(overviewCenterRef.current, overviewRadiusRef.current, aspectRef.current);
     else if (command.kind === "resource") shot = resourceShot(command.center);
     else if (command.kind === "point") shot = pointShot(command.center, controls.object.position, controls.target);
     else shot = boundedShot(command.center, command.radius ?? 4);
@@ -183,6 +227,22 @@ export function UniverseCameraController({ overviewCenter, overviewRadius }: Uni
     desiredTarget.current.copy(shot.target);
     transitioning.current = true;
   }, [command]);
+
+  // Resize/orientation change: only Overview needs to react (re-fit the whole
+  // building to the new viewport) — a Focus shot keeps its target, R3F itself
+  // already updates camera.aspect/projection on resize regardless of mode.
+  const skipFirstResize = useRef(true);
+  useEffect(() => {
+    if (skipFirstResize.current) {
+      skipFirstResize.current = false;
+      return;
+    }
+    if (mode !== "overview" || !controlsRef.current) return;
+    const shot = overviewShot(overviewCenterRef.current, overviewRadiusRef.current, aspectRef.current);
+    desiredPosition.current.copy(shot.position);
+    desiredTarget.current.copy(shot.target);
+    transitioning.current = true;
+  }, [size.width, size.height, mode]);
 
   // Keyboard: WASD/arrows pan across the ground plane relative to where the
   // camera is actually looking (never world-fixed axes), Q/E orbit, F
@@ -221,7 +281,7 @@ export function UniverseCameraController({ overviewCenter, overviewRadius }: Uni
 
     if (!initialized.current) {
       initialized.current = true;
-      const shot = overviewShot(overviewCenterRef.current, overviewRadiusRef.current);
+      const shot = overviewShot(overviewCenterRef.current, overviewRadiusRef.current, aspectRef.current);
       controls.object.position.copy(shot.position);
       controls.target.copy(shot.target);
       controls.update();
@@ -230,9 +290,10 @@ export function UniverseCameraController({ overviewCenter, overviewRadius }: Uni
 
     // Keyboard navigation — direction is derived from the camera's own
     // current orientation, projected onto the ground plane, so "forward"
-    // always means "where I'm looking," never a fixed world axis.
+    // always means "where I'm looking," never a fixed world axis. Disabled
+    // in Overview: the maquette is locked, full stop.
     const keys = pressedKeys.current;
-    if (keys.size > 0) {
+    if (!locked && keys.size > 0) {
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
       forward.y = 0;
       forward.normalize();
@@ -292,18 +353,21 @@ export function UniverseCameraController({ overviewCenter, overviewRadius }: Uni
           overviewCenter/overviewRadius change (every layout recompute,
           including background polling), fighting MapControls for ownership
           of camera.position. Initial pose is set once, imperatively, above. */}
-      <PerspectiveCamera makeDefault fov={45} near={0.05} far={far} />
+      <PerspectiveCamera makeDefault fov={FOV_DEG} near={0.05} far={far} />
       <MapControls
         ref={controlsRef}
         makeDefault
         enableDamping
         dampingFactor={0.12}
         screenSpacePanning={false}
-        enablePan
+        // Overview is a locked maquette — no pan/rotate/zoom at all. Hover, click and
+        // raycast keep working regardless (those are r3f pointer events on the meshes
+        // themselves, entirely separate from MapControls).
+        enablePan={!locked}
         panSpeed={1}
-        enableRotate
+        enableRotate={!locked}
         rotateSpeed={0.55}
-        enableZoom
+        enableZoom={!locked}
         zoomToCursor
         zoomSpeed={1.1}
         minDistance={MIN_DISTANCE}

@@ -21,19 +21,30 @@ export interface CameraCommand {
   radius?: number;
 }
 
+/** The project/control-room a focused Resource belongs to — lets ESC step RESOURCE → PROJECT before PROJECT → OVERVIEW, instead of jumping straight home. */
+export interface ResourceParent {
+  id: string;
+  center: [number, number, number];
+  radius: number;
+  label: string;
+}
+
 interface CameraStoreState {
   mode: CameraMode;
   /** Breadcrumb text ("Italoc", "Fake Coolify", ...), or null in overview/free. */
   focusLabel: string | null;
   /** id of the focused Project/Resource/Provider, so a room/rack/workstation can highlight itself as "this is what the camera is looking at." Null in overview/free. */
   focusId: string | null;
+  resourceParent: ResourceParent | null;
   command: CameraCommand | null;
   focusProject: (id: string, center: [number, number, number], radius: number, label: string) => void;
-  focusResource: (id: string, center: [number, number, number], label: string) => void;
+  focusResource: (id: string, center: [number, number, number], label: string, parent?: ResourceParent) => void;
   focusProvider: (id: string, center: [number, number, number], radius: number, label: string) => void;
   /** Double-click on empty floor — "look here," without changing zoom level or semantic mode/breadcrumb/focusId. */
   focusPoint: (center: [number, number, number]) => void;
   reset: () => void;
+  /** ESC: RESOURCE steps back to its parent Project/Control Room; anything else goes straight to Overview. */
+  backOneLevel: () => void;
   /** Called by the controller itself the moment the user pans/orbits/zooms/uses WASD — never call this from elsewhere. */
   setFree: () => void;
 }
@@ -42,12 +53,23 @@ export const useCameraStore = create<CameraStoreState>((set, get) => ({
   mode: "overview",
   focusLabel: null,
   focusId: null,
+  resourceParent: null,
   command: null,
-  focusProject: (id, center, radius, label) => set({ mode: "project", focusLabel: label, focusId: id, command: { token: nextToken++, kind: "project", center, radius } }),
-  focusResource: (id, center, label) => set({ mode: "resource", focusLabel: label, focusId: id, command: { token: nextToken++, kind: "resource", center } }),
-  focusProvider: (id, center, radius, label) => set({ mode: "provider", focusLabel: label, focusId: id, command: { token: nextToken++, kind: "provider", center, radius } }),
+  focusProject: (id, center, radius, label) => set({ mode: "project", focusLabel: label, focusId: id, resourceParent: null, command: { token: nextToken++, kind: "project", center, radius } }),
+  focusResource: (id, center, label, parent) =>
+    set({ mode: "resource", focusLabel: label, focusId: id, resourceParent: parent ?? null, command: { token: nextToken++, kind: "resource", center } }),
+  focusProvider: (id, center, radius, label) => set({ mode: "provider", focusLabel: label, focusId: id, resourceParent: null, command: { token: nextToken++, kind: "provider", center, radius } }),
   focusPoint: (center) => set({ command: { token: nextToken++, kind: "point", center } }),
-  reset: () => set({ mode: "overview", focusLabel: null, focusId: null, command: { token: nextToken++, kind: "reset", center: [0, 0, 0] } }),
+  reset: () => set({ mode: "overview", focusLabel: null, focusId: null, resourceParent: null, command: { token: nextToken++, kind: "reset", center: [0, 0, 0] } }),
+  backOneLevel: () => {
+    const state = get();
+    if (state.mode === "resource" && state.resourceParent) {
+      const p = state.resourceParent;
+      set({ mode: "project", focusLabel: p.label, focusId: p.id, resourceParent: null, command: { token: nextToken++, kind: "project", center: p.center, radius: p.radius } });
+      return;
+    }
+    set({ mode: "overview", focusLabel: null, focusId: null, resourceParent: null, command: { token: nextToken++, kind: "reset", center: [0, 0, 0] } });
+  },
   setFree: () => {
     if (get().mode === "free" && get().focusLabel === null) return;
     set({ mode: "free", focusLabel: null, focusId: null });

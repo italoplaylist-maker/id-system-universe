@@ -5,7 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RoomLayout } from "./hq-layout";
 import { computeWorkstationLocalPositions, WALL_THICKNESS } from "./hq-layout";
-import { RoomShell, type NameplateLod } from "./room-shell";
+import { RoomShell, type NameplateLod, type WindowSpec } from "./room-shell";
 import { ResourceWorkstation } from "./resource-workstation";
 import { EmployeeModel } from "./assets/employee-model";
 import { WorldAsset } from "./assets/world-asset";
@@ -70,21 +70,33 @@ function hashCode(input: string): number {
   return hash;
 }
 
+/** A real window only for LARGE rooms, on about half of them — independent seed from
+    RoomDecor's own so the two don't fight over the same rand() sequence. Placed on the
+    right side of the back wall; RoomDecor keeps that side clear when one is present. */
+function computeWindowSpec(room: RoomLayout): WindowSpec | null {
+  if (room.size !== "LARGE") return null;
+  const rand = seededRandom(Math.abs(hashCode(`${room.id}:window`)) || 1);
+  if (rand() < 0.5) return null;
+  return { offsetX: room.width * 0.3, width: Math.min(room.width * 0.22, 1.3), height: 1.0, sillY: 0.95, openFraction: 0.7 };
+}
+
 /**
  * Wall art, a corner piece and an optional clock — composition picked once
  * per room from its own id, so it's stable across re-renders/refreshes and
  * every room doesn't end up looking like the same office (briefing: no 12
  * identical offices). Density follows room.size: small rooms stay sparse.
  */
-function RoomDecor({ room, dimmed }: { room: RoomLayout; dimmed: boolean }) {
+function RoomDecor({ room, dimmed, hasWindow }: { room: RoomLayout; dimmed: boolean; hasWindow: boolean }) {
   const seed = Math.abs(hashCode(room.id)) || 1;
   const rand = seededRandom(seed);
   const artCount = room.size === "SMALL" ? 1 : room.size === "MEDIUM" ? 2 : 3;
   const backZ = -room.depth / 2 + WALL_THICKNESS / 2 + 0.03;
-  const artSpan = room.width * 0.55;
-  const artXs = Array.from({ length: artCount }, (_, i) => (artCount === 1 ? 0 : -artSpan / 2 + (artSpan * i) / (artCount - 1)));
+  // A window (when present) owns the right side of the back wall — keep art on the left.
+  const artSpan = room.width * (hasWindow ? 0.42 : 0.55);
+  const artStart = hasWindow ? -room.width * 0.32 : -artSpan / 2;
+  const artXs = Array.from({ length: artCount }, (_, i) => (artCount === 1 ? artStart + artSpan / 2 : artStart + (artSpan * i) / (artCount - 1)));
   const cornerVariant = room.size !== "SMALL" ? pick(rand, ["shelf", "storage", "books"] as const) : null;
-  const showClock = room.size !== "SMALL" && rand() > 0.5;
+  const showClock = room.size !== "SMALL" && !hasWindow && rand() > 0.5;
   const showWhiteboard = room.size === "LARGE" && rand() > 0.5;
 
   return (
@@ -143,6 +155,7 @@ export function ProjectRoomScene({
   const employeeCount = dimmed || resources.length === 0 ? 0 : resources.length > 3 ? 2 : 1;
   const plantCorner: [number, number, number] = [room.width / 2 - 0.5, 0, -room.depth / 2 + 0.5];
   const plantScale = [0.65, 0.85, 1, 1.2][Math.abs(hashCode(room.id)) % 4];
+  const windowSpec = useMemo(() => computeWindowSpec(room), [room]);
 
   return (
     <group position={[room.x, room.y, room.z]}>
@@ -154,6 +167,7 @@ export function ProjectRoomScene({
         openSides={room.openSides}
         floorKind="project"
         backWallAccent
+        southWindow={windowSpec ?? undefined}
         dimmed={dimmed}
         selected={selected}
         tooltipLines={tooltipLines}
@@ -182,7 +196,7 @@ export function ProjectRoomScene({
         {Array.from({ length: employeeCount }).map((_, i) => (
           <AmbientEmployee key={i} room={room} seedOffset={i} />
         ))}
-        <RoomDecor room={room} dimmed={dimmed} />
+        <RoomDecor room={room} dimmed={dimmed} hasWindow={Boolean(windowSpec)} />
         <group position={plantCorner} scale={plantScale}>
           <WorldAsset asset={ASSET_KEYS.PLANT} fallback={<PlantFallback />} />
         </group>

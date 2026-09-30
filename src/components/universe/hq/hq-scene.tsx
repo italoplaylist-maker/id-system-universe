@@ -3,6 +3,7 @@
 import { Suspense, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { ContactShadows } from "@react-three/drei";
+import * as THREE from "three";
 import { computeHqLayout, computeWorkstationWorldPositions, SLAB_THICKNESS } from "./hq-layout";
 import { UniverseCameraController } from "./camera/universe-camera-controller";
 import { useCameraStore } from "@/store/camera-store";
@@ -12,6 +13,11 @@ import { ControlRoomScene, type CommandCenterStats } from "./control-room-scene"
 import { ServerRoomScene } from "./server-room-scene";
 import { TaskAgents } from "./task-agents";
 import { PALETTE } from "./palette";
+import { SkyScene, skyColor } from "./environment/sky-scene";
+import { ExteriorScene } from "./environment/exterior-scene";
+import { RainEffect } from "./environment/rain-effect";
+import type { EnvironmentState } from "./environment/environment-state";
+import { useWeather } from "@/hooks/use-weather";
 import type { UniverseApplication, UniverseProject, UniverseProviderSummary } from "@/types/domain";
 
 interface HqSceneProps {
@@ -22,6 +28,7 @@ interface HqSceneProps {
   onSelectApplication: (id: string) => void;
   onOpenProvider: (providerId: string) => void;
   reducedGraphics: boolean;
+  env: EnvironmentState;
 }
 
 const HEALTH_LABEL: Record<UniverseProject["health"], string> = {
@@ -48,7 +55,17 @@ export function HqScene({
   onSelectApplication,
   onOpenProvider,
   reducedGraphics,
+  env,
 }: HqSceneProps) {
+  const { data: weatherData } = useWeather();
+  const weatherCondition = weatherData && "ok" in weatherData && weatherData.ok ? weatherData.condition : null;
+  const isRaining = weatherCondition === "CHUVA" || weatherCondition === "CHUVA_FORTE";
+  const cloudFactor = weatherCondition === "NUBLADO" || isRaining ? 0.75 : weatherCondition === "PARCIALMENTE_NUBLADO" ? 0.4 : 0;
+  // Astronomy decides WHERE the sun is and whether it's day; weather only ever
+  // dims/diffuses it — the two are independent, per the spec's own rule.
+  const sunStrength = env.daylightFactor * (1 - cloudFactor * 0.55);
+  const nightFactor = 1 - env.daylightFactor;
+  const bgColor = useMemo(() => skyColor((env.sun.altitude * 180) / Math.PI, cloudFactor * 100), [env.sun.altitude, cloudFactor]);
   // Room highlight is a lightweight visual concern, not a camera one — the
   // camera itself is only ever driven by useCameraStore commands dispatched
   // straight from the room/resource/rack components below.
@@ -98,16 +115,28 @@ export function HqScene({
     return null;
   }, [cameraMode, focusId, layout.rooms, applications]);
 
-  const stats: CommandCenterStats = useMemo(
-    () => ({
+  const stats: CommandCenterStats = useMemo(() => {
+    const deployingCount = applications.filter((a) => a.status === "DEPLOYING" || a.pendingOperation !== null).length;
+    // Real headcount derived from the same rules that decide who's actually staffing each
+    // room (project rooms, the control room's ops desks + front desk, the server room) —
+    // never an invented number.
+    let employeeCount = 1 + Math.max(2, 6 - deployingCount); // control room: front desk + manned ops desks
+    if (layout.serverRacks.length > 0) employeeCount += 1;
+    for (const room of layout.rooms) {
+      if (room.kind !== "project" || !room.projectId) continue;
+      const resources = resourcesByRoom.get(room.projectId) ?? [];
+      const allStopped = resources.length > 0 && resources.every((r) => r.status === "STOPPED");
+      employeeCount += allStopped || resources.length === 0 ? 0 : resources.length > 3 ? 2 : 1;
+    }
+    return {
       projectCount: activeProjects.length,
       resourceCount: applications.length,
       onlineCount: applications.filter((a) => a.status === "RUNNING").length,
-      deployingCount: applications.filter((a) => a.status === "DEPLOYING" || a.pendingOperation !== null).length,
+      deployingCount,
       incidentCount: applications.filter((a) => a.status === "ERROR").length,
-    }),
-    [applications, activeProjects],
-  );
+      employeeCount,
+    };
+  }, [applications, activeProjects, layout.rooms, layout.serverRacks, resourcesByRoom]);
 
   // Ground-level atmosphere (fog anchor, ground plane, contact shadows, lights) stays
   // anchored at the building's XZ center but at actual ground height — only the camera's
@@ -122,17 +151,28 @@ export function HqScene({
       className="bg-background"
       onPointerMissed={() => selectedProjectId && setSelectedProjectId(null)}
     >
-      <color attach="background" args={[PALETTE.background]} />
-      <fog attach="fog" args={[PALETTE.background, layout.radius * 1.9, layout.radius * 3.6]} />
+      <color attach="background" args={[bgColor]} />
+      <fog attach="fog" args={[bgColor, layout.radius * 1.9, layout.radius * 3.6]} />
 
-      {/* Bright and colorful, not a blackout: hemisphere gives even fill, one strong key light
-          models shadows/contrast, a warm amber rim gives the far side of the building real
-          color instead of just another shade of blue. */}
-      <hemisphereLight args={["#a8c4e8", "#1c2740", 2.0] as const} />
-      <ambientLight intensity={1.4} />
+      <SkyScene env={env} weatherCondition={weatherCondition} radius={layout.radius} reducedGraphics={reducedGraphics} />
+      <ExteriorScene center={layout.center} buildingRadius={layout.radius} nightFactor={nightFactor} reducedGraphics={reducedGraphics} />
+      {!reducedGraphics && isRaining && <RainEffect center={layout.center} radius={layout.radius} heavy={weatherCondition === "CHUVA_FORTE"} />}
+
+      {/* Bright and colorful, not a blackout: hemisphere gives even fill, one key light that
+          follows the real sun's position/strength, a warm amber rim keeps the far side of the
+          building readable. A small night floor on every light keeps interiors legible even
+          when the sun itself is below the horizon — Project room state (dimmed or lit) stays
+          entirely independent of time of day, driven only by its own resources' status. */}
+      <hemisphereLight args={["#a8c4e8", "#1c2740", THREE.MathUtils.lerp(1.15, 2.0, env.daylightFactor)] as const} />
+      <ambientLight intensity={THREE.MathUtils.lerp(0.85, 1.4, env.daylightFactor)} />
       <directionalLight
-        position={[centerX + 9, Math.max(14, layout.bounds.maxY + 8), centerZ + 7]}
-        intensity={2.8}
+        position={[
+          centerX + env.sunDirection[0] * Math.max(layout.radius * 2.2, 18),
+          Math.max(6, layout.bounds.maxY + 4, env.sunDirection[1] * Math.max(layout.radius * 2.2, 18)),
+          centerZ + env.sunDirection[2] * Math.max(layout.radius * 2.2, 18),
+        ]}
+        intensity={2.8 * Math.max(sunStrength, 0.08)}
+        color={env.sun.altitude < 0.12 ? "#ffb46b" : "#ffffff"}
         castShadow={!reducedGraphics}
         shadow-mapSize={[1024, 1024]}
       />
@@ -147,6 +187,8 @@ export function HqScene({
         receiveShadow
         onDoubleClick={(e) => {
           e.stopPropagation();
+          // Overview is a locked maquette — "look here" is a Focus-mode convenience only.
+          if (cameraMode === "overview") return;
           focusPoint([e.point.x, 0.6, e.point.z]);
         }}
       >
@@ -234,7 +276,14 @@ export function HqScene({
                 dimmed={allStopped}
                 selectedResourceId={selectedApplicationId}
                 onSelectResource={onSelectApplication}
-                onFocusResource={(resourceId, worldPos, name) => focusResource(resourceId, worldPos, name)}
+                onFocusResource={(resourceId, worldPos, name) =>
+                  focusResource(resourceId, worldPos, name, {
+                    id: projectId,
+                    center: [room.x, room.y + 1, room.z],
+                    radius: roomRadius,
+                    label: project?.name ?? room.name,
+                  })
+                }
                 onSelectNameplate={() => setSelectedProjectId(projectId)}
                 selected={selectedProjectId === projectId || focusId === projectId}
                 tooltipLines={tooltipLines}

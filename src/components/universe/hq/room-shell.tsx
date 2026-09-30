@@ -6,6 +6,18 @@ import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import { WALL_HEIGHT, WALL_THICKNESS, type OpenSide } from "./hq-layout";
 import { getOfficeFloorTexture, type FloorKind } from "./assets/office-decor";
+import { WindowGlass, Blinds } from "./assets/window";
+import { useCameraStore } from "@/store/camera-store";
+
+/** A real window punched into the south (back) wall — offset from wall center, sized, with
+    corporate blinds left mostly open. Only the south wall supports this today. */
+export interface WindowSpec {
+  offsetX: number;
+  width: number;
+  height: number;
+  sillY: number;
+  openFraction: number;
+}
 
 const GLOW_TINT: Record<"neutral" | "cool" | "warm", string> = { neutral: "#e8ecf5", cool: "#bcd7ff", warm: "#ffe3bc" };
 const FLOOR_TINT: Record<FloorKind, string> = { project: "#252d3a", command: "#1c222c", server: "#171d25" };
@@ -18,12 +30,13 @@ const OUTWARD_NORMAL: Record<OpenSide, [number, number, number]> = {
 };
 
 /**
- * Architectural-cutaway walls: instead of one statically-open side, every wall fades toward
- * near-transparent whenever the orbiting camera is on the outside looking in through it —
- * "front" is whichever side currently faces the camera, not a fixed one, so no wall is ever
- * allowed to sit between camera and interior. `depthWrite={false}` while fading keeps a
- * faded-out wall from still occluding the room behind it (a transparent mesh that keeps
- * writing depth blocks exactly as much as an opaque one would).
+ * Architectural-cutaway walls. In Overview the whole building is a locked, 100%-solid
+ * maquette — you only ever see inside through each room's one designed-open (north) side.
+ * In Focus (orbiting close to a Project/Resource/Control Room), a wall that ends up BETWEEN
+ * the free-orbiting camera and the room's interior fades toward near-transparent instead of
+ * blocking the view — "front" is whichever side currently faces the camera, not a fixed one.
+ * `depthWrite={false}` while faded keeps it from still occluding the room behind it (a
+ * transparent mesh that keeps writing depth blocks exactly as much as an opaque one would).
  */
 function FadingWall({ side, position, args, color }: { side: OpenSide; position: [number, number, number]; args: [number, number, number]; color: string }) {
   const meshRef = useRef<THREE.Mesh>(null);
@@ -36,6 +49,15 @@ function FadingWall({ side, position, args, color }: { side: OpenSide; position:
     const material = materialRef.current;
     const mesh = meshRef.current;
     if (!material || !mesh) return;
+
+    // Read imperatively (not a reactive selector) — this runs once per wall per frame,
+    // and every room in the building has several of these.
+    if (useCameraStore.getState().mode === "overview") {
+      material.opacity += (1 - material.opacity) * 0.2;
+      material.depthWrite = true;
+      return;
+    }
+
     mesh.getWorldPosition(worldPos.current);
     toCamera.current.copy(camera.position).sub(worldPos.current);
     const facingCamera = toCamera.current.x * outward[0] + toCamera.current.y * outward[1] + toCamera.current.z * outward[2];
@@ -255,6 +277,8 @@ export interface RoomShellProps {
   backWallAccent?: boolean;
   /** Tint of the soft ceiling-glow wash — neutral office light, or a cooler/warmer read for special rooms. */
   glowTint?: "neutral" | "cool" | "warm";
+  /** A real window (gap + frame + glass + blinds) punched into the south wall. */
+  southWindow?: WindowSpec;
   dimmed?: boolean;
   selected?: boolean;
   /** e.g. ["5 Resources", "Healthy"] — shown in the hover tooltip under the room name. */
@@ -287,6 +311,7 @@ export const RoomShell = memo(function RoomShell({
   floorKind = "project",
   backWallAccent = false,
   glowTint = "neutral",
+  southWindow,
   dimmed = false,
   selected = false,
   tooltipLines,
@@ -387,9 +412,44 @@ export const RoomShell = memo(function RoomShell({
         </>
       )}
 
-      {walls.map((wall) => (
-        <FadingWall key={wall.side} side={wall.side} position={wall.position} args={wall.args} color={wallColor} />
-      ))}
+      {walls.map((wall) => {
+        if (wall.side === "south" && southWindow) {
+          const [wallWidth, , thickness] = wall.args;
+          const { offsetX, width: ww, height: wh, sillY } = southWindow;
+          const topHeight = WALL_HEIGHT - (sillY + wh);
+          const leftWidth = wallWidth / 2 + offsetX - ww / 2;
+          const rightWidth = wallWidth / 2 - offsetX - ww / 2;
+          return (
+            <group key="south-window-wall">
+              {topHeight > 0.02 && (
+                <FadingWall side="south" position={[wall.position[0], sillY + wh + topHeight / 2, wall.position[2]]} args={[wallWidth, topHeight, thickness]} color={wallColor} />
+              )}
+              {sillY > 0.02 && <FadingWall side="south" position={[wall.position[0], sillY / 2, wall.position[2]]} args={[wallWidth, sillY, thickness]} color={wallColor} />}
+              {leftWidth > 0.02 && (
+                <FadingWall
+                  side="south"
+                  position={[wall.position[0] - wallWidth / 2 + leftWidth / 2, sillY + wh / 2, wall.position[2]]}
+                  args={[leftWidth, wh, thickness]}
+                  color={wallColor}
+                />
+              )}
+              {rightWidth > 0.02 && (
+                <FadingWall
+                  side="south"
+                  position={[wall.position[0] + wallWidth / 2 - rightWidth / 2, sillY + wh / 2, wall.position[2]]}
+                  args={[rightWidth, wh, thickness]}
+                  color={wallColor}
+                />
+              )}
+              <group position={[wall.position[0] + offsetX, sillY + wh / 2, wall.position[2]]}>
+                <WindowGlass width={ww} height={wh} />
+                <Blinds width={ww} height={wh} openFraction={southWindow.openFraction} />
+              </group>
+            </group>
+          );
+        }
+        return <FadingWall key={wall.side} side={wall.side} position={wall.position} args={wall.args} color={wallColor} />;
+      })}
 
       {/* Discreet baseboard along every solid wall's foot. */}
       {walls.map((wall) => (

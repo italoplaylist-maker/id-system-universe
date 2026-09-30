@@ -13,6 +13,9 @@ import { HqScene } from "./hq-scene";
 import { HqErrorBoundary } from "./hq-error-boundary";
 import { HqLoading } from "./hq-loading";
 import { detectWebglSupport } from "../webgl";
+import { useEnvironmentState } from "./environment/use-environment-state";
+import { WeatherHud } from "./environment/weather-hud";
+import { HQ_LOCATION } from "@/lib/hq-location";
 import { DEMO_APPLICATIONS, DEMO_PROJECTS, DEMO_PROVIDERS } from "@/lib/demo-data";
 import { Button } from "@/components/ui/button";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
@@ -30,6 +33,15 @@ export function HqView() {
   const cameraMode = useCameraStore((s) => s.mode);
   const focusLabel = useCameraStore((s) => s.focusLabel);
   const resetCamera = useCameraStore((s) => s.reset);
+  const backOneLevel = useCameraStore((s) => s.backOneLevel);
+  const env = useEnvironmentState();
+  const timeLabel = (() => {
+    try {
+      return new Intl.DateTimeFormat("pt-BR", { timeZone: HQ_LOCATION.timezone, hour: "2-digit", minute: "2-digit" }).format(env.now);
+    } catch {
+      return "--:--";
+    }
+  })();
 
   const { data: realProviders } = useProviders();
   const { data: realApplications } = useApplications();
@@ -49,11 +61,11 @@ export function HqView() {
         selectApplication(null);
         return;
       }
-      if (cameraMode !== "overview") resetCamera();
+      if (cameraMode !== "overview") backOneLevel();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedApplicationId, selectApplication, cameraMode, resetCamera]);
+  }, [selectedApplicationId, selectApplication, cameraMode, backOneLevel]);
 
   useEffect(() => {
     // WebGL support can only be known client-side (canvas probing needs
@@ -126,6 +138,7 @@ export function HqView() {
               router.push("/settings/infrastructure");
             }}
             reducedGraphics={reducedGraphics}
+            env={env}
           />
         </HqErrorBoundary>
       )}
@@ -151,14 +164,18 @@ export function HqView() {
         )}
       </div>
 
+      <div className="absolute right-4 top-4">
+        <WeatherHud timeLabel={timeLabel} />
+      </div>
+
       <div className="absolute bottom-4 right-4 flex items-center gap-2">
         {cameraMode !== "overview" && (
           <button
             onClick={() => resetCamera()}
-            title="Reset View (Home)"
+            title="Visão Geral (Home)"
             className="flex items-center gap-1.5 rounded-full border border-border bg-surface-raised/80 px-3 py-1.5 text-xs text-muted backdrop-blur hover:text-foreground"
           >
-            <span aria-hidden>⌂</span> Reset View
+            <span aria-hidden>⌂</span> Visão Geral
           </button>
         )}
         <button
