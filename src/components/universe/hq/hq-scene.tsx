@@ -184,8 +184,7 @@ export function HqScene({
           real, via a raycast against the scene, whenever a wall genuinely sits between it and
           the camera, instead of always drawing on top regardless of depth. */}
       {layout.corridors.map((c) => {
-        const floorRooms = layout.rooms.filter((r) => r.floorIndex === c.floorIndex);
-        const frontZ = floorRooms.length > 0 ? Math.min(...floorRooms.map((r) => r.z - r.depth / 2)) : 0;
+        const frontZ = layout.floorFootprints.find((f) => f.floorIndex === c.floorIndex)?.minZ ?? 0;
         return (
           <Html key={`floor-title-${c.floorIndex}`} position={[0, c.y + 1.7, frontZ - 0.7]} center occlude style={{ pointerEvents: "none" }}>
           <div

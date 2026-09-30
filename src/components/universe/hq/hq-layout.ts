@@ -392,9 +392,15 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
     const { walls, doors } = computeCorridorWallsAndDoors(floorRooms, corridorLength, CORRIDOR_WIDTH, y);
     corridorWalls.push(...walls);
     corridorDoors.push(...doors);
+    // Flush to the rooms themselves, never the shared corridor's nominal 0..length span — a
+    // project floor's rooms start well past z=0 (that leading stretch is the empty landing
+    // zone shared by every floor so the vertical alignment point lines up), so sizing the
+    // slab to the corridor length left it overhanging past the walls on the empty end.
     const minX = Math.min(...floorRooms.map((r) => r.x - r.width / 2));
     const maxX = Math.max(...floorRooms.map((r) => r.x + r.width / 2));
-    floorFootprints.push({ floorIndex, y, minX, maxX, minZ: 0, maxZ: corridorLength });
+    const minZ = Math.min(...floorRooms.map((r) => r.z - r.depth / 2));
+    const maxZ = Math.max(...floorRooms.map((r) => r.z + r.depth / 2));
+    floorFootprints.push({ floorIndex, y, minX, maxX, minZ, maxZ });
   }
 
   const basement = buildBasementFloor(providers);
