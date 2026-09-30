@@ -15,6 +15,10 @@ type ApplicationWithProvider = ApplicationWithRelations;
 
 const STATUS_CACHE_TTL_MS = 5_000;
 const statusCache = new TtlCache<UniverseApplicationStatus>(STATUS_CACHE_TTL_MS);
+// Real deploys finish well inside this window. Past it, stop trusting the tracked deployment
+// record (it may itself be stuck, or its id lost) and ask Coolify what the container is
+// actually doing right now instead — never leave DEPLOYING forever, and never invent SUCCESS.
+const DEPLOYMENT_TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface ActorContext {
   userId: string;
@@ -149,7 +153,14 @@ export async function listApplications(filter: ListApplicationsFilter = {}): Pro
     orderBy: { name: "asc" },
   });
 
-  const mapped = rows.map((row) => toUniverseApplication(row));
+  // The list is what every passive view (Tower, HUD, project panels) polls — a row stuck
+  // showing DEPLOYING never got a chance to resolve unless someone happened to open its own
+  // detail panel (the only other caller of reconcilePendingDeployment). Reconciling here too
+  // means the fast 4s poll this list already gets while anything is DEPLOYING is what
+  // actually clears it, with no manual refresh.
+  const reconciled = await Promise.all(rows.map((row) => (row.pendingDeploymentExternalId ? reconcilePendingDeployment(row) : row)));
+
+  const mapped = reconciled.map((row) => toUniverseApplication(row));
   return filter.status ? mapped.filter((a) => a.status === filter.status) : mapped;
 }
 
@@ -209,7 +220,46 @@ async function reconcilePendingDeployment(row: ApplicationWithProvider): Promise
     logger.warn("deployment_reconcile_failed", { applicationId: row.id, error: error instanceof Error ? error.message : String(error) });
   }
 
+  // Still non-terminal (or the check itself keeps failing) well past how long any real
+  // deploy takes: stop trusting this deployment id and ask Coolify what the container is
+  // actually doing right now, rather than leaving DEPLOYING on screen forever.
+  if (row.pendingSince && Date.now() - row.pendingSince.getTime() > DEPLOYMENT_TIMEOUT_MS) {
+    return forceResyncAfterTimeout(row);
+  }
+
   return row;
+}
+
+/** Deployment tracking lost or stuck past DEPLOYMENT_TIMEOUT_MS — never invent SUCCESS, just
+    find out the real current state. */
+async function forceResyncAfterTimeout(row: ApplicationWithProvider): Promise<ApplicationWithProvider> {
+  try {
+    const provider = createDeploymentProvider(row.provider);
+    const liveStatus = await provider.getApplicationStatus(row.externalId, row.resourceType);
+    const updated = await prisma.application.update({
+      where: { id: row.id },
+      data: { status: liveStatus, pendingOperation: null, pendingSince: null, pendingDeploymentExternalId: null },
+      include: { provider: true, project: true },
+    });
+    logger.warn("deployment_timed_out_forced_resync", { applicationId: row.id, liveStatus });
+    await recordUniverseEvent({
+      type: "DEPLOYMENT_FAILED",
+      message: `${eventLabel(row)} deployment tracking timed out; resynced to real status.`,
+      applicationId: row.id,
+      applicationName: row.name,
+      providerId: row.providerId,
+      projectId: row.projectId,
+      projectName: row.project?.name,
+    });
+    return updated;
+  } catch (error) {
+    logger.warn("deployment_timeout_resync_failed", { applicationId: row.id, error: error instanceof Error ? error.message : String(error) });
+    return prisma.application.update({
+      where: { id: row.id },
+      data: { status: "UNKNOWN", pendingOperation: null, pendingSince: null, pendingDeploymentExternalId: null },
+      include: { provider: true, project: true },
+    });
+  }
 }
 
 export async function getApplicationDetail(applicationId: string): Promise<UniverseApplication> {
