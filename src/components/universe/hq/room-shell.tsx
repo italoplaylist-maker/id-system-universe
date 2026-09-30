@@ -292,12 +292,15 @@ export const RoomShell = memo(function RoomShell({
   const walls = wallsFor(width, depth, openSides);
   const [hovered, setHovered] = useState(false);
   const interactive = Boolean(onSelectRoom || onFocusRoom);
+  // A dark, unstaffed albedo reads as "the lights are off" under any scene lighting —
+  // darkening the material itself, not just its accents, is what actually sells it.
+  const wallColor = dimmed ? "#20262f" : "#404f64";
 
   return (
     <group>
       <mesh position={[0, 0, 0]} receiveShadow>
         <boxGeometry args={[width, 0.1, depth]} />
-        <meshStandardMaterial color={floorColor} roughness={0.9} />
+        <meshStandardMaterial color={dimmed ? "#11151b" : floorColor} roughness={0.9} />
       </mesh>
 
       {/* Full-floor hitbox — the whole room is the click target, not just the
@@ -368,14 +371,14 @@ export const RoomShell = memo(function RoomShell({
       )}
 
       {walls.map((wall) => (
-        <FadingWall key={wall.side} side={wall.side} position={wall.position} args={wall.args} color="#404f64" />
+        <FadingWall key={wall.side} side={wall.side} position={wall.position} args={wall.args} color={wallColor} />
       ))}
 
-      {/* A thin emissive cap along each wall's top edge — the "lit up at night" read that sells the isometric diorama look. */}
+      {/* A thin emissive cap along each wall's top edge — the "lit up at night" read that sells the isometric diorama look. Barely there when the room's shut down. */}
       {walls.map((wall) => (
         <mesh key={`${wall.side}-cap`} position={[wall.position[0], WALL_HEIGHT + 0.005, wall.position[2]]}>
           <boxGeometry args={[wall.args[0], 0.01, wall.args[2]]} />
-          <meshBasicMaterial color={accent} transparent opacity={dimmed ? 0.2 : 0.5} />
+          <meshBasicMaterial color={accent} transparent opacity={dimmed ? 0.06 : 0.5} />
         </mesh>
       ))}
 

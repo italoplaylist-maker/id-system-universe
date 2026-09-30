@@ -212,7 +212,11 @@ export function HqScene({
           if (room.kind === "project" && room.projectId) {
             const projectId = room.projectId;
             const project = projectById.get(projectId);
+            const roomResources = resourcesByRoom.get(projectId) ?? [];
             const resourceCount = resourcesByRoom.get(projectId)?.length ?? room.resourceCount;
+            // A room with real resources where every single one is stopped reads as
+            // shut down: lights off, nobody at their desk — not just "quiet."
+            const allStopped = roomResources.length > 0 && roomResources.every((r) => r.status === "STOPPED");
             const tooltipLines = [
               `${resourceCount} Resource${resourceCount === 1 ? "" : "s"}`,
               project ? HEALTH_LABEL[project.health] : "Unknown",
@@ -226,7 +230,8 @@ export function HqScene({
               <ProjectRoomScene
                 key={room.id}
                 room={room}
-                resources={resourcesByRoom.get(projectId) ?? []}
+                resources={roomResources}
+                dimmed={allStopped}
                 selectedResourceId={selectedApplicationId}
                 onSelectResource={onSelectApplication}
                 onFocusResource={(resourceId, worldPos, name) => focusResource(resourceId, worldPos, name)}

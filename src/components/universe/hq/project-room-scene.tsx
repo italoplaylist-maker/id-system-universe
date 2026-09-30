@@ -86,7 +86,8 @@ export function ProjectRoomScene({
   onFocusRoom,
 }: ProjectRoomSceneProps) {
   const positions = useMemo(() => computeWorkstationLocalPositions(room, resources.length), [room, resources.length]);
-  const employeeCount = resources.length === 0 ? 0 : resources.length > 3 ? 2 : 1;
+  // Nobody's staffing a room that's shut down — every resource in it stopped.
+  const employeeCount = dimmed || resources.length === 0 ? 0 : resources.length > 3 ? 2 : 1;
   const plantCorner: [number, number, number] = [room.width / 2 - 0.5, 0, -room.depth / 2 + 0.5];
 
   return (
