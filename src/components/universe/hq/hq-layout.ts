@@ -32,6 +32,17 @@ export interface CorridorFloor {
   length: number;
   width: number;
   y: number;
+  floorIndex: number;
+  label: string;
+}
+
+export interface FloorFootprint {
+  floorIndex: number;
+  y: number;
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
 }
 
 export interface WorldBounds {
@@ -50,8 +61,12 @@ export interface HqLayout {
   serverRacks: { providerId: string; name: string; color: string; x: number; z: number }[];
   corridorWalls: CorridorWallSegment[];
   corridorDoors: CorridorDoor[];
-  /** Fixed (x,z) of the vertical circulation core, straight through every floor. */
+  /** Fixed (x,z) vertical alignment point shared by every floor — not a rendered structure,
+      just what keeps cross-floor pathing on a single straight line through the stack. */
   elevator: { x: number; z: number; topY: number };
+  /** One entry per floor, footprint sized to exactly that floor's own rooms+corridor —
+      what a floor slab/ceiling should be clipped to, never the whole building's bounds. */
+  floorFootprints: FloorFootprint[];
   floorCount: number;
   floorHeight: number;
   /** Real footprint of every room — the camera fits to this, never a magic constant (briefing: calculateWorldBounds). */
@@ -94,7 +109,9 @@ const DOOR_WIDTH = 1.6;
     lines up at the exact same (x,z) all the way up the building. On the ground floor
     that reserved zone is where Reception physically stands. */
 const LANDING_DEPTH = 3;
-export const FLOOR_HEIGHT = 3.3;
+// Tight architectural-cutaway spacing: just enough for WALL_HEIGHT + a slab, not a gap that
+// reads as disconnected floating platforms.
+export const FLOOR_HEIGHT = 2;
 
 export interface CorridorWallSegment {
   side: "left" | "right";
@@ -247,10 +264,10 @@ function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number, y: number, fl
   return z + rowDepth + ROW_GAP;
 }
 
-/** Ground floor: Reception (the elevator physically stands inside its back half), then
-    Command Center, Operations, and the Server Room — no projects here anymore, they each
-    get their own floor above. */
-function buildGroundFloor(providers: UniverseProviderSummary[]) {
+/** 1F: Reception, then Command Center and Operations — the building's own staff floor.
+    No projects and no Server Room here anymore; projects get their own floors above, the
+    Server Room its own floor below (B1), directly under this one, not off to the side. */
+function buildGroundFloor() {
   const rooms: RoomLayout[] = [];
   let z = 0;
 
@@ -313,27 +330,35 @@ function buildGroundFloor(providers: UniverseProviderSummary[]) {
   });
   z += opsDepth + ROW_GAP;
 
+  return { rooms, corridorLength: z };
+}
+
+/** B1: the Server Room, directly beneath 1F (same x, same landing-aligned z) — a real
+    basement level, not a room laterally down the same hallway. */
+function buildBasementFloor(providers: UniverseProviderSummary[]) {
   const providerCount = Math.max(providers.length, 1);
   const serverWidth = Math.max(6.5, providerCount * 2.6 + 2);
   const serverDepth = 5;
-  const serverZ = z + serverDepth / 2;
-  rooms.push({
-    id: "server-room",
-    kind: "server-room",
-    name: "SERVER ROOM",
-    accent: "#38bdf8",
-    size: "LARGE",
-    x: 0,
-    y: 0,
-    z: serverZ,
-    width: serverWidth,
-    depth: serverDepth,
-    doorPoint: [0, z],
-    side: "center",
-    openSides: ["south"],
-    resourceCount: 0,
-    floorIndex: 0,
-  });
+  const serverZ = serverDepth / 2;
+  const rooms: RoomLayout[] = [
+    {
+      id: "server-room",
+      kind: "server-room",
+      name: "SERVER ROOM",
+      accent: "#38bdf8",
+      size: "LARGE",
+      x: 0,
+      y: -FLOOR_HEIGHT,
+      z: serverZ,
+      width: serverWidth,
+      depth: serverDepth,
+      doorPoint: [0, serverDepth],
+      side: "center",
+      openSides: ["north"],
+      resourceCount: 0,
+      floorIndex: -1,
+    },
+  ];
 
   const serverRacks = providers.map((provider, index) => {
     const slotWidth = serverWidth / providerCount;
@@ -341,38 +366,49 @@ function buildGroundFloor(providers: UniverseProviderSummary[]) {
     return { providerId: provider.id, name: provider.name, color: provider.color, x: rackX, z: serverZ };
   });
 
-  z += serverDepth;
-  return { rooms, corridorLength: z, serverRacks };
+  return { rooms, corridorLength: serverDepth, serverRacks };
 }
 
 /**
- * A real multi-story building: Reception/Command Center/Operations/Server Room stay on
- * the ground floor, and every row of up to 3 projects gets its own floor stacked straight
- * above, all sharing one elevator core at a fixed (x,z) so the shaft lines up cleanly
- * through the whole stack. Sorting projects by id keeps floor assignment stable across
- * refreshes for the same data.
+ * A real multi-story building, architectural-cutaway style: B1 is the Server Room, 1F is
+ * Reception/Command Center/Operations, and every row of up to 3 projects gets its own
+ * floor stacked straight above, all sharing one fixed (x,z) vertical alignment point
+ * (used only for cross-floor pathing, not rendered as any structure). Sorting projects by
+ * id keeps floor assignment stable across refreshes for the same data.
  */
 export function computeHqLayout(projects: UniverseProject[], providers: UniverseProviderSummary[]): HqLayout {
   const sortedProjects = [...projects].sort((a, b) => a.id.localeCompare(b.id));
   const rows = chunkIntoRows(sortedProjects);
 
-  const ground = buildGroundFloor(providers);
-  const rooms: RoomLayout[] = [...ground.rooms];
-  const corridors: CorridorFloor[] = [{ length: ground.corridorLength, width: CORRIDOR_WIDTH, y: 0 }];
-  const { walls: groundWalls, doors: groundDoors } = computeCorridorWallsAndDoors(ground.rooms, ground.corridorLength, CORRIDOR_WIDTH, 0);
-  const corridorWalls: CorridorWallSegment[] = [...groundWalls];
-  const corridorDoors: CorridorDoor[] = [...groundDoors];
+  const rooms: RoomLayout[] = [];
+  const corridors: CorridorFloor[] = [];
+  const corridorWalls: CorridorWallSegment[] = [];
+  const corridorDoors: CorridorDoor[] = [];
+  const floorFootprints: FloorFootprint[] = [];
+
+  function addFloor(floorRooms: RoomLayout[], corridorLength: number, floorIndex: number, y: number, label: string) {
+    rooms.push(...floorRooms);
+    corridors.push({ length: corridorLength, width: CORRIDOR_WIDTH, y, floorIndex, label });
+    const { walls, doors } = computeCorridorWallsAndDoors(floorRooms, corridorLength, CORRIDOR_WIDTH, y);
+    corridorWalls.push(...walls);
+    corridorDoors.push(...doors);
+    const minX = Math.min(...floorRooms.map((r) => r.x - r.width / 2));
+    const maxX = Math.max(...floorRooms.map((r) => r.x + r.width / 2));
+    floorFootprints.push({ floorIndex, y, minX, maxX, minZ: 0, maxZ: corridorLength });
+  }
+
+  const basement = buildBasementFloor(providers);
+  addFloor(basement.rooms, basement.corridorLength, -1, -FLOOR_HEIGHT, "B1 — INFRASTRUCTURE");
+
+  const ground = buildGroundFloor();
+  addFloor(ground.rooms, ground.corridorLength, 0, 0, "1F — OPERATIONS");
 
   rows.forEach((row, i) => {
     const floorIndex = i + 1;
     const y = floorIndex * FLOOR_HEIGHT;
     const floorRooms: RoomLayout[] = [];
     const corridorLength = placeRow(floorRooms, row, LANDING_DEPTH + ROW_GAP, y, floorIndex);
-    rooms.push(...floorRooms);
-    corridors.push({ length: corridorLength, width: CORRIDOR_WIDTH, y });
-    const { walls, doors } = computeCorridorWallsAndDoors(floorRooms, corridorLength, CORRIDOR_WIDTH, y);
-    corridorWalls.push(...walls);
-    corridorDoors.push(...doors);
+    addFloor(floorRooms, corridorLength, floorIndex, y, `${floorIndex + 1}F — PROJECTS`);
   });
 
   const floorCount = rows.length;
@@ -387,7 +423,7 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
   // pulls the overview camera back too, not only a wider or longer one.
   const radius = Math.max(Math.sqrt(halfWidth ** 2 + halfDepth ** 2 + halfHeight ** 2), 6) + 2.5;
 
-  return { rooms, corridors, serverRacks: ground.serverRacks, corridorWalls, corridorDoors, elevator, floorCount, floorHeight: FLOOR_HEIGHT, bounds, center, radius };
+  return { rooms, corridors, serverRacks: basement.serverRacks, corridorWalls, corridorDoors, elevator, floorFootprints, floorCount, floorHeight: FLOOR_HEIGHT, bounds, center, radius };
 }
 
 /** A room's walkable "door" and "inside" points, for the waypoint path builder. */

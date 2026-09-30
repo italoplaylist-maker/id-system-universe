@@ -5,7 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RoomLayout } from "./hq-layout";
 import { computeWorkstationLocalPositions, ROOM_GAP } from "./hq-layout";
-import { RoomShell } from "./room-shell";
+import { RoomShell, type NameplateLod } from "./room-shell";
 import { ResourceWorkstation } from "./resource-workstation";
 import { EmployeeModel } from "./assets/employee-model";
 import { WorldAsset } from "./assets/world-asset";
@@ -26,6 +26,9 @@ interface ProjectRoomSceneProps {
   /** Room-level selection/focus, distinct from selecting a resource inside it. */
   selected?: boolean;
   tooltipLines?: string[];
+  statusLabel?: string;
+  statusColor?: string;
+  nameplateLod?: NameplateLod;
   onSelectRoom?: () => void;
   onFocusRoom?: () => void;
 }
@@ -76,6 +79,9 @@ export function ProjectRoomScene({
   dimmed = false,
   selected = false,
   tooltipLines,
+  statusLabel,
+  statusColor,
+  nameplateLod,
   onSelectRoom,
   onFocusRoom,
 }: ProjectRoomSceneProps) {
@@ -97,7 +103,12 @@ export function ProjectRoomScene({
         // Left/right rooms sit a full vestibule back from the corridor's real
         // door; center rooms (default 0.08) open directly onto it already.
         doorDistance={room.side === "center" ? undefined : ROOM_GAP - 0.05}
+        statusLabel={statusLabel}
+        statusColor={statusColor}
+        resourceCount={resources.length}
+        nameplateLod={nameplateLod}
         onSelectNameplate={onSelectNameplate}
+        onFocusNameplate={onFocusRoom}
         onSelectRoom={onSelectRoom}
         onFocusRoom={onFocusRoom}
       >

@@ -1,8 +1,52 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useRef, useState } from "react";
+import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
+import * as THREE from "three";
 import { WALL_HEIGHT, WALL_THICKNESS, type OpenSide } from "./hq-layout";
+
+const OUTWARD_NORMAL: Record<OpenSide, [number, number, number]> = {
+  north: [0, 0, 1],
+  south: [0, 0, -1],
+  east: [1, 0, 0],
+  west: [-1, 0, 0],
+};
+
+/**
+ * Architectural-cutaway walls: instead of one statically-open side, every wall fades toward
+ * near-transparent whenever the orbiting camera is on the outside looking in through it —
+ * "front" is whichever side currently faces the camera, not a fixed one, so no wall is ever
+ * allowed to sit between camera and interior. `depthWrite={false}` while fading keeps a
+ * faded-out wall from still occluding the room behind it (a transparent mesh that keeps
+ * writing depth blocks exactly as much as an opaque one would).
+ */
+function FadingWall({ side, position, args, color }: { side: OpenSide; position: [number, number, number]; args: [number, number, number]; color: string }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const materialRef = useRef<THREE.MeshStandardMaterial>(null);
+  const worldPos = useRef(new THREE.Vector3());
+  const toCamera = useRef(new THREE.Vector3());
+  const outward = OUTWARD_NORMAL[side];
+
+  useFrame(({ camera }) => {
+    const material = materialRef.current;
+    const mesh = meshRef.current;
+    if (!material || !mesh) return;
+    mesh.getWorldPosition(worldPos.current);
+    toCamera.current.copy(camera.position).sub(worldPos.current);
+    const facingCamera = toCamera.current.x * outward[0] + toCamera.current.y * outward[1] + toCamera.current.z * outward[2];
+    const target = facingCamera > 0 ? 0.08 : 1;
+    material.opacity += (target - material.opacity) * 0.15;
+    material.depthWrite = material.opacity > 0.5;
+  });
+
+  return (
+    <mesh ref={meshRef} position={position} castShadow receiveShadow>
+      <boxGeometry args={args} />
+      <meshStandardMaterial ref={materialRef} color={color} roughness={0.75} metalness={0.05} transparent />
+    </mesh>
+  );
+}
 
 // Deliberately below employee shoulder height (~1.5) rather than the "real"
 // door height — a full-height wall on the side facing the camera blocks the
@@ -49,13 +93,16 @@ const NAMEPLATE_ROTATION: Record<OpenSide, number> = {
   west: -Math.PI / 2,
 };
 
+/** How much detail a nameplate shows, driven by what the camera is currently focused on —
+    never more than the current context needs, so distant/overview shots stay uncluttered. */
+export type NameplateLod = "tower" | "floor" | "project";
+
 /**
- * A physical sign above the room's main opening — mounted like a real
- * doorway header. The plate mesh is a real 3D object oriented to the wall;
- * its label renders as billboarded HTML (not drei's `Text`, which pulls a
- * unicode-font-resolver fallback from a remote CDN — a dependency this
- * self-hosted app shouldn't have at all, and one that hangs the whole
- * Suspense tree when that host is unreachable).
+ * A dark-premium translucent card floating just in front of the room's open side — billboarded
+ * HTML (not drei's `Text`, which pulls a unicode-font-resolver fallback from a remote CDN, a
+ * dependency this self-hosted app shouldn't have and one that hangs the whole Suspense tree
+ * when that host is unreachable), so it always stays upright and legible as the camera orbits.
+ * Click selects, double-click focuses — same as the room body, just reachable from the sign too.
  */
 function Nameplate({
   name,
@@ -64,7 +111,12 @@ function Nameplate({
   depth,
   side,
   doorDistance = 0.08,
+  statusLabel,
+  statusColor,
+  resourceCount,
+  lod = "tower",
   onSelect,
+  onFocus,
 }: {
   name: string;
   accent: string;
@@ -76,8 +128,14 @@ function Nameplate({
       at the room's own (closer) wall, so there's exactly one door per room instead
       of two that don't line up as the camera moves. */
   doorDistance?: number;
+  statusLabel?: string;
+  statusColor?: string;
+  resourceCount?: number;
+  lod?: NameplateLod;
   onSelect?: () => void;
+  onFocus?: () => void;
 }) {
+  const [hovered, setHovered] = useState(false);
   const isNS = side === "north" || side === "south";
   const edgeOffset = (isNS ? depth : width) / 2 + doorDistance;
   const position: [number, number, number] =
@@ -88,34 +146,60 @@ function Nameplate({
         : side === "east"
           ? [edgeOffset, NAMEPLATE_Y, 0]
           : [-edgeOffset, NAMEPLATE_Y, 0];
-  const plateWidth = Math.min((isNS ? width : depth) * 0.75, name.length * 0.15 + 0.4);
+  const plateWidth = Math.min((isNS ? width : depth) * 0.75, name.length * 0.15 + 0.6);
+  const interactive = Boolean(onSelect || onFocus);
 
   return (
-    <group
-      position={position}
-      onClick={(e) => {
-        if (!onSelect) return;
-        e.stopPropagation();
-        onSelect();
-      }}
-    >
-      <mesh rotation={[0, NAMEPLATE_ROTATION[side], 0]}>
-        <boxGeometry args={[plateWidth, 0.3, 0.03]} />
-        <meshStandardMaterial color="#0d0f14" metalness={0.4} roughness={0.5} />
-      </mesh>
+    <group position={position}>
+      {/* Comfortable click/hover target — the card itself (Html) is pointer-events:none so it
+          never eats clicks meant for the room behind it; this plane, oriented the same way the
+          old physical plate was, is the real hit target. */}
+      {interactive && (
+        <mesh
+          rotation={[0, NAMEPLATE_ROTATION[side], 0]}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect?.();
+          }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            onFocus?.();
+          }}
+          onPointerOver={(e) => {
+            e.stopPropagation();
+            setHovered(true);
+            document.body.style.cursor = "pointer";
+          }}
+          onPointerOut={() => {
+            setHovered(false);
+            document.body.style.cursor = "auto";
+          }}
+        >
+          <planeGeometry args={[plateWidth + 0.4, 0.55]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      )}
       <Html center distanceFactor={8} style={{ pointerEvents: "none" }}>
-        <span
+        <div
           style={{
-            fontSize: 13,
-            fontWeight: 700,
-            letterSpacing: 1.5,
-            color: accent,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "4px 10px",
+            borderRadius: 6,
+            background: hovered ? "rgba(22,27,36,0.92)" : "rgba(12,15,20,0.8)",
+            border: `1px solid ${hovered ? accent : "rgba(255,255,255,0.14)"}`,
             fontFamily: "ui-sans-serif, system-ui",
             whiteSpace: "nowrap",
           }}
         >
-          {name.toUpperCase()}
-        </span>
+          <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "#f2f5fa" }}>{name.toUpperCase()}</span>
+          {statusColor && <span style={{ width: 6, height: 6, borderRadius: 99, background: statusColor, flexShrink: 0 }} />}
+          {lod !== "tower" && statusLabel && <span style={{ fontSize: 11, color: "#aab3c5" }}>{statusLabel}</span>}
+          {lod === "project" && resourceCount != null && (
+            <span style={{ fontSize: 11, color: "#7b8496" }}>· {resourceCount} RES</span>
+          )}
+        </div>
       </Html>
     </group>
   );
@@ -134,7 +218,13 @@ export interface RoomShellProps {
   tooltipLines?: string[];
   /** Passed straight to Nameplate — how far past the room's own wall its door (and sign) sits. */
   doorDistance?: number;
+  /** Nameplate-only extras — status dot, its label, and how much of it to show. */
+  statusLabel?: string;
+  statusColor?: string;
+  resourceCount?: number;
+  nameplateLod?: NameplateLod;
   onSelectNameplate?: () => void;
+  onFocusNameplate?: () => void;
   /** Single click anywhere in the room — select without moving the camera. */
   onSelectRoom?: () => void;
   /** Double click anywhere in the room — camera focuses on it (briefing: "double click → focus"). */
@@ -153,7 +243,12 @@ export const RoomShell = memo(function RoomShell({
   selected = false,
   tooltipLines,
   doorDistance,
+  statusLabel,
+  statusColor,
+  resourceCount,
+  nameplateLod,
   onSelectNameplate,
+  onFocusNameplate,
   onSelectRoom,
   onFocusRoom,
   children,
@@ -240,10 +335,7 @@ export const RoomShell = memo(function RoomShell({
       )}
 
       {walls.map((wall) => (
-        <mesh key={wall.side} position={wall.position} castShadow receiveShadow>
-          <boxGeometry args={wall.args} />
-          <meshStandardMaterial color="#31384a" roughness={0.75} metalness={0.05} />
-        </mesh>
+        <FadingWall key={wall.side} side={wall.side} position={wall.position} args={wall.args} color="#31384a" />
       ))}
 
       {/* A thin emissive cap along each wall's top edge — the "lit up at night" read that sells the isometric diorama look. */}
@@ -265,7 +357,12 @@ export const RoomShell = memo(function RoomShell({
         depth={depth}
         side={openSides[0] ?? "south"}
         doorDistance={doorDistance}
+        statusLabel={statusLabel}
+        statusColor={statusColor}
+        resourceCount={resourceCount}
+        lod={nameplateLod}
         onSelect={onSelectNameplate}
+        onFocus={onFocusNameplate}
       />
 
       {children}

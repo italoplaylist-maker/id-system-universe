@@ -118,13 +118,6 @@ export function HqView() {
               }
               selectApplication(id);
             }}
-            onOpenProject={(projectId) => {
-              if (demoMode) {
-                toast.message("This is demo data. Connect a real Coolify instance to manage projects.");
-                return;
-              }
-              router.push(`/projects/${projectId}`);
-            }}
             onOpenProvider={() => {
               if (demoMode) {
                 toast.message("This is demo data. Connect a real Coolify instance to manage providers.");

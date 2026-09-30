@@ -2,12 +2,11 @@
 
 import { Suspense, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { ContactShadows } from "@react-three/drei";
+import { ContactShadows, Html } from "@react-three/drei";
 import { computeHqLayout, computeWorkstationWorldPositions } from "./hq-layout";
 import { UniverseCameraController } from "./camera/universe-camera-controller";
 import { useCameraStore } from "@/store/camera-store";
 import { CorridorScene } from "./corridor-scene";
-import { ElevatorShaft } from "./elevator-shaft";
 import { ReceptionScene } from "./reception-scene";
 import { ProjectRoomScene } from "./project-room-scene";
 import { CommandCenterScene, type CommandCenterStats } from "./command-center-scene";
@@ -23,7 +22,6 @@ interface HqSceneProps {
   applications: UniverseApplication[];
   selectedApplicationId: string | null;
   onSelectApplication: (id: string) => void;
-  onOpenProject: (projectId: string) => void;
   onOpenProvider: (providerId: string) => void;
   reducedGraphics: boolean;
 }
@@ -36,13 +34,20 @@ const HEALTH_LABEL: Record<UniverseProject["health"], string> = {
   UNKNOWN: "Unknown",
 };
 
+const HEALTH_COLOR: Record<UniverseProject["health"], string> = {
+  HEALTHY: "#34d399",
+  DEPLOYING: "#38bdf8",
+  DEGRADED: "#fbbf24",
+  OFFLINE: "#f87171",
+  UNKNOWN: "#8890a3",
+};
+
 export function HqScene({
   providers,
   projects,
   applications,
   selectedApplicationId,
   onSelectApplication,
-  onOpenProject,
   onOpenProvider,
   reducedGraphics,
 }: HqSceneProps) {
@@ -55,6 +60,7 @@ export function HqScene({
   const focusProvider = useCameraStore((s) => s.focusProvider);
   const focusPoint = useCameraStore((s) => s.focusPoint);
   const focusId = useCameraStore((s) => s.focusId);
+  const cameraMode = useCameraStore((s) => s.mode);
 
   const enabledProviders = useMemo(() => providers.filter((p) => p.enabled), [providers]);
   const activeProjects = useMemo(() => projects.filter((p) => !p.archivedAt), [projects]);
@@ -79,6 +85,20 @@ export function HqScene({
   const workstationPositions = useMemo(() => computeWorkstationWorldPositions(layout.rooms, resourcesByRoom), [layout.rooms, resourcesByRoom]);
 
   const projectById = useMemo(() => new Map(activeProjects.map((p) => [p.id, p])), [activeProjects]);
+
+  // Which floor is "in view" for occlusion purposes: focusing a project/resource means
+  // only the floors AT or BELOW it should ever be allowed to hide it — any floor's slab
+  // strictly above is the ceiling right over what the camera is looking at.
+  const focusedFloorIndex = useMemo(() => {
+    if (cameraMode === "provider") return -1;
+    if (cameraMode === "project") return layout.rooms.find((r) => r.id === focusId)?.floorIndex ?? null;
+    if (cameraMode === "resource" && focusId) {
+      const app = applications.find((a) => a.id === focusId);
+      const room = app?.projectId ? layout.rooms.find((r) => r.id === app.projectId) : undefined;
+      return room?.floorIndex ?? null;
+    }
+    return null;
+  }, [cameraMode, focusId, layout.rooms, applications]);
 
   const stats: CommandCenterStats = useMemo(
     () => ({
@@ -109,8 +129,8 @@ export function HqScene({
 
       {/* Premium-dark, not blackout: hemisphere gives even fill, one strong key light
           models shadows/contrast, a soft cyan rim keeps the far side of the building readable. */}
-      <hemisphereLight args={["#5b6f88", "#0a0d12", 0.85] as const} />
-      <ambientLight intensity={0.5} />
+      <hemisphereLight args={["#6b83a0", "#0e131c", 1.05] as const} />
+      <ambientLight intensity={0.68} />
       <directionalLight
         position={[centerX + 9, Math.max(14, layout.bounds.maxY + 8), centerZ + 7]}
         intensity={1.6}
@@ -139,27 +159,43 @@ export function HqScene({
         <ContactShadows position={[centerX, 0.001, centerZ]} opacity={0.45} scale={layout.radius * 2.4} blur={2} far={4} color="#000000" />
       )}
 
-      {/* One structural slab per stacked floor, sized to THAT floor's own footprint (not the
-          whole building's — ground floor is far longer than any single project row, and a
-          slab sized to it would hang as an opaque ceiling over floors that don't reach that
-          far, hiding whatever's underneath). Ground floor needs none (it sits on the scene's
-          own ground plane). */}
-      {Array.from({ length: layout.floorCount }).map((_, i) => {
-        const floorIndex = i + 1;
-        const floorRooms = layout.rooms.filter((r) => r.floorIndex === floorIndex);
-        const fMinX = Math.min(...floorRooms.map((r) => r.x - r.width / 2));
-        const fMaxX = Math.max(...floorRooms.map((r) => r.x + r.width / 2));
-        const fLength = layout.corridors.find((c) => c.y === floorIndex * layout.floorHeight)?.length ?? 0;
-        const fCenterX = (fMinX + fMaxX) / 2;
-        return (
-          <mesh key={`slab-${i}`} position={[fCenterX, floorIndex * layout.floorHeight - 0.08, fLength / 2]} receiveShadow>
-            <boxGeometry args={[fMaxX - fMinX + 1, 0.15, fLength + 1]} />
-            <meshStandardMaterial color="#12151d" roughness={0.95} />
-          </mesh>
-        );
-      })}
+      {/* One structural slab per floor (except the lowest, B1, which has nothing under it),
+          clipped tight to THAT floor's own rooms+corridor footprint — never the whole
+          building's, and never wider than the walls it caps. A slab strictly above the
+          floor currently being focused is skipped entirely (not just faded — a transparent
+          slab still writes depth and would occlude the very thing being focused). */}
+      {(() => {
+        const lowestFloor = Math.min(...layout.floorFootprints.map((f) => f.floorIndex));
+        return layout.floorFootprints
+          .filter((f) => f.floorIndex > lowestFloor)
+          .filter((f) => focusedFloorIndex === null || f.floorIndex <= focusedFloorIndex)
+          .map((f) => (
+            <mesh key={`slab-${f.floorIndex}`} position={[(f.minX + f.maxX) / 2, f.y - 0.08, (f.minZ + f.maxZ) / 2]} receiveShadow>
+              <boxGeometry args={[f.maxX - f.minX + 0.2, 0.15, f.maxZ - f.minZ + 0.2]} />
+              <meshStandardMaterial color="#12151d" roughness={0.95} />
+            </mesh>
+          ));
+      })()}
 
-      <ElevatorShaft x={layout.elevator.x} z={layout.elevator.z} topY={layout.elevator.topY} floorCount={layout.floorCount} floorHeight={layout.floorHeight} />
+      {/* Floor titles anchored to the front edge (z=0 on every floor), large and legible —
+          never on the floor itself. */}
+      {layout.corridors.map((c) => (
+        <Html key={`floor-title-${c.floorIndex}`} position={[0, c.y + 1.7, -0.7]} center style={{ pointerEvents: "none" }}>
+          <div
+            style={{
+              fontFamily: "ui-sans-serif, system-ui",
+              fontSize: 15,
+              fontWeight: 800,
+              letterSpacing: 2,
+              color: "#e7ecf5",
+              whiteSpace: "nowrap",
+              textShadow: "0 1px 3px rgba(0,0,0,0.8)",
+            }}
+          >
+            {c.label}
+          </div>
+        </Html>
+      ))}
 
       <Suspense fallback={null}>
         <CorridorScene corridors={layout.corridors} walls={layout.corridorWalls} doors={layout.corridorDoors} />
@@ -196,6 +232,8 @@ export function HqScene({
             // Half-diagonal of the room's own footprint — same idea as the
             // building-wide radius in hq-layout.ts, just scoped to one room.
             const roomRadius = Math.sqrt((room.width / 2) ** 2 + (room.depth / 2) ** 2);
+            const isThisProjectFocused = cameraMode === "project" && focusId === projectId;
+            const nameplateLod = isThisProjectFocused ? "project" : focusedFloorIndex === room.floorIndex ? "floor" : "tower";
             return (
               <ProjectRoomScene
                 key={room.id}
@@ -204,9 +242,12 @@ export function HqScene({
                 selectedResourceId={selectedApplicationId}
                 onSelectResource={onSelectApplication}
                 onFocusResource={(resourceId, worldPos, name) => focusResource(resourceId, worldPos, name)}
-                onSelectNameplate={() => onOpenProject(projectId)}
+                onSelectNameplate={() => setSelectedProjectId(projectId)}
                 selected={selectedProjectId === projectId || focusId === projectId}
                 tooltipLines={tooltipLines}
+                statusLabel={project ? HEALTH_LABEL[project.health] : "Unknown"}
+                statusColor={project ? HEALTH_COLOR[project.health] : HEALTH_COLOR.UNKNOWN}
+                nameplateLod={nameplateLod}
                 onSelectRoom={() => setSelectedProjectId(projectId)}
                 onFocusRoom={() => focusProject(projectId, [room.x, room.y + 1, room.z], roomRadius, project?.name ?? room.name)}
               />
