@@ -28,12 +28,24 @@ export interface CommandCenterStats {
   incidentCount: number;
 }
 
-function StatBlock({ label, value, tone }: { label: string; value: number; tone: "default" | "good" | "warn" | "bad" }) {
+function StatBlock({ label, value, tone, divider }: { label: string; value: number; tone: "default" | "good" | "warn" | "bad"; divider: boolean }) {
   const color = tone === "good" ? "#34d399" : tone === "warn" ? "#38bdf8" : tone === "bad" ? "#f87171" : "#e6e9f0";
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-      <span style={{ fontSize: 30, fontWeight: 700, color, lineHeight: 1 }}>{value}</span>
-      <span style={{ fontSize: 9, letterSpacing: 1.3, color: "#8890a3", textTransform: "uppercase" }}>{label}</span>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        padding: "10px 6px 14px",
+        borderLeft: divider ? "1px solid rgba(255,255,255,0.08)" : "none",
+        position: "relative",
+      }}
+    >
+      <span style={{ fontSize: 42, fontWeight: 800, color, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{value}</span>
+      <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: 1.6, color: "#9aa4b8", textTransform: "uppercase" }}>{label}</span>
+      <div style={{ position: "absolute", bottom: 0, left: "26%", right: "26%", height: 3, borderRadius: 2, background: color }} />
     </div>
   );
 }
@@ -43,31 +55,33 @@ function StatBlock({ label, value, tone }: { label: string; value: number; tone:
  * every other view uses, never a separately invented figure.
  */
 function BigScreen({ width, stats }: { width: number; stats: CommandCenterStats }) {
-  const screenWidth = width * 0.5;
-  const screenHeight = screenWidth * 0.36;
+  const screenWidth = width * 0.62;
+  const screenHeight = 1.55;
   return (
-    <group position={[0, WALL_HEIGHT * 0.58, -3.65]}>
+    <group position={[0, WALL_HEIGHT * 0.62, -3.65]}>
       <WallScreenFrame width={screenWidth} height={screenHeight} />
       <Html occlude distanceFactor={6} position={[0, 0, 0.03]}>
         <div
           style={{
             width: Math.round(screenWidth * 100),
-            padding: "14px 20px",
-            borderRadius: 8,
-            background: "#0b0d12",
-            display: "flex",
-            justifyContent: "space-around",
+            padding: "20px 28px 16px",
+            borderRadius: 10,
+            background: "linear-gradient(180deg, #10131a, #090b10)",
+            border: "1px solid rgba(255,255,255,0.06)",
             fontFamily: "ui-sans-serif, system-ui",
+            position: "relative",
           }}
         >
-          <div style={{ position: "absolute", top: -34, left: 0, right: 0, textAlign: "center", fontSize: 10, letterSpacing: 3, color: PALETTE.screen }}>
+          <div style={{ position: "absolute", top: -32, left: 0, right: 0, textAlign: "center", fontSize: 12, fontWeight: 600, letterSpacing: 4, color: PALETTE.screen }}>
             ID SYSTEM UNIVERSE
           </div>
-          <StatBlock label="Projects" value={stats.projectCount} tone="default" />
-          <StatBlock label="Resources" value={stats.resourceCount} tone="default" />
-          <StatBlock label="Online" value={stats.onlineCount} tone="good" />
-          <StatBlock label="Deploying" value={stats.deployingCount} tone="warn" />
-          <StatBlock label="Incidents" value={stats.incidentCount} tone={stats.incidentCount > 0 ? "bad" : "default"} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)" }}>
+            <StatBlock label="Projetos" value={stats.projectCount} tone="default" divider={false} />
+            <StatBlock label="Recursos" value={stats.resourceCount} tone="default" divider />
+            <StatBlock label="Online" value={stats.onlineCount} tone="good" divider />
+            <StatBlock label="Implantando" value={stats.deployingCount} tone="warn" divider />
+            <StatBlock label="Incidentes" value={stats.incidentCount} tone={stats.incidentCount > 0 ? "bad" : "default"} divider />
+          </div>
         </div>
       </Html>
     </group>

@@ -241,15 +241,20 @@ function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number, y: number, fl
 
 const CONTROL_ROOM_WIDTH = 14;
 const CONTROL_ROOM_DEPTH = 8;
+// Where a normal (SMALL) project row's own front edge sits: LANDING_DEPTH + ROW_GAP + its
+// depth. The control room's front (door) face is pinned here too, never past it — any extra
+// depth it needs over a normal floor is added going backward instead of pushing its front
+// wall out past the floors below it.
+const CONTROL_ROOM_FRONT_Z = LANDING_DEPTH + ROW_GAP + 4.5;
 
 /** The building's single unified control room — front desk, the big information screen
     and the operations desks all in one complete room — placed at the TOP of the stack
     (see computeHqLayout), not the ground: projects get their own floors below it, the
-    Server Room its own floor at the very bottom (B1). Same landing+row offset every
-    other floor uses, so its front (door) face stays aligned with the floors below it. */
+    Server Room its own floor at the very bottom (B1). Its front (door) face is pinned to
+    the same line every floor's front edge tops out at; being a bigger room than a project
+    floor's, it extends backward instead of jutting out past the floors below it. */
 function buildControlRoom(floorIndex: number, y: number): { rooms: RoomLayout[] } {
-  const z = LANDING_DEPTH + ROW_GAP;
-  const centerZ = z + CONTROL_ROOM_DEPTH / 2;
+  const centerZ = CONTROL_ROOM_FRONT_Z - CONTROL_ROOM_DEPTH / 2;
 
   return {
     rooms: [
