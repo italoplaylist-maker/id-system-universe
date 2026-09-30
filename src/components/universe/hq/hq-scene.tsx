@@ -3,7 +3,7 @@
 import { Suspense, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { ContactShadows } from "@react-three/drei";
-import { computeHqLayout, computeWorkstationWorldPositions } from "./hq-layout";
+import { computeHqLayout, computeWorkstationWorldPositions, SLAB_THICKNESS } from "./hq-layout";
 import { UniverseCameraController } from "./camera/universe-camera-controller";
 import { useCameraStore } from "@/store/camera-store";
 import { CorridorScene } from "./corridor-scene";
@@ -170,8 +170,8 @@ export function HqScene({
           .filter((f) => f.floorIndex > lowestFloor)
           .filter((f) => focusedFloorIndex === null || f.floorIndex <= focusedFloorIndex)
           .map((f) => (
-            <mesh key={`slab-${f.floorIndex}`} position={[(f.minX + f.maxX) / 2, f.y - 0.08, (f.minZ + f.maxZ) / 2]} receiveShadow>
-              <boxGeometry args={[f.maxX - f.minX + 0.2, 0.15, f.maxZ - f.minZ + 0.2]} />
+            <mesh key={`slab-${f.floorIndex}`} position={[(f.minX + f.maxX) / 2, f.y - SLAB_THICKNESS / 2, (f.minZ + f.maxZ) / 2]} receiveShadow>
+              <boxGeometry args={[f.maxX - f.minX + 0.2, SLAB_THICKNESS, f.maxZ - f.minZ + 0.2]} />
               <meshStandardMaterial color="#12151d" roughness={0.95} />
             </mesh>
           ));

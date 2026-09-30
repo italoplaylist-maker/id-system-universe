@@ -104,18 +104,20 @@ const ROW_GAP = 1.5;
 // the middle of every floor, stacked all the way up the building).
 const PROJECT_ROOM_GAP = 0.5;
 
-export const WALL_HEIGHT = 1.3;
+export const WALL_HEIGHT = 2.6;
 export const WALL_THICKNESS = 0.12;
 const DOOR_WIDTH = 1.6;
+/** Thickness of the structural slab between floors — see FLOOR_HEIGHT below. */
+export const SLAB_THICKNESS = 0.15;
 
 /** Every floor's row of project rooms starts at this same z — the z-range before it
     (0..LANDING_DEPTH) is reserved on every floor as the elevator landing, so the shaft
     lines up at the exact same (x,z) all the way up the building. On the ground floor
     that reserved zone is where Reception physically stands. */
 const LANDING_DEPTH = 3;
-// Tight architectural-cutaway spacing: just enough for WALL_HEIGHT + a slab, not a gap that
-// reads as disconnected floating platforms.
-export const FLOOR_HEIGHT = 2;
+// Exactly WALL_HEIGHT + SLAB_THICKNESS: the floor above's slab sits flush on top of this
+// floor's walls, no gap — a real building, not stacked platforms with daylight between them.
+export const FLOOR_HEIGHT = WALL_HEIGHT + SLAB_THICKNESS;
 
 export interface CorridorWallSegment {
   side: "left" | "right";
