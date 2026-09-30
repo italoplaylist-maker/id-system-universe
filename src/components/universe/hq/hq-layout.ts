@@ -186,11 +186,10 @@ interface ProjectRow {
   projects: UniverseProject[];
 }
 
-// Straight building, no center/pass-through room: at most 2 rooms per row, always left and
-// right of the corridor. A 3rd room sat astride the corridor spine itself, open on both
-// ends like a covered porch — the one deliberately asymmetric element in an otherwise
-// straight building, and the room whose sign sat further out than every other room's.
-const ROW_SIZE = 2;
+// Straight building, no center/pass-through room: every room on a floor sits in one row,
+// side by side, all facing the same way (south) — no corridor between them anymore, just a
+// thin reveal, so there's no reason a row is capped at 2 the way an actual hallway would be.
+const ROW_SIZE = 3;
 
 function chunkIntoRows(projects: UniverseProject[]): ProjectRow[] {
   const rows: ProjectRow[] = [];
@@ -198,19 +197,21 @@ function chunkIntoRows(projects: UniverseProject[]): ProjectRow[] {
   return rows;
 }
 
-/** Up to 2 rooms per row, side by side, each with its OWN front-facing opening (south) —
-    every project room faces the same way, toward the front of the floor, instead of left
-    and right rooms opening toward each other across the gap between them. The gap itself
-    is a sealed reveal now (each room keeps a solid wall on that side), not a doorway. */
+/** Every room on a floor sits in one row, side by side, each with its own front-facing
+    opening (south) — every project room faces the same way, none opens toward another
+    across a gap. Thin PROJECT_ROOM_GAP reveals separate adjacent rooms, nothing more. */
 function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number, y: number, floorIndex: number): number {
   const sizes = row.projects.map((p) => roomSizeFor(p.resourceCount));
   const rowDepth = Math.max(...sizes.map((s) => s.depth));
   const rowCenterZ = z + rowDepth / 2;
+  const totalWidth = sizes.reduce((sum, s) => sum + s.width, 0) + PROJECT_ROOM_GAP * (sizes.length - 1);
 
+  let cursorX = -totalWidth / 2;
   row.projects.forEach((project, idx) => {
     const { size, width, depth } = sizes[idx];
-    const slot: "left" | "right" = idx === 0 ? "left" : "right";
-    const roomX = (slot === "left" ? -1 : 1) * (PROJECT_ROOM_GAP / 2 + width / 2);
+    const roomX = cursorX + width / 2;
+    cursorX += width + PROJECT_ROOM_GAP;
+    const slot: "left" | "right" | "center" = idx === 0 ? "left" : idx === row.projects.length - 1 ? "right" : "center";
     rooms.push({
       id: project.id,
       kind: "project",

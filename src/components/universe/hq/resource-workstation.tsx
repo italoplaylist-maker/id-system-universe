@@ -73,7 +73,7 @@ export const ResourceWorkstation = memo(function ResourceWorkstation({ resource,
         </>
       )}
 
-      <Html position={[0, isDatabase ? 0.82 : 0.74, 0]} center distanceFactor={8} style={{ pointerEvents: "none" }}>
+      <Html position={[0, isDatabase ? 0.82 : 0.74, 0]} center distanceFactor={8} occlude style={{ pointerEvents: "none" }}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: "#e6e9f0", fontFamily: "ui-sans-serif, system-ui" }}>{label}</span>
           <span style={{ fontSize: 9, color, display: "flex", alignItems: "center", gap: 3 }}>
