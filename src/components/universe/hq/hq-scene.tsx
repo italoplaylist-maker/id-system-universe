@@ -25,11 +25,11 @@ interface HqSceneProps {
 }
 
 const HEALTH_LABEL: Record<UniverseProject["health"], string> = {
-  HEALTHY: "Healthy",
-  DEPLOYING: "Deploying",
-  DEGRADED: "Degraded",
+  HEALTHY: "Saudável",
+  DEPLOYING: "Implantando",
+  DEGRADED: "Degradado",
   OFFLINE: "Offline",
-  UNKNOWN: "Unknown",
+  UNKNOWN: "Desconhecido",
 };
 
 const HEALTH_COLOR: Record<UniverseProject["health"], string> = {

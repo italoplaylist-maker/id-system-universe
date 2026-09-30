@@ -48,10 +48,9 @@ function FadingWall({ side, position, args, color }: { side: OpenSide; position:
   );
 }
 
-// Deliberately below employee shoulder height (~1.5) rather than the "real"
-// door height — a full-height wall on the side facing the camera blocks the
-// one thing this diorama exists to show (briefing 14: "paredes cutaway").
-const NAMEPLATE_Y = WALL_HEIGHT + 0.32;
+// Low, pinned to the floor edge — an architectural plaque at the base of the
+// opening, not a sign floating up in the doorway.
+const NAMEPLATE_Y = 0.3;
 
 interface WallSpec {
   side: OpenSide;
@@ -98,14 +97,14 @@ const NAMEPLATE_ROTATION: Record<OpenSide, number> = {
 export type NameplateLod = "tower" | "floor" | "project";
 
 /**
- * A dark-premium translucent card floating just in front of the room's open side — billboarded
+ * A small architectural plaque pinned to the floor edge at the room's open side — billboarded
  * HTML (not drei's `Text`, which pulls a unicode-font-resolver fallback from a remote CDN, a
  * dependency this self-hosted app shouldn't have and one that hangs the whole Suspense tree
  * when that host is unreachable), so it always stays upright and legible as the camera orbits.
  * Click selects AND focuses the camera on it — same as the room body, just reachable from the
- * sign too. No `distanceFactor`: the card renders at a fixed screen size regardless of camera
- * distance, so a project's name stays readable from the overview shot instead of shrinking
- * into an unreadable speck the farther the camera sits.
+ * sign too. Identifies the room; doesn't dominate the scene — discreet by default, only a
+ * little brighter on hover/selected, and gone entirely once the room itself is focused (the
+ * Project Panel already names it at that point).
  */
 function Nameplate({
   name,
@@ -116,8 +115,9 @@ function Nameplate({
   doorDistance = 0.08,
   statusLabel,
   statusColor,
-  resourceCount,
   lod = "tower",
+  selected = false,
+  emphasis = false,
   onSelect,
   onFocus,
 }: {
@@ -135,10 +135,18 @@ function Nameplate({
   statusColor?: string;
   resourceCount?: number;
   lod?: NameplateLod;
+  selected?: boolean;
+  /** Slightly larger type for the one-of-a-kind rooms (e.g. Central de Comando) — still a
+      plaque, never a HUD button. */
+  emphasis?: boolean;
   onSelect?: () => void;
   onFocus?: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  // Once a room is the camera's actual focus, the Project Panel already identifies it —
+  // the plaque would just be clutter sitting between the camera and the room's interior.
+  if (lod === "project") return null;
+
   const isNS = side === "north" || side === "south";
   const edgeOffset = (isNS ? depth : width) / 2 + doorDistance;
   const position: [number, number, number] =
@@ -149,8 +157,17 @@ function Nameplate({
         : side === "east"
           ? [edgeOffset, NAMEPLATE_Y, 0]
           : [-edgeOffset, NAMEPLATE_Y, 0];
-  const plateWidth = Math.min((isNS ? width : depth) * 0.75, name.length * 0.15 + 0.6);
+  const roomSpan = isNS ? width : depth;
+  // 3D-unit size of the (invisible) click target only — not the rendered card, which
+  // auto-sizes to its text in CSS pixels below.
+  const plateWidth = Math.min(roomSpan * 0.45, name.length * 0.1 + 0.5);
+  const longName = name.length > 16;
+  // Pixel budget for the name text itself — generous enough that a normal project name
+  // never truncates, tightening only for a genuinely narrow room, so it can't reach into
+  // a neighboring room's plaque. Ellipsis (below) is the last-resort fallback past that.
+  const nameMaxWidthPx = Math.max(90, Math.round(roomSpan * 30));
   const interactive = Boolean(onSelect || onFocus);
+  const emphasized = hovered || selected;
 
   return (
     <group position={position}>
@@ -175,36 +192,46 @@ function Nameplate({
             document.body.style.cursor = "auto";
           }}
         >
-          <planeGeometry args={[plateWidth + 0.4, 0.55]} />
+          <planeGeometry args={[plateWidth + 0.3, 0.4]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
       )}
       {/* No `occlude`: a raycast-based occlusion check here flickered as the room's own
           FadingWall toggled opacity/depthWrite underneath it — the nameplate should read
-          through a wall anyway, the same way a real building directory sign does. No
-          `distanceFactor` either: a fixed screen-space size, not one that shrinks with
-          camera distance, so the name stays readable from the overview shot. */}
-      <Html center style={{ pointerEvents: "none" }}>
+          through a wall anyway, the same way a real building directory sign does.
+          `distanceFactor` gives it natural perspective scaling (smaller from far away,
+          legible up close) instead of sitting at a fixed HUD-like screen size. */}
+      <Html center distanceFactor={8} style={{ pointerEvents: "none" }}>
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 8,
-            padding: "7px 14px",
-            borderRadius: 7,
-            background: hovered ? "rgba(24,32,44,0.95)" : "rgba(14,19,27,0.9)",
-            border: `1.5px solid ${accent}`,
-            boxShadow: `0 0 14px 1px ${accent}55`,
+            gap: 5,
+            padding: emphasis ? "4px 10px" : "3px 8px",
+            borderRadius: 5,
+            background: emphasized ? "rgba(20,25,33,0.92)" : "rgba(12,15,20,0.82)",
+            border: `1px solid ${selected ? `${accent}99` : hovered ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.12)"}`,
+            borderBottom: `2px solid ${accent}`,
+            boxShadow: emphasized ? `0 0 6px 0 ${accent}40` : "none",
             fontFamily: "ui-sans-serif, system-ui",
             whiteSpace: "nowrap",
           }}
         >
-          <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: 1.1, color: "#ffffff" }}>{name.toUpperCase()}</span>
-          {statusColor && <span style={{ width: 7, height: 7, borderRadius: 99, background: statusColor, flexShrink: 0 }} />}
-          {lod !== "tower" && statusLabel && <span style={{ fontSize: 12, color: "#c3ccdc" }}>{statusLabel}</span>}
-          {lod === "project" && resourceCount != null && (
-            <span style={{ fontSize: 12, color: "#93a0b8" }}>· {resourceCount} RES</span>
-          )}
+          <span
+            style={{
+              fontWeight: 700,
+              fontSize: emphasis ? 13 : longName ? 10.5 : 11.5,
+              color: "#e9edf5",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: nameMaxWidthPx,
+              minWidth: 0,
+            }}
+          >
+            {name}
+          </span>
+          {statusColor && <span style={{ width: 5, height: 5, borderRadius: 99, background: statusColor, flexShrink: 0 }} />}
+          {lod !== "tower" && statusLabel && <span style={{ fontSize: 9.5, color: "#9aa4b8", flexShrink: 0 }}>{statusLabel}</span>}
         </div>
       </Html>
     </group>
@@ -229,6 +256,8 @@ export interface RoomShellProps {
   statusColor?: string;
   resourceCount?: number;
   nameplateLod?: NameplateLod;
+  /** Slightly larger plaque type — for the one-of-a-kind rooms (Central de Comando). */
+  nameplateEmphasis?: boolean;
   onSelectNameplate?: () => void;
   onFocusNameplate?: () => void;
   /** Click anywhere in the room — select it. */
@@ -253,6 +282,7 @@ export const RoomShell = memo(function RoomShell({
   statusColor,
   resourceCount,
   nameplateLod,
+  nameplateEmphasis = false,
   onSelectNameplate,
   onFocusNameplate,
   onSelectRoom,
@@ -364,6 +394,8 @@ export const RoomShell = memo(function RoomShell({
         statusColor={statusColor}
         resourceCount={resourceCount}
         lod={nameplateLod}
+        selected={selected}
+        emphasis={nameplateEmphasis}
         onSelect={onSelectNameplate}
         onFocus={onFocusNameplate}
       />

@@ -256,7 +256,7 @@ function buildControlRoom(floorIndex: number, y: number): { rooms: RoomLayout[] 
       {
         id: "control-room",
         kind: "control-room",
-        name: "CONTROL ROOM",
+        name: "Central de Comando",
         accent: "#38bdf8",
         size: "LARGE",
         x: 0,
@@ -370,7 +370,7 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
   const controlFloor = buildControlRoom(topFloorIndex, topFloorIndex * FLOOR_HEIGHT);
   // One single room straddling the corridor spine — no hallway edge shared with anything,
   // same as every project floor.
-  addFloor(controlFloor.rooms, topFloorIndex, topFloorIndex * FLOOR_HEIGHT, "TOPO — CONTROL ROOM", CORRIDOR_WIDTH, false);
+  addFloor(controlFloor.rooms, topFloorIndex, topFloorIndex * FLOOR_HEIGHT, "TOPO — CENTRAL DE COMANDO", CORRIDOR_WIDTH, false);
 
   const elevator = { x: 0, z: LANDING_DEPTH / 2, topY: (topFloorIndex + 1) * FLOOR_HEIGHT + WALL_HEIGHT + 0.6 };
 

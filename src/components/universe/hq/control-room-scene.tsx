@@ -139,6 +139,7 @@ export function ControlRoomScene({
         name={room.name}
         accent={room.accent}
         openSides={room.openSides}
+        nameplateEmphasis
         onSelectRoom={onSelectRoom}
         onFocusRoom={onFocusRoom}
       >
