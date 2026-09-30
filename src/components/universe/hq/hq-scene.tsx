@@ -301,7 +301,7 @@ export function HqScene({
         <TaskAgents layout={layout} applications={applications} workstationPositions={workstationPositions} />
       </Suspense>
 
-      <UniverseCameraController overviewCenter={layout.center} overviewRadius={layout.radius} />
+      <UniverseCameraController overviewCenter={layout.center} overviewRadius={layout.radius} overviewBounds={layout.bounds} />
     </Canvas>
   );
 }

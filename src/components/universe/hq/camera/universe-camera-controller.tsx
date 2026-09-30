@@ -7,10 +7,22 @@ import * as THREE from "three";
 import type { MapControls as MapControlsImpl } from "three-stdlib";
 import { useCameraStore } from "@/store/camera-store";
 
+interface Bounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  minZ: number;
+  maxZ: number;
+}
+
 interface UniverseCameraControllerProps {
   /** The HQ's current overview shot — read once per change into a ref, never applied to the camera automatically. Only an explicit reset() (or the very first mount) actually moves the camera to it. */
   overviewCenter: [number, number, number];
   overviewRadius: number;
+  /** Real footprint of every room — computing the fit distance from the actual box (not
+      just a diagonal radius) is what lets it stay correct as floors are added. */
+  overviewBounds: Bounds;
 }
 
 // Same flatter, more frontal direction used for the default overview shot and
@@ -29,21 +41,43 @@ const KEY_ROTATE_SPEED = 1.4; // rad/s
 const LERP_RATE = 6.5; // exponential approach rate, frame-rate independent (see damp())
 const FOV_DEG = 45;
 
-// The desktop aspect the original radius*1.05 distance was tuned and visually approved
-// against, across many rounds of screenshot review — never thrown away, only adapted.
-const REFERENCE_ASPECT = 1.6;
-const REFERENCE_MARGIN = 1.05;
+// A single "radius" (the bounding sphere's diagonal) can't tell a wide-but-short building
+// from a narrow-but-tall one — and a 15-floor tower is a LOT taller relative to its width
+// than a 2-floor one, so any fixed radius*constant heuristic drifts wrong as floors are
+// added (verified: it visibly under- and over-shot at different floor counts). The correct,
+// floor-count-proof approach is to actually project the real bounding BOX onto the camera's
+// own view plane for the fixed VIEW_DIRECTION, and solve for the distance that fits it.
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
-/** The building's silhouette from the fixed oblique VIEW_DIRECTION is nowhere near as tall
-    as its full 3D bounding sphere in every direction — fitting to that sphere with real
-    trigonometry (as a naive "fit a sphere in the frustum" formula would) pulls the camera
-    absurdly far back. Instead: keep the desktop distance exactly as tuned, and only pull
-    back further for an aspect NARROWER than desktop (tablet/mobile portrait), where the
-    horizontal frustum genuinely is the tighter constraint — scaled by how much narrower. */
-function fitDistance(radius: number, aspect: number): number {
-  const base = radius * REFERENCE_MARGIN;
-  if (aspect >= REFERENCE_ASPECT) return base;
-  return base * (REFERENCE_ASPECT / Math.max(aspect, 0.35));
+/** Distance along VIEW_DIRECTION from `center` at which the whole `bounds` box fits inside
+    the frustum (both axes), for the given vertical FOV/aspect — the real "fit object to
+    viewport" calculation, not a hand-tuned constant. */
+function fitDistanceToBounds(bounds: Bounds, center: THREE.Vector3, fovDeg: number, aspect: number, margin = 1.12): number {
+  const vHalf = THREE.MathUtils.degToRad(fovDeg) / 2;
+  const hHalf = Math.atan(Math.tan(vHalf) * aspect);
+
+  // Camera basis for this fixed viewing direction (standard lookAt construction):
+  // "zaxis" points from target toward the eye (i.e. VIEW_DIRECTION itself).
+  const zaxis = VIEW_DIRECTION;
+  const right = new THREE.Vector3().crossVectors(WORLD_UP, zaxis).normalize();
+  const up = new THREE.Vector3().crossVectors(zaxis, right);
+
+  let maxRight = 0;
+  let maxUp = 0;
+  const corner = new THREE.Vector3();
+  for (const x of [bounds.minX, bounds.maxX]) {
+    for (const y of [bounds.minY, bounds.maxY]) {
+      for (const z of [bounds.minZ, bounds.maxZ]) {
+        corner.set(x, y, z).sub(center);
+        maxRight = Math.max(maxRight, Math.abs(corner.dot(right)));
+        maxUp = Math.max(maxUp, Math.abs(corner.dot(up)));
+      }
+    }
+  }
+
+  const distForVertical = maxUp / Math.tan(vHalf);
+  const distForHorizontal = maxRight / Math.tan(hHalf);
+  return Math.max(distForVertical, distForHorizontal, 1) * margin;
 }
 
 // Module-level, not inline in JSX — a fresh object literal every render is
@@ -54,11 +88,11 @@ const MOUSE_BUTTONS = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: T
 
 type Shot = { position: THREE.Vector3; target: THREE.Vector3 };
 
-function overviewShot(center: [number, number, number], radius: number, aspect: number): Shot {
+function overviewShot(center: [number, number, number], bounds: Bounds, aspect: number): Shot {
   const target = new THREE.Vector3(center[0], center[1], center[2]);
   return {
     target,
-    position: target.clone().addScaledVector(VIEW_DIRECTION, fitDistance(radius, aspect)),
+    position: target.clone().addScaledVector(VIEW_DIRECTION, fitDistanceToBounds(bounds, target, FOV_DEG, aspect)),
   };
 }
 
@@ -114,7 +148,7 @@ function isTypingTarget(el: Element | null): boolean {
  * command only ever *nudges* it via an animated transition — nothing here
  * ever calls `target.set(centerX, 0, centerZ)` as a standing rule.
  */
-export function UniverseCameraController({ overviewCenter, overviewRadius }: UniverseCameraControllerProps) {
+export function UniverseCameraController({ overviewCenter, overviewRadius, overviewBounds }: UniverseCameraControllerProps) {
   const { camera, size } = useThree();
   const controlsRef = useRef<MapControlsImpl>(null);
   const aspectRef = useRef(size.width / Math.max(size.height, 1));
@@ -129,31 +163,30 @@ export function UniverseCameraController({ overviewCenter, overviewRadius }: Uni
   const locked = mode === "overview";
 
   const overviewCenterRef = useRef<[number, number, number]>(overviewCenter);
-  const overviewRadiusRef = useRef(overviewRadius);
+  const overviewBoundsRef = useRef(overviewBounds);
   const lastFitRadiusRef = useRef(overviewRadius);
   const desiredPosition = useRef(new THREE.Vector3());
   const desiredTarget = useRef(new THREE.Vector3());
   const transitioning = useRef(false);
   useEffect(() => {
     overviewCenterRef.current = overviewCenter;
-    overviewRadiusRef.current = overviewRadius;
+    overviewBoundsRef.current = overviewBounds;
     // Polling refreshes projects/applications constantly, which recomputes the layout
-    // (and this array/number) on every tick — but the radius itself only actually
-    // changes when a real structural change happens (a Project/room added or resized),
-    // never from a status update alone. So: re-fit ONLY when the number genuinely
-    // moved, and only while locked in Overview — this is what lets item 2 ("Overview
-    // adapts as Projects/floors are added") coexist with item 14 ("polling never
-    // resets the camera").
+    // (and this radius) on every tick — but it only actually changes when a real
+    // structural change happens (a Project/room added or resized), never from a status
+    // update alone. So: re-fit ONLY when the number genuinely moved, and only while
+    // locked in Overview — this is what lets item 2 ("Overview adapts as Projects/
+    // floors are added") coexist with item 14 ("polling never resets the camera").
     if (Math.abs(overviewRadius - lastFitRadiusRef.current) > 0.01) {
       lastFitRadiusRef.current = overviewRadius;
       if (useCameraStore.getState().mode === "overview" && controlsRef.current) {
-        const shot = overviewShot(overviewCenterRef.current, overviewRadiusRef.current, aspectRef.current);
+        const shot = overviewShot(overviewCenterRef.current, overviewBoundsRef.current, aspectRef.current);
         desiredPosition.current.copy(shot.position);
         desiredTarget.current.copy(shot.target);
         transitioning.current = true;
       }
     }
-  }, [overviewCenter, overviewRadius]);
+  }, [overviewCenter, overviewRadius, overviewBounds]);
   const lastAppliedToken = useRef(0);
   const userGestureActive = useRef(false);
 
@@ -218,7 +251,7 @@ export function UniverseCameraController({ overviewCenter, overviewRadius }: Uni
     if (!controls) return;
 
     let shot: Shot;
-    if (command.kind === "reset") shot = overviewShot(overviewCenterRef.current, overviewRadiusRef.current, aspectRef.current);
+    if (command.kind === "reset") shot = overviewShot(overviewCenterRef.current, overviewBoundsRef.current, aspectRef.current);
     else if (command.kind === "resource") shot = resourceShot(command.center);
     else if (command.kind === "point") shot = pointShot(command.center, controls.object.position, controls.target);
     else shot = boundedShot(command.center, command.radius ?? 4);
@@ -238,7 +271,7 @@ export function UniverseCameraController({ overviewCenter, overviewRadius }: Uni
       return;
     }
     if (mode !== "overview" || !controlsRef.current) return;
-    const shot = overviewShot(overviewCenterRef.current, overviewRadiusRef.current, aspectRef.current);
+    const shot = overviewShot(overviewCenterRef.current, overviewBoundsRef.current, aspectRef.current);
     desiredPosition.current.copy(shot.position);
     desiredTarget.current.copy(shot.target);
     transitioning.current = true;
@@ -281,7 +314,7 @@ export function UniverseCameraController({ overviewCenter, overviewRadius }: Uni
 
     if (!initialized.current) {
       initialized.current = true;
-      const shot = overviewShot(overviewCenterRef.current, overviewRadiusRef.current, aspectRef.current);
+      const shot = overviewShot(overviewCenterRef.current, overviewBoundsRef.current, aspectRef.current);
       controls.object.position.copy(shot.position);
       controls.target.copy(shot.target);
       controls.update();
