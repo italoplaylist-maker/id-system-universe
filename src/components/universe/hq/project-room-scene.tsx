@@ -100,9 +100,9 @@ export function ProjectRoomScene({
         dimmed={dimmed}
         selected={selected}
         tooltipLines={tooltipLines}
-        // Left/right rooms sit a full vestibule back from the corridor's real
-        // door; center rooms (default 0.08) open directly onto it already.
-        doorDistance={room.side === "center" ? undefined : ROOM_GAP - 0.05}
+        // Every project room sits a full vestibule back from the corridor's real door —
+        // there's no more center/pass-through project room, so this is always the case now.
+        doorDistance={ROOM_GAP - 0.05}
         statusLabel={statusLabel}
         statusColor={statusColor}
         resourceCount={resources.length}

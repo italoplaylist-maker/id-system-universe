@@ -28,8 +28,9 @@ export interface RoomLayout {
 }
 
 export interface CorridorFloor {
-  /** The shared walking spine on this floor: x is always 0, z runs from 0 to length. */
-  length: number;
+  /** The shared walking spine on this floor, flush to that floor's own rooms — x is always 0. */
+  minZ: number;
+  maxZ: number;
   width: number;
   y: number;
   floorIndex: number;
@@ -133,12 +134,13 @@ export interface CorridorDoor {
  * Real hallway walls along both corridor edges of ONE floor, with a door-width gap cut
  * wherever a room actually opens onto that edge — so you walk down an enclosed corridor
  * and enter each room through a distinct doorway, instead of the whole room frontage
- * being open floor. Center rooms (Reception, Command Center, Operations, Server Room,
- * and any 3-project row's middle room) straddle the corridor spine itself and are wider
- * than it, so both edges are left fully open across their depth — the room's own walls
- * take over as the corridor boundary there.
+ * being open floor. Center rooms (Reception, Command Center, Operations, Server Room)
+ * straddle the corridor spine itself and are wider than it, so both edges are left fully
+ * open across their depth — the room's own walls take over as the corridor boundary
+ * there. Walls only ever span [minZ, maxZ] — that floor's own rooms, flush, never a
+ * shared nominal length that would run past the walls it's supposed to cap.
  */
-function computeCorridorWallsAndDoors(rooms: RoomLayout[], corridorLength: number, corridorWidth: number, y: number) {
+function computeCorridorWallsAndDoors(rooms: RoomLayout[], minZ: number, maxZ: number, corridorWidth: number, y: number) {
   const walls: CorridorWallSegment[] = [];
   const doors: CorridorDoor[] = [];
 
@@ -160,12 +162,12 @@ function computeCorridorWallsAndDoors(rooms: RoomLayout[], corridorLength: numbe
       if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
       else merged.push(range);
     }
-    let cursor = 0;
+    let cursor = minZ;
     for (const [start, end] of merged) {
       if (start - cursor > 0.15) walls.push({ side, y, z: (cursor + start) / 2, length: start - cursor });
       cursor = Math.max(cursor, end);
     }
-    if (corridorLength - cursor > 0.15) walls.push({ side, y, z: (cursor + corridorLength) / 2, length: corridorLength - cursor });
+    if (maxZ - cursor > 0.15) walls.push({ side, y, z: (cursor + maxZ) / 2, length: maxZ - cursor });
   }
 
   return { walls, doors };
@@ -181,7 +183,11 @@ interface ProjectRow {
   projects: UniverseProject[];
 }
 
-const ROW_SIZE = 3;
+// Straight building, no center/pass-through room: at most 2 rooms per row, always left and
+// right of the corridor. A 3rd room sat astride the corridor spine itself, open on both
+// ends like a covered porch — the one deliberately asymmetric element in an otherwise
+// straight building, and the room whose sign sat further out than every other room's.
+const ROW_SIZE = 2;
 
 function chunkIntoRows(projects: UniverseProject[]): ProjectRow[] {
   const rows: ProjectRow[] = [];
@@ -189,57 +195,16 @@ function chunkIntoRows(projects: UniverseProject[]): ProjectRow[] {
   return rows;
 }
 
-/**
- * Up to 3 rooms per row — left/right open onto the corridor sideways, and when a row has
- * a middle room, it straddles the corridor spine itself (open north+south), so the
- * single-corridor waypoint model (everything walkable reaches x=0) never has to change.
- */
+/** Up to 2 rooms per row, one on each side of the corridor — every project room is the
+    same "left" or "right" shape, so every nameplate sits in the exact same kind of spot. */
 function placeRow(rooms: RoomLayout[], row: ProjectRow, z: number, y: number, floorIndex: number): number {
-  const hasMiddle = row.projects.length === 3;
-  // A center room sits between the two side rooms' inner (corridor-facing)
-  // walls, so its width is capped to that gap — any width it would have
-  // needed beyond that becomes extra depth instead, keeping roughly the same
-  // floor area for computeWorkstationLocalPositions to lay out. Computed
-  // before rowDepth so the row reserves enough Z for the (now deeper) room.
-  const maxCenterWidth = CORRIDOR_WIDTH + ROOM_GAP * 2 - 0.3;
-  const rowSizes = row.projects.map((p, idx) => {
-    const natural = roomSizeFor(p.resourceCount);
-    if (hasMiddle && idx === 1) {
-      const width = Math.min(natural.width, maxCenterWidth);
-      const depth = width < natural.width ? natural.depth * (natural.width / width) : natural.depth;
-      return { size: natural.size, width, depth };
-    }
-    return natural;
-  });
-  const rowDepth = Math.max(...rowSizes.map((s) => s.depth));
+  const sizes = row.projects.map((p) => roomSizeFor(p.resourceCount));
+  const rowDepth = Math.max(...sizes.map((s) => s.depth));
   const rowCenterZ = z + rowDepth / 2;
 
   row.projects.forEach((project, idx) => {
-    const { size, width, depth } = rowSizes[idx];
-    const slot: "left" | "center" | "right" = hasMiddle ? (["left", "center", "right"] as const)[idx] : idx === 0 ? "left" : "right";
-
-    if (slot === "center") {
-      rooms.push({
-        id: project.id,
-        kind: "project",
-        projectId: project.id,
-        name: project.name,
-        accent: project.accent,
-        size,
-        x: 0,
-        y,
-        z: rowCenterZ,
-        width,
-        depth,
-        doorPoint: [0, rowCenterZ - depth / 2],
-        side: "center",
-        openSides: ["north", "south"],
-        resourceCount: project.resourceCount,
-        floorIndex,
-      });
-      return;
-    }
-
+    const { size, width, depth } = sizes[idx];
+    const slot: "left" | "right" = idx === 0 ? "left" : "right";
     const roomX = (slot === "left" ? -1 : 1) * (CORRIDOR_WIDTH / 2 + ROOM_GAP + width / 2);
     rooms.push({
       id: project.id,
@@ -328,9 +293,7 @@ function buildGroundFloor() {
     resourceCount: 0,
     floorIndex: 0,
   });
-  z += opsDepth + ROW_GAP;
-
-  return { rooms, corridorLength: z };
+  return { rooms };
 }
 
 /** B1: the Server Room, directly beneath 1F (same x, same landing-aligned z) — a real
@@ -366,7 +329,7 @@ function buildBasementFloor(providers: UniverseProviderSummary[]) {
     return { providerId: provider.id, name: provider.name, color: provider.color, x: rackX, z: serverZ };
   });
 
-  return { rooms, corridorLength: serverDepth, serverRacks };
+  return { rooms, serverRacks };
 }
 
 /**
@@ -386,35 +349,35 @@ export function computeHqLayout(projects: UniverseProject[], providers: Universe
   const corridorDoors: CorridorDoor[] = [];
   const floorFootprints: FloorFootprint[] = [];
 
-  function addFloor(floorRooms: RoomLayout[], corridorLength: number, floorIndex: number, y: number, label: string) {
+  function addFloor(floorRooms: RoomLayout[], floorIndex: number, y: number, label: string) {
     rooms.push(...floorRooms);
-    corridors.push({ length: corridorLength, width: CORRIDOR_WIDTH, y, floorIndex, label });
-    const { walls, doors } = computeCorridorWallsAndDoors(floorRooms, corridorLength, CORRIDOR_WIDTH, y);
-    corridorWalls.push(...walls);
-    corridorDoors.push(...doors);
-    // Flush to the rooms themselves, never the shared corridor's nominal 0..length span — a
-    // project floor's rooms start well past z=0 (that leading stretch is the empty landing
-    // zone shared by every floor so the vertical alignment point lines up), so sizing the
-    // slab to the corridor length left it overhanging past the walls on the empty end.
+    // Flush to the rooms themselves, never a shared nominal corridor length — a project
+    // floor's rooms start well past z=0 (that leading stretch is the empty landing zone
+    // shared by every floor so the vertical alignment point lines up), so sizing anything to
+    // that nominal length left it overhanging past the walls on the empty end.
     const minX = Math.min(...floorRooms.map((r) => r.x - r.width / 2));
     const maxX = Math.max(...floorRooms.map((r) => r.x + r.width / 2));
     const minZ = Math.min(...floorRooms.map((r) => r.z - r.depth / 2));
     const maxZ = Math.max(...floorRooms.map((r) => r.z + r.depth / 2));
+    corridors.push({ minZ, maxZ, width: CORRIDOR_WIDTH, y, floorIndex, label });
+    const { walls, doors } = computeCorridorWallsAndDoors(floorRooms, minZ, maxZ, CORRIDOR_WIDTH, y);
+    corridorWalls.push(...walls);
+    corridorDoors.push(...doors);
     floorFootprints.push({ floorIndex, y, minX, maxX, minZ, maxZ });
   }
 
   const basement = buildBasementFloor(providers);
-  addFloor(basement.rooms, basement.corridorLength, -1, -FLOOR_HEIGHT, "B1 — INFRASTRUCTURE");
+  addFloor(basement.rooms, -1, -FLOOR_HEIGHT, "B1 — INFRASTRUCTURE");
 
   const ground = buildGroundFloor();
-  addFloor(ground.rooms, ground.corridorLength, 0, 0, "1F — OPERATIONS");
+  addFloor(ground.rooms, 0, 0, "1F — OPERATIONS");
 
   rows.forEach((row, i) => {
     const floorIndex = i + 1;
     const y = floorIndex * FLOOR_HEIGHT;
     const floorRooms: RoomLayout[] = [];
-    const corridorLength = placeRow(floorRooms, row, LANDING_DEPTH + ROW_GAP, y, floorIndex);
-    addFloor(floorRooms, corridorLength, floorIndex, y, `${floorIndex + 1}F — PROJECTS`);
+    placeRow(floorRooms, row, LANDING_DEPTH + ROW_GAP, y, floorIndex);
+    addFloor(floorRooms, floorIndex, y, `${floorIndex + 1}F — PROJECTS`);
   });
 
   const floorCount = rows.length;
