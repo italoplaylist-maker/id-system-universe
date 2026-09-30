@@ -1,7 +1,7 @@
 "use client";
 
 import { Html } from "@react-three/drei";
-import type { RoomLayout } from "./hq-layout";
+import { WALL_HEIGHT, type RoomLayout } from "./hq-layout";
 import { RoomShell } from "./room-shell";
 import { EmployeeModel } from "./assets/employee-model";
 import { WorldAsset } from "./assets/world-asset";
@@ -32,10 +32,10 @@ function StatBlock({ label, value, tone }: { label: string; value: number; tone:
  * every other view uses, never a separately invented figure.
  */
 function BigScreen({ width, stats }: { width: number; stats: CommandCenterStats }) {
-  const screenWidth = width * 0.7;
+  const screenWidth = width * 0.78;
   const screenHeight = screenWidth * 0.36;
   return (
-    <group position={[0, 1.3, -1.9]}>
+    <group position={[0, WALL_HEIGHT * 0.58, -1.9]}>
       <WallScreenFrame width={screenWidth} height={screenHeight} />
       <Html occlude distanceFactor={6} position={[0, 0, 0.03]}>
         <div
