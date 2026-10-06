@@ -157,7 +157,7 @@ function OpsDesk({ x, z, manned, accent, seed }: { x: number; z: number; manned:
     <group position={[x, 0, z]} rotation={[0, Math.PI, 0]}>
       <WorldAsset asset={ASSET_KEYS.OFFICE_DESK} fallback={<DeskFallback />} />
       <WorldAsset asset={ASSET_KEYS.MONITOR} fallback={<MonitorFallback color={PALETTE.screen} pulse="none" />} />
-      <WorldAsset asset={ASSET_KEYS.OFFICE_CHAIR} fallback={<ChairFallback />} position={[0, 0, 0.32]} />
+      <WorldAsset asset={ASSET_KEYS.OFFICE_CHAIR} fallback={<ChairFallback variant="operator" />} position={[0, 0, 0.32]} />
       {manned && (
         <group position={[0, 0, 0.32]}>
           <StandbyEmployee accent={accent} seed={seed} />

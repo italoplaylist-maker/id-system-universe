@@ -21,6 +21,10 @@ export const PALETTE = {
   skinAlt: "#8a5a3c",
   uniform: "#3d4b5c",
   uniformAlt: "#4a3d5c",
+  /** ID System red — the one accent color: LEDs, selection rings, plaques, discreet
+      architectural lines. Never a base material color (briefing: "não pintar tudo de vermelho"). */
+  brand: "#e8283f",
+  brandDim: "#7a1620",
 } as const;
 
 export const STATUS_COLOR = {

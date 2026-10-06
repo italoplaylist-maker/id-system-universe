@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { PALETTE } from "../palette";
@@ -45,25 +45,88 @@ export function DeskFallback() {
   );
 }
 
-export function ChairFallback() {
+export type ChairVariant = "developer" | "operator" | "executive";
+
+const CHAIR_FABRIC: Record<ChairVariant, string> = { developer: PALETTE.fabric, operator: "#2e3540", executive: "#1c1f26" };
+
+/** A 5-point star base with casters — every office chair variant shares this. */
+function ChairBase({ metalness = 0.75 }: { metalness?: number }) {
+  const legCount = 5;
   return (
     <group>
-      <mesh position={[0, SCALE.CHAIR_HEIGHT - 0.05, 0]} castShadow>
-        <boxGeometry args={[0.34, 0.04, 0.32]} />
-        <meshStandardMaterial color={PALETTE.fabric} roughness={0.85} />
-      </mesh>
-      <mesh position={[0, SCALE.CHAIR_HEIGHT + 0.18, -0.15]} castShadow>
-        <boxGeometry args={[0.34, 0.4, 0.04]} />
-        <meshStandardMaterial color={PALETTE.fabric} roughness={0.85} />
-      </mesh>
+      {Array.from({ length: legCount }).map((_, i) => {
+        const angle = (i / legCount) * Math.PI * 2;
+        const reach = 0.21;
+        return (
+          <group key={i} rotation={[0, angle, 0]}>
+            <mesh position={[reach / 2, 0.035, 0]} castShadow>
+              <boxGeometry args={[reach, 0.025, 0.03]} />
+              <meshStandardMaterial color={PALETTE.metalDark} metalness={metalness} roughness={0.35} />
+            </mesh>
+            {/* caster wheel */}
+            <mesh position={[reach, 0.018, 0]}>
+              <sphereGeometry args={[0.018, 8, 8]} />
+              <meshStandardMaterial color="#14171a" roughness={0.5} />
+            </mesh>
+          </group>
+        );
+      })}
       <mesh position={[0, (SCALE.CHAIR_HEIGHT - 0.05) / 2, 0]}>
-        <cylinderGeometry args={[0.03, 0.04, SCALE.CHAIR_HEIGHT - 0.05, 8]} />
-        <meshStandardMaterial color={PALETTE.metalDark} metalness={0.7} roughness={0.35} />
+        <cylinderGeometry args={[0.03, 0.04, SCALE.CHAIR_HEIGHT - 0.05, 10]} />
+        <meshStandardMaterial color={PALETTE.metalDark} metalness={metalness} roughness={0.3} />
       </mesh>
-      <mesh position={[0, 0.02, 0]}>
-        <cylinderGeometry args={[0.18, 0.18, 0.02, 12]} />
-        <meshStandardMaterial color={PALETTE.metalDark} metalness={0.7} roughness={0.35} />
+    </group>
+  );
+}
+
+/**
+ * A real office chair: star base + casters, a central gas-lift column, a seat with a
+ * lumbar-curved backrest, and armrests — the closest a low-poly procedural chair gets to
+ * actually reading as furniture instead of three disconnected boxes. Three named variants
+ * share this same geometry/material recipe, just retinted (briefing 31/33).
+ */
+export function ChairFallback({ variant = "developer" }: { variant?: ChairVariant }) {
+  const fabric = CHAIR_FABRIC[variant];
+  const seatY = SCALE.CHAIR_HEIGHT - 0.05;
+  return (
+    <group>
+      <ChairBase />
+      {/* seat */}
+      <mesh position={[0, seatY, 0]} castShadow>
+        <boxGeometry args={[0.36, 0.045, 0.34]} />
+        <meshStandardMaterial color={fabric} roughness={0.8} />
       </mesh>
+      {/* backrest, tilted back slightly like a real seated-recline angle */}
+      <group position={[0, seatY + 0.02, -0.155]} rotation={[0.12, 0, 0]}>
+        <mesh position={[0, 0.2, 0]} castShadow>
+          <boxGeometry args={[0.34, 0.42, 0.045]} />
+          <meshStandardMaterial color={fabric} roughness={0.8} />
+        </mesh>
+        {/* lumbar bump */}
+        <mesh position={[0, 0.07, 0.03]} castShadow>
+          <boxGeometry args={[0.3, 0.1, 0.03]} />
+          <meshStandardMaterial color={fabric} roughness={0.8} />
+        </mesh>
+        {variant === "executive" && (
+          <mesh position={[0, 0.43, 0]} castShadow>
+            <boxGeometry args={[0.26, 0.14, 0.05]} />
+            <meshStandardMaterial color={fabric} roughness={0.8} />
+          </mesh>
+        )}
+      </group>
+      {/* armrests */}
+      {[-1, 1].map((side) => (
+        <group key={side} position={[side * 0.2, seatY, 0.02]}>
+          <mesh position={[0, 0.09, 0]} castShadow>
+            <boxGeometry args={[0.035, 0.18, 0.03]} />
+            <meshStandardMaterial color={PALETTE.metalDark} metalness={0.6} roughness={0.4} />
+          </mesh>
+          <mesh position={[0, 0.19, 0]} castShadow>
+            <boxGeometry args={[0.07, 0.025, 0.2]} />
+            <meshStandardMaterial color="#1c2026" roughness={0.6} />
+          </mesh>
+        </group>
+      ))}
     </group>
   );
 }
@@ -72,15 +135,59 @@ interface MonitorFallbackProps {
   color?: string;
   /** Base emissive brightness — the resource's status color. */
   intensity?: number;
-  /** Animate the screen (DEPLOYING pulse, ERROR flicker) without the parent needing its own useFrame/ref. */
+  /** Animate the screen (DEPLOYING pulse, ERROR flicker) without the parent needing its own useFrame/ref. Ignored when `paint` is given. */
   pulse?: "none" | "slow" | "fast";
+  /** Draws the live screen content (status dashboard, graph, progress bar...) onto a
+      CanvasTexture owned by this monitor. Redrawn only when `paintKey` changes (e.g. the
+      resource's status), never every frame — see briefing 25/74. */
+  paint?: (ctx: CanvasRenderingContext2D, width: number, height: number) => void;
+  paintKey?: string;
+  /** A wider 21:9-ish panel for a handful of "important" workstations (briefing 24). */
+  wide?: boolean;
+  /** Screen fully off — status STOPPED. */
+  off?: boolean;
 }
 
-export function MonitorFallback({ color = PALETTE.screen, intensity = 0.55, pulse = "none" }: MonitorFallbackProps) {
+const SCREEN_CANVAS_W = 256;
+const SCREEN_CANVAS_H = 132;
+
+export function MonitorFallback({ color = PALETTE.screen, intensity = 0.55, pulse = "none", paint, paintKey, wide = false, off = false }: MonitorFallbackProps) {
   const screenRef = useRef<THREE.Mesh>(null);
+  const materialRef = useRef<THREE.MeshBasicMaterial>(null);
+  const textureRef = useRef<THREE.CanvasTexture | null>(null);
+  const screenWidth = wide ? 0.46 : 0.28;
+  const hasPaint = Boolean(paint);
+  const live = hasPaint && !off;
+
+  // Screen texture created exactly once per monitor, attached to the (always-rendered)
+  // material's ref from inside an effect — never read a ref during render (see
+  // control-room-scene.tsx's BigScreen for the same pattern/reasoning).
+  useEffect(() => {
+    if (!hasPaint) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = SCREEN_CANVAS_W;
+    canvas.height = SCREEN_CANVAS_H;
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    textureRef.current = texture;
+    if (materialRef.current) {
+      materialRef.current.map = texture;
+      materialRef.current.needsUpdate = true;
+    }
+    return () => texture.dispose();
+  }, [hasPaint]);
+
+  useEffect(() => {
+    if (!paint || !textureRef.current) return;
+    const canvas = textureRef.current.image as HTMLCanvasElement;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    paint(ctx, canvas.width, canvas.height);
+    textureRef.current.needsUpdate = true;
+  }, [paint, paintKey]);
 
   useFrame(({ clock }) => {
-    if (pulse === "none") return;
+    if (pulse === "none" || live || off) return;
     const material = screenRef.current?.material as THREE.MeshStandardMaterial | undefined;
     if (!material) return;
     const speed = pulse === "fast" ? 5 : 1.2;
@@ -91,19 +198,38 @@ export function MonitorFallback({ color = PALETTE.screen, intensity = 0.55, puls
     <group position={[0, SCALE.DESK_HEIGHT, -0.12]}>
       <mesh position={[0, 0.02, 0]}>
         <boxGeometry args={[0.03, 0.16, 0.06]} />
-        <meshStandardMaterial color={PALETTE.metalDark} metalness={0.5} roughness={0.5} />
+        <meshStandardMaterial color={PALETTE.metalDark} metalness={0.6} roughness={0.4} />
       </mesh>
       <mesh position={[0, 0.02, -0.03]}>
-        <boxGeometry args={[0.14, 0.02, 0.09]} />
-        <meshStandardMaterial color={PALETTE.metalDark} metalness={0.5} roughness={0.5} />
+        <boxGeometry args={[Math.max(screenWidth * 0.5, 0.14), 0.02, 0.09]} />
+        <meshStandardMaterial color={PALETTE.metalDark} metalness={0.6} roughness={0.4} />
       </mesh>
+      {/* bezel */}
       <mesh position={[0, 0.2, -0.04]}>
-        <boxGeometry args={[0.32, 0.2, 0.015]} />
-        <meshStandardMaterial color="#0d1015" roughness={0.6} />
+        <boxGeometry args={[screenWidth + 0.02, 0.2, 0.015]} />
+        <meshStandardMaterial color="#0d1015" roughness={0.55} metalness={0.2} />
       </mesh>
-      <mesh ref={screenRef} position={[0, 0.2, -0.031]}>
-        <planeGeometry args={[0.28, 0.16]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={intensity} />
+      {/* screen */}
+      {off ? (
+        <mesh position={[0, 0.2, -0.031]}>
+          <planeGeometry args={[screenWidth - 0.015, 0.145]} />
+          <meshStandardMaterial color="#05070a" roughness={0.3} metalness={0.1} />
+        </mesh>
+      ) : live ? (
+        <mesh ref={screenRef} position={[0, 0.2, -0.031]}>
+          <planeGeometry args={[screenWidth - 0.015, 0.145]} />
+          <meshBasicMaterial ref={materialRef} toneMapped={false} />
+        </mesh>
+      ) : (
+        <mesh ref={screenRef} position={[0, 0.2, -0.031]}>
+          <planeGeometry args={[screenWidth - 0.015, 0.145]} />
+          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={intensity} />
+        </mesh>
+      )}
+      {/* small bottom-bezel status LED */}
+      <mesh position={[screenWidth / 2 - 0.02, 0.105, -0.032]}>
+        <circleGeometry args={[0.006, 8]} />
+        <meshStandardMaterial color={off ? "#2a2f36" : color} emissive={off ? "#000000" : color} emissiveIntensity={off ? 0 : 0.8} />
       </mesh>
     </group>
   );

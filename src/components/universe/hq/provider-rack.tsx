@@ -5,6 +5,7 @@ import { Html } from "@react-three/drei";
 import { WorldAsset } from "./assets/world-asset";
 import { ASSET_KEYS } from "./assets/asset-keys";
 import { ServerRackFallback } from "./assets/procedural-furniture";
+import { PALETTE } from "./palette";
 import type { UniverseProviderSummary } from "@/types/domain";
 
 const HEALTH_COLOR: Record<UniverseProviderSummary["health"], string> = {
@@ -51,7 +52,7 @@ export const ProviderRack = memo(function ProviderRack({ provider, position, sel
       {selected && (
         <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <ringGeometry args={[0.55, 0.65, 24]} />
-          <meshBasicMaterial color="#38bdf8" transparent opacity={0.8} />
+          <meshBasicMaterial color={PALETTE.brand} transparent opacity={0.8} />
         </mesh>
       )}
 
