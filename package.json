@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --env-file=.env --import tsx --test --test-concurrency=1 tests/*.test.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.1",
@@ -40,6 +41,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.6",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }

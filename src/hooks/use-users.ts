@@ -10,6 +10,8 @@ export interface UserRow {
   role: Role;
   active: boolean;
   createdAt: string;
+  extraPermissions: string[];
+  projectIds: string[];
 }
 
 export function useUsers() {
@@ -23,7 +25,7 @@ export function useUsers() {
 export function useCreateUser() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { email: string; password: string; role: Role }) =>
+    mutationFn: (input: { email: string; password: string; role: Role; projectIds?: string[]; extraPermissions?: string[] }) =>
       apiFetch("/api/users", { method: "POST", body: JSON.stringify(input) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
   });
@@ -32,7 +34,7 @@ export function useCreateUser() {
 export function useUpdateUser() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...input }: { id: string; role?: Role; active?: boolean; password?: string }) =>
+    mutationFn: ({ id, ...input }: { id: string; role?: Role; active?: boolean; password?: string; projectIds?: string[]; extraPermissions?: string[] }) =>
       apiFetch(`/api/users/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
   });

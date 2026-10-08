@@ -18,6 +18,7 @@ export interface SessionUser {
   id: string;
   email: string;
   role: Role;
+  extraPermissions: string[];
 }
 
 function hashToken(token: string): string {
@@ -86,7 +87,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     return null;
   }
 
-  return { id: session.user.id, email: session.user.email, role: session.user.role };
+  return { id: session.user.id, email: session.user.email, role: session.user.role, extraPermissions: session.user.extraPermissions };
 }
 
 /** Throws UnauthorizedError instead of returning null — for route handlers. */

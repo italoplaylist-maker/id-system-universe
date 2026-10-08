@@ -1,11 +1,13 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import type { Role } from "@/lib/roles";
 
 export interface CurrentUser {
   id: string;
   email: string;
-  role: "ADMIN" | "OPERATOR" | "VIEWER";
+  role: Role;
+  extraPermissions: string[];
 }
 
 async function fetchSession(): Promise<CurrentUser | null> {

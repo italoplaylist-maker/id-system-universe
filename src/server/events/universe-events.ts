@@ -1,4 +1,7 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { canUser, type PermissionSubject } from "@/server/auth/rbac";
+import type { ProjectScope } from "@/server/auth/project-access";
 
 export type UniverseEventType =
   | "REDEPLOY_REQUESTED"
@@ -16,7 +19,15 @@ export type UniverseEventType =
   | "SYNC_COMPLETED"
   | "RESOURCE_ASSIGNED"
   | "RESOURCE_UNASSIGNED"
-  | "PROJECT_AUTO_CREATED";
+  | "PROJECT_AUTO_CREATED"
+  | "GITHUB_CONNECTED"
+  | "GITHUB_DISCONNECTED"
+  | "GITHUB_DEPLOY_QUEUED"
+  | "BILLING_DUE_TODAY"
+  | "BILLING_OVERDUE"
+  | "BILLING_CLIENT_WITHOUT_WHATSAPP"
+  | "BILLING_RECURRENCE_ERROR"
+  | "WHATSAPP_FAILED";
 
 export interface RecordUniverseEventInput {
   type: UniverseEventType;
@@ -26,6 +37,8 @@ export interface RecordUniverseEventInput {
   providerId?: string;
   projectId?: string | null;
   projectName?: string | null;
+  /** Só quem tem esta permissão enxerga o evento (ex.: "billing:view"). */
+  permission?: string;
 }
 
 export async function recordUniverseEvent(input: RecordUniverseEventInput): Promise<void> {
@@ -38,13 +51,30 @@ export async function recordUniverseEvent(input: RecordUniverseEventInput): Prom
       providerId: input.providerId,
       projectId: input.projectId,
       projectName: input.projectName,
+      permission: input.permission,
     },
   });
 }
 
-export async function listRecentUniverseEvents(limit = 50, projectId?: string) {
+export async function listRecentUniverseEvents(
+  limit = 50,
+  options: { projectId?: string; scope?: ProjectScope; user?: PermissionSubject } = {},
+) {
+  const { projectId, scope, user } = options;
+  const projectFilter: Prisma.UniverseEventWhereInput = projectId
+    ? { projectId }
+    : scope && !scope.all
+      ? { projectId: { in: scope.projectIds } }
+      : {};
+  // Eventos protegidos por permissão (financeiro) nunca vazam para quem não a possui.
+  const permissionFilter: Prisma.UniverseEventWhereInput = {
+    OR: [
+      { permission: null },
+      ...(user && canUser(user, "billing:view") ? [{ permission: "billing:view" }] : []),
+    ],
+  };
   return prisma.universeEvent.findMany({
-    where: projectId ? { projectId } : undefined,
+    where: { AND: [projectFilter, permissionFilter] },
     orderBy: { createdAt: "desc" },
     take: limit,
   });

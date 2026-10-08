@@ -12,7 +12,7 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
     const { id } = await params;
     const meta = await getRequestMeta();
     const body = await request.json();
-    const updated = await updateUser(id, body, { userId: user.id, ip: meta.ip, userAgent: meta.userAgent });
+    const updated = await updateUser(id, body, { userId: user.id, role: user.role, ip: meta.ip, userAgent: meta.userAgent });
     return NextResponse.json({ user: updated });
   } catch (error) {
     return apiError(error);

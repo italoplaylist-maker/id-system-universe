@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSessionUser, getRequestMeta } from "@/server/auth/session";
+import { getProjectScope } from "@/server/auth/project-access";
+import { ForbiddenError } from "@/lib/errors";
 import { requirePermission, apiError } from "@/server/http/api-helpers";
 import { deleteProvider, getProviderRowOrThrow, listProviders, updateProvider } from "@/server/providers/provider-service";
 
@@ -11,8 +13,9 @@ export async function GET(_request: Request, { params }: { params: Params }) {
     requirePermission(user, "provider:read");
     const { id } = await params;
     await getProviderRowOrThrow(id);
-    const providers = await listProviders();
+    const providers = await listProviders(await getProjectScope(user));
     const provider = providers.find((p) => p.id === id);
+    if (!provider) throw new ForbiddenError("Você não tem acesso a este servidor.");
     return NextResponse.json({ provider });
   } catch (error) {
     return apiError(error);

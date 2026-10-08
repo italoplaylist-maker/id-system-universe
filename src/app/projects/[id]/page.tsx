@@ -17,9 +17,19 @@ import { ProjectHealthBadge } from "@/components/ui/project-health-badge";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ApiClientError } from "@/lib/api-client";
+import { useSession } from "@/hooks/use-session";
+import { useBillingSummary, useCharges } from "@/hooks/use-billing";
+import { useDeploymentRuns, useResourceRepository } from "@/hooks/use-github-repos";
+import { canUser } from "@/server/auth/rbac";
+import { formatBRL } from "@/lib/money";
+import { ChargesTable } from "@/components/billing/charges-table";
+import { ChargeDrawer } from "@/components/billing/charge-drawer";
+import { ChargeFormDialog } from "@/components/billing/charge-form-dialog";
 import { cn } from "@/lib/cn";
 
-type Tab = "overview" | "resources" | "activity";
+type Tab = "overview" | "resources" | "github" | "billing" | "activity";
+
+const TAB_LABEL: Record<Tab, string> = { overview: "Visão geral", resources: "Resources", github: "GitHub", billing: "Financeiro", activity: "Atividade" };
 
 function EditProjectDialog({ project }: { project: { id: string; name: string; description: string | null } }) {
   const [open, setOpen] = useState(false);
@@ -57,6 +67,52 @@ function EditProjectDialog({ project }: { project: { id: string; name: string; d
   );
 }
 
+function ProjectGitHubRow({ resource }: { resource: { id: string; name: string; resourceType: string } }) {
+  const selectApplication = useUiStore((s) => s.selectApplication);
+  const requestTab = useUiStore((s) => s.requestTab);
+  const deployable = resource.resourceType === "APPLICATION";
+  const { data: repository } = useResourceRepository(deployable ? resource.id : null);
+  const { data: runs } = useDeploymentRuns(deployable ? resource.id : null);
+  const production = runs?.production;
+
+  return (
+    <button
+      onClick={() => {
+        selectApplication(resource.id);
+        requestTab("github");
+      }}
+      disabled={!deployable}
+      className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left text-sm hover:bg-surface-raised disabled:cursor-default disabled:opacity-60"
+    >
+      <div className="min-w-0">
+        <p className="font-medium">{resource.name}</p>
+        <p className="truncate text-xs text-muted">
+          {!deployable ? "Sem deploy via Git" : repository ? `${repository.repositoryFullName} · ${repository.branch} · Auto Deploy ${repository.autoDeploy ? "ativo" : "desligado"}` : "Sem repositório vinculado"}
+        </p>
+      </div>
+      <p className="shrink-0 text-xs text-muted">{production?.commitSha ? <>Em produção: <span className="font-mono">{production.commitSha.slice(0, 7)}</span></> : ""}</p>
+    </button>
+  );
+}
+
+function ProjectBilling({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+  const { data: summary } = useBillingSummary({ projectId });
+  const { data: charges } = useCharges({ projectId });
+  const [open, setOpen] = useState<string | null>(null);
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted">
+          {summary ? `A receber ${formatBRL(summary.toReceiveCents)} · Vencido ${formatBRL(summary.overdueCents)}` : "Carregando…"}
+        </p>
+        {canManage && <ChargeFormDialog defaultProjectId={projectId} />}
+      </div>
+      <ChargesTable items={charges?.items ?? []} onOpen={setOpen} emptyText="Nenhuma cobrança vinculada a este projeto." />
+      <ChargeDrawer chargeId={open} onClose={() => setOpen(null)} />
+    </div>
+  );
+}
+
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -67,6 +123,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const { data: activity } = useActivity(30, id);
   const deleteProject = useDeleteProject();
   const selectApplication = useUiStore((s) => s.selectApplication);
+  const { data: user } = useSession();
+  const canSeeBilling = user ? canUser(user, "billing:view") : false;
+  const canManageBilling = user ? canUser(user, "billing:manage") : false;
+  const tabs: Tab[] = canSeeBilling ? ["overview", "resources", "github", "billing", "activity"] : ["overview", "resources", "github", "activity"];
 
   if (isLoading || !project) {
     return <div className="min-h-screen bg-background p-6 text-sm text-muted">Loading…</div>;
@@ -92,13 +152,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       </header>
 
       <div className="flex border-b border-border px-6">
-        {(["overview", "resources", "activity"] as const).map((t) => (
+        {tabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={cn("border-b-2 px-3 py-2 text-sm capitalize", tab === t ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground")}
+            className={cn("border-b-2 px-3 py-2 text-sm", tab === t ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground")}
           >
-            {t}
+            {TAB_LABEL[t]}
           </button>
         ))}
       </div>
@@ -142,6 +202,17 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             {project.resources.length === 0 && <p className="p-4 text-sm text-muted">No resources assigned yet.</p>}
           </Card>
         )}
+
+        {tab === "github" && (
+          <Card className="divide-y divide-border">
+            {project.resources.map((resource) => (
+              <ProjectGitHubRow key={resource.id} resource={resource} />
+            ))}
+            {project.resources.length === 0 && <p className="p-4 text-sm text-muted">Nenhum resource neste projeto.</p>}
+          </Card>
+        )}
+
+        {tab === "billing" && canSeeBilling && <ProjectBilling projectId={project.id} canManage={canManageBilling} />}
 
         {tab === "activity" && (
           <Card className="divide-y divide-border">

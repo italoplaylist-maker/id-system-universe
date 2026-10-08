@@ -27,6 +27,8 @@ export interface CommandCenterStats {
   deployingCount: number;
   incidentCount: number;
   employeeCount: number;
+  /** Só contagens agregadas, e só para quem tem permissão financeira — nunca valores ou nomes de clientes. */
+  billing?: { pending: number; overdue: number; dueToday: number } | null;
 }
 
 const CANVAS_W = 1024;
@@ -75,6 +77,28 @@ function paintScreen(ctx: CanvasRenderingContext2D, stats: CommandCenterStats) {
   ctx.fillStyle = "#e6e9f0";
   ctx.font = "700 20px ui-sans-serif, system-ui";
   ctx.fillText(ok ? "OPERAÇÃO NORMAL" : "ATENÇÃO NECESSÁRIA", dotX + 18, 347);
+
+  if (stats.billing) {
+    const { pending, overdue, dueToday } = stats.billing;
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#8890a3";
+    ctx.font = "600 14px ui-sans-serif, system-ui";
+    ctx.fillText("COBRANÇAS", CANVAS_W / 2 - 250, 408);
+    const items: { label: string; value: number; color: string }[] = [
+      { label: "PENDENTES", value: pending, color: "#e6e9f0" },
+      { label: "VENCEM HOJE", value: dueToday, color: dueToday > 0 ? "#38bdf8" : "#e6e9f0" },
+      { label: "VENCIDAS", value: overdue, color: overdue > 0 ? "#f87171" : "#e6e9f0" },
+    ];
+    items.forEach((item, i) => {
+      const x = CANVAS_W / 2 - 100 + i * 170;
+      ctx.fillStyle = item.color;
+      ctx.font = "700 26px ui-sans-serif, system-ui";
+      ctx.fillText(String(item.value), x, 412);
+      ctx.fillStyle = "#8890a3";
+      ctx.font = "600 12px ui-sans-serif, system-ui";
+      ctx.fillText(item.label, x, 432);
+    });
+  }
 }
 
 /**
@@ -105,7 +129,7 @@ function BigScreen({ width, stats }: { width: number; stats: CommandCenterStats 
     return () => texture.dispose();
   }, []);
 
-  const statsKey = `${stats.projectCount}|${stats.resourceCount}|${stats.onlineCount}|${stats.deployingCount}|${stats.incidentCount}|${stats.employeeCount}`;
+  const statsKey = `${stats.projectCount}|${stats.resourceCount}|${stats.onlineCount}|${stats.deployingCount}|${stats.incidentCount}|${stats.employeeCount}|${stats.billing ? `${stats.billing.pending},${stats.billing.overdue},${stats.billing.dueToday}` : "-"}`;
   useEffect(() => {
     const texture = textureRef.current;
     if (!texture) return;

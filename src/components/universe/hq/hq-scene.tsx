@@ -18,6 +18,9 @@ import { ExteriorScene } from "./environment/exterior-scene";
 import { RainEffect } from "./environment/rain-effect";
 import type { EnvironmentState } from "./environment/environment-state";
 import { useWeather } from "@/hooks/use-weather";
+import { useSession } from "@/hooks/use-session";
+import { useBillingCounts } from "@/hooks/use-billing";
+import { canUser } from "@/server/auth/rbac";
 import type { UniverseApplication, UniverseProject, UniverseProviderSummary } from "@/types/domain";
 
 interface HqSceneProps {
@@ -115,6 +118,10 @@ export function HqScene({
     return null;
   }, [cameraMode, focusId, layout.rooms, applications]);
 
+  const { data: sessionUser } = useSession();
+  const canSeeBilling = sessionUser ? canUser(sessionUser, "billing:view") : false;
+  const { data: billingCounts } = useBillingCounts(canSeeBilling);
+
   const stats: CommandCenterStats = useMemo(() => {
     const deployingCount = applications.filter((a) => a.status === "DEPLOYING" || a.pendingOperation !== null).length;
     // Real headcount derived from the same rules that decide who's actually staffing each
@@ -135,8 +142,9 @@ export function HqScene({
       deployingCount,
       incidentCount: applications.filter((a) => a.status === "ERROR").length,
       employeeCount,
+      billing: canSeeBilling ? (billingCounts ?? null) : null,
     };
-  }, [applications, activeProjects, layout.rooms, layout.serverRacks, resourcesByRoom]);
+  }, [applications, activeProjects, layout.rooms, layout.serverRacks, resourcesByRoom, canSeeBilling, billingCounts]);
 
   // Ground-level atmosphere (fog anchor, ground plane, contact shadows, lights) stays
   // anchored at the building's XZ center but at actual ground height — only the camera's

@@ -85,9 +85,16 @@ success from an HTTP 200.
 - Passwords: Argon2id (`src/server/auth/password.ts`).
 - Sessions: random token in an `httpOnly`, `sameSite=lax` cookie; only its SHA-256 hash is stored (`src/server/auth/session.ts`).
 - SSRF: provider base URLs are validated (protocol, no embedded credentials, no cloud metadata endpoints) before being stored or called (`src/server/security/ssrf.ts`).
-- RBAC: `ADMIN` / `OPERATOR` / `VIEWER` permission table in `src/server/auth/rbac.ts` — every route checks `can(role, permission)`, nothing branches on `role === "ADMIN"` directly. Only `ADMIN` accounts can currently be created (via bootstrap); creating `OPERATOR`/`VIEWER` users is a natural next step once user management ships.
+- RBAC: `SUPERADMIN` / `ADMIN` / `OPERATOR` / `VIEWER` permission table in `src/server/auth/rbac.ts` — every route checks `canUser(user, permission)`; nothing branches on a role name directly. Which Projects a user sees is separate (`ProjectAccess`, enforced server-side in `src/server/auth/project-access.ts`; no access → 403).
 - Every administrative action writes an `AuditEvent` (never including tokens/secrets) and a `UniverseEvent` for the activity feed.
 - Concurrent conflicting actions on the same application are rejected with a clear error rather than racing.
+
+## GitHub App, Auto Deploy and billing
+
+- **GitHub App** (Settings → Integrações): App ID, slug, private key and webhook secret are stored encrypted in the database (or via `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_WEBHOOK_SECRET`). In the App's settings point the **Webhook URL** to `https://<universe>/api/webhooks/github` (events: Push, Pull request, Installation, Installation repositories) and the **Setup URL** to `https://<universe>/api/integrations/github/callback`. `GITHUB_API_URL` / `GITHUB_WEB_URL` override the defaults (GitHub Enterprise).
+- Webhooks are verified by HMAC signature, deduplicated by delivery id and by repo+branch+commit, and queued per Resource (`src/server/deployments/deployment-queue.ts`). GitHub never calls Coolify directly.
+- **WhatsApp** (Settings → Integrações): Evolution API (`WHATSAPP_API_URL`, `WHATSAPP_API_KEY`, `WHATSAPP_INSTANCE` as optional env fallback). Billing reminders run from a server-side scheduler started in `src/instrumentation.ts`.
+- **Tests**: `npm test` runs the integration suite against a dedicated database — set `TEST_DATABASE_URL` (its name must contain `test`) and apply migrations to it first (`DATABASE_URL=$TEST_DATABASE_URL npx prisma migrate deploy`).
 
 ## Dev/build
 

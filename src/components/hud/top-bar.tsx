@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, Settings, LogOut, LayoutGrid, Box, RefreshCw, Building2 } from "lucide-react";
+import { Search, Settings, LogOut, LayoutGrid, Box, RefreshCw, Building2, Receipt } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/hooks/use-session";
 import { useApplications } from "@/hooks/use-applications";
@@ -10,6 +10,7 @@ import { useSyncAll } from "@/hooks/use-applications";
 import { useUiStore } from "@/store/ui-store";
 import { Button } from "@/components/ui/button";
 import { ProjectManagerDrawer } from "@/components/projects/project-manager-drawer";
+import { canUser } from "@/server/auth/rbac";
 
 function StatusPill({ label, value, dotClassName }: { label: string; value: number; dotClassName: string }) {
   return (
@@ -66,9 +67,14 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-2">
-        <Link href="/projects" className="rounded-md p-2 text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Projects">
+        <Link href="/projects" className="rounded-md p-2 text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Projetos">
           <Building2 className="h-4 w-4" />
         </Link>
+        {user && canUser(user, "billing:view") && (
+          <Link href="/billing" className="rounded-md p-2 text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Central de Cobranças" title="Central de Cobranças">
+            <Receipt className="h-4 w-4" />
+          </Link>
+        )}
 
         <button
           onClick={() => setCommandPaletteOpen(true)}
@@ -113,7 +119,7 @@ export function TopBar() {
           </button>
         </div>
 
-        <Link href="/settings/infrastructure" className="rounded-md p-2 text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Settings">
+        <Link href="/settings/integrations" className="rounded-md p-2 text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Configurações">
           <Settings className="h-4 w-4" />
         </Link>
 

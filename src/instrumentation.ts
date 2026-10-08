@@ -27,4 +27,18 @@ export async function register() {
   // Fire once shortly after boot (give the DB connection a moment), then on the interval.
   setTimeout(runSync, 5_000);
   setInterval(runSync, SYNC_INTERVAL_MS);
+
+  // Tudo abaixo roda NO SERVIDOR, sem depender de navegador aberto. Cada tick é
+  // idempotente (claims atômicos no banco), então reinícios e réplicas não duplicam trabalho.
+  const { runDeploymentQueueTick } = await import("@/server/deployments/deployment-queue");
+  const { runBillingTick } = await import("@/server/billing/scheduler");
+  const { syncAllInstallations } = await import("@/server/github/github-service");
+
+  const safely = (name: string, task: () => Promise<unknown>) => () => {
+    task().catch((error) => logger.error(`${name}_failed`, { message: error instanceof Error ? error.message : String(error) }));
+  };
+  setInterval(safely("deployment_queue_tick", runDeploymentQueueTick), 15_000);
+  setInterval(safely("billing_tick", () => runBillingTick()), 60_000);
+  setTimeout(safely("billing_tick", () => runBillingTick()), 10_000);
+  setInterval(safely("github_repo_sync", syncAllInstallations), 30 * 60_000);
 }

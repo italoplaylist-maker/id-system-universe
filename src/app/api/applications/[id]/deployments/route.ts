@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSessionUser } from "@/server/auth/session";
+import { assertApplicationAccess } from "@/server/auth/project-access";
 import { requirePermission, apiError } from "@/server/http/api-helpers";
 import { listApplicationDeployments } from "@/server/applications/application-service";
 
@@ -10,6 +11,7 @@ export async function GET(_request: Request, { params }: { params: Params }) {
     const user = await requireSessionUser();
     requirePermission(user, "application:read");
     const { id } = await params;
+    await assertApplicationAccess(user, id);
     const deployments = await listApplicationDeployments(id);
     return NextResponse.json({ deployments });
   } catch (error) {

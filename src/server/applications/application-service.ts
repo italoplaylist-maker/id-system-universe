@@ -8,7 +8,9 @@ import { TtlCache } from "@/server/cache/cache";
 import { NotFoundError, ProviderError, ValidationError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { toUniverseApplication, type ApplicationWithRelations } from "@/server/applications/application-mapper";
+import { finalizeRunsForDeployment, recordManualRun } from "@/server/deployments/deployment-runs";
 import { linkUnassignedResourcesFromProviderProjects } from "@/server/projects/project-service";
+import { applicationWhere, type ProjectScope } from "@/server/auth/project-access";
 import type { UniverseApplication, UniverseApplicationStatus } from "@/types/domain";
 
 type ApplicationWithProvider = ApplicationWithRelations;
@@ -21,7 +23,8 @@ const statusCache = new TtlCache<UniverseApplicationStatus>(STATUS_CACHE_TTL_MS)
 const DEPLOYMENT_TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface ActorContext {
-  userId: string;
+  /** Ausente quando a ação vem do sistema (ex.: Auto Deploy do GitHub). */
+  userId?: string;
   ip?: string;
   userAgent?: string;
 }
@@ -129,11 +132,14 @@ export interface ListApplicationsFilter {
   unassignedOnly?: boolean;
   query?: string;
   status?: UniverseApplicationStatus;
+  /** Restringe aos Projects que o usuário pode ver — sempre informe em rotas de usuário. */
+  scope?: ProjectScope;
 }
 
 export async function listApplications(filter: ListApplicationsFilter = {}): Promise<UniverseApplication[]> {
   const rows = await prisma.application.findMany({
     where: {
+      AND: filter.scope ? [applicationWhere(filter.scope)] : [],
       providerId: filter.providerId,
       projectId: filter.unassignedOnly ? null : filter.projectId,
       ...(filter.query
@@ -196,6 +202,7 @@ async function reconcilePendingDeployment(row: ApplicationWithProvider): Promise
         include: { provider: true, project: true },
       });
 
+      await finalizeRunsForDeployment(row.pendingDeploymentExternalId, deployment);
       await recordAuditEvent({
         applicationId: row.id,
         providerId: row.providerId,
@@ -260,6 +267,13 @@ async function forceResyncAfterTimeout(row: ApplicationWithProvider): Promise<Ap
       include: { provider: true, project: true },
     });
   }
+}
+
+/** Como getApplicationDetail, mas ignora o cache curto de status — usado pela fila de deploys, que precisa do estado real agora. */
+export async function reconcileApplicationNow(applicationId: string): Promise<UniverseApplication> {
+  const row = await getRowOrThrow(applicationId);
+  if (row.pendingDeploymentExternalId) statusCache.invalidate(`deployment:${row.pendingDeploymentExternalId}`);
+  return toUniverseApplication(await reconcilePendingDeployment(row));
 }
 
 export async function getApplicationDetail(applicationId: string): Promise<UniverseApplication> {
@@ -346,7 +360,7 @@ export async function restartApplication(applicationId: string, actor: ActorCont
   return runImmediateAction(await getRowOrThrow(applicationId), "RESTART", actor);
 }
 
-export async function redeployApplication(applicationId: string, force: boolean, actor: ActorContext): Promise<UniverseApplication> {
+export async function redeployApplication(applicationId: string, force: boolean, actor: ActorContext, options: { runId?: string } = {}): Promise<UniverseApplication> {
   const row = await getRowOrThrow(applicationId);
   // Only a git-deployed Application has a build/deploy history — a Service
   // or Database is "redeployed" by restarting it (see restartApplication).
@@ -366,6 +380,20 @@ export async function redeployApplication(applicationId: string, force: boolean,
       data: { status: "DEPLOYING", pendingDeploymentExternalId: result.deploymentExternalId },
       include: { provider: true, project: true },
     });
+
+    // Todo deploy (manual ou Auto Deploy) deixa um DeploymentRun — é dele que sai "versão em produção".
+    if (options.runId) {
+      await prisma.deploymentRun.update({ where: { id: options.runId }, data: { coolifyDeploymentId: result.deploymentExternalId } });
+    } else {
+      await recordManualRun({
+        applicationId: row.id,
+        projectId: row.projectId,
+        repository: row.repository,
+        branch: row.branch,
+        coolifyDeploymentId: result.deploymentExternalId,
+        userId: actor.userId,
+      });
+    }
 
     await recordAuditEvent({ userId: actor.userId, applicationId: row.id, providerId: row.providerId, projectId: row.projectId, action: ACTION_TO_AUDIT[operation], status: "RUNNING", metadata: { deploymentId: result.deploymentExternalId }, ipAddress: actor.ip, userAgent: actor.userAgent });
     await recordUniverseEvent({ type: "DEPLOYMENT_STARTED", message: `${eventLabel(row)} deployment started.`, applicationId: row.id, applicationName: row.name, providerId: row.providerId, projectId: row.projectId, projectName: row.project?.name });

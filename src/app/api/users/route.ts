@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     requirePermission(user, "user:manage");
     const meta = await getRequestMeta();
     const body = await request.json();
-    const created = await createUser(body, { userId: user.id, ip: meta.ip, userAgent: meta.userAgent });
+    const created = await createUser(body, { userId: user.id, role: user.role, ip: meta.ip, userAgent: meta.userAgent });
     return NextResponse.json({ user: created }, { status: 201 });
   } catch (error) {
     return apiError(error);

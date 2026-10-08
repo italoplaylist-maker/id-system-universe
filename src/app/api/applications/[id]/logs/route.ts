@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSessionUser } from "@/server/auth/session";
+import { assertApplicationAccess } from "@/server/auth/project-access";
 import { requirePermission, apiError } from "@/server/http/api-helpers";
 import { getApplicationLogs } from "@/server/applications/application-service";
 import { consumeRateLimit } from "@/server/security/rate-limit";
@@ -12,6 +13,7 @@ export async function GET(request: Request, { params }: { params: Params }) {
     requirePermission(user, "application:logs");
     const { id } = await params;
 
+    await assertApplicationAccess(user, id);
     // Logs polling is the highest-frequency read in the app (fast poll while
     // the panel is open) — keep it bounded per user regardless.
     consumeRateLimit(`logs:${user.id}:${id}`, 30, 60_000);

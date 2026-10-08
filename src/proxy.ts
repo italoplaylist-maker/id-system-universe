@@ -11,7 +11,7 @@ import { SESSION_COOKIE } from "@/server/auth/session";
  * an unauthenticated visitor doesn't see a flash of protected UI.
  */
 const PUBLIC_PATHS = ["/login", "/onboarding"];
-const PUBLIC_API_PREFIXES = ["/api/health", "/api/auth"];
+const PUBLIC_API_PREFIXES = ["/api/health", "/api/auth", "/api/webhooks"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

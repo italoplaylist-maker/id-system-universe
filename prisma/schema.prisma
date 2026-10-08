@@ -12,6 +12,8 @@ datasource db {
 }
 
 enum Role {
+  /// Acesso global total (inclui financeiro e integrações). ADMIN segue como antes.
+  SUPERADMIN
   ADMIN
   OPERATOR
   VIEWER
@@ -65,9 +67,27 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  sessions    Session[]
-  auditEvents AuditEvent[]
-  preference  UserPreference?
+  /// Permissões extras concedidas além do role (ex.: BILLING_VIEW, BILLING_MANAGE).
+  extraPermissions String[] @default([])
+
+  sessions      Session[]
+  auditEvents   AuditEvent[]
+  preference    UserPreference?
+  projectAccess ProjectAccess[]
+}
+
+/// Quais Projects um usuário OPERATOR/VIEWER enxerga. SUPERADMIN e ADMIN têm
+/// acesso global e ignoram esta tabela.
+model ProjectAccess {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, projectId])
+  @@index([projectId])
 }
 
 model Session {
@@ -112,6 +132,11 @@ model Project {
   resources      Application[]
   auditEvents    AuditEvent[]
   universeEvents UniverseEvent[]
+  access         ProjectAccess[]
+  clientLinks    ClientProject[]
+  charges        Charge[]
+  recurrences    BillingRecurrence[]
+  deploymentRuns DeploymentRun[]
 }
 
 /// Uma instância/conta administrada (Coolify hoje; outros providers futuramente).
@@ -155,7 +180,7 @@ model Application {
   /// Environment UUID it lives in) — null for a provider without this
   /// concept. Used only to auto-link a freshly-synced resource to the
   /// Project matching its provider-side grouping; never shown in the UI.
-  groupExternalId              String?
+  groupExternalId             String?
   name                        String
   description                 String?
   status                      ApplicationStatus      @default(UNKNOWN)
@@ -173,6 +198,8 @@ model Application {
   deployments    DeploymentCache[]
   auditEvents    AuditEvent[]
   universeEvents UniverseEvent[]
+  repositoryLink ResourceRepository?
+  deploymentRuns DeploymentRun[]
 
   @@unique([providerId, externalId])
   @@index([providerId])
@@ -210,6 +237,9 @@ model AuditEvent {
   action        String
   status        String
   metadata      Json?
+  /// Entidade não-infra afetada (ex.: "Charge", "Client", "GitHubInstallation").
+  entityType    String?
+  entityId      String?
   ipAddress     String?
   userAgent     String?
   createdAt     DateTime                @default(now())
@@ -217,6 +247,7 @@ model AuditEvent {
   @@index([createdAt])
   @@index([applicationId])
   @@index([projectId])
+  @@index([entityType, entityId])
 }
 
 /// Feed de eventos do Universe (barra inferior + Activity Center).
@@ -232,6 +263,8 @@ model UniverseEvent {
   projectName     String?
   type            String
   message         String
+  /// Quando preenchido, só quem possui esta permissão vê o evento (ex.: "billing:view").
+  permission      String?
   createdAt       DateTime                @default(now())
 
   @@index([createdAt])
@@ -241,4 +274,385 @@ model UniverseEvent {
 model SystemSetting {
   key   String @id
   value String
+}
+
+// ---------------------------------------------------------------------------
+// Integrações (GitHub App, WhatsApp). Segredos SEMPRE criptografados e só no
+// backend — nunca retornados ao navegador.
+// ---------------------------------------------------------------------------
+
+model IntegrationConfig {
+  key       String   @id
+  value     String
+  secret    Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+}
+
+enum GitHubInstallationStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+model GitHubInstallation {
+  id                  String                   @id @default(cuid())
+  installationId      String                   @unique
+  accountLogin        String
+  accountType         String
+  accountId           String?
+  repositorySelection String?
+  status              GitHubInstallationStatus @default(ACTIVE)
+  lastSyncedAt        DateTime?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+
+  repositories GitHubRepository[]
+}
+
+model GitHubRepository {
+  id             String             @id @default(cuid())
+  installationId String
+  installation   GitHubInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  externalId     String
+  fullName       String
+  ownerLogin     String
+  name           String
+  defaultBranch  String?
+  isPrivate      Boolean            @default(false)
+  archived       Boolean            @default(false)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  resourceLinks ResourceRepository[]
+
+  @@unique([installationId, externalId])
+  @@index([fullName])
+}
+
+/// Vínculo Resource ↔ repositório GitHub + configuração de Auto Deploy.
+model ResourceRepository {
+  id                 String            @id @default(cuid())
+  applicationId      String            @unique
+  application        Application       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  githubRepositoryId String?
+  githubRepository   GitHubRepository? @relation(fields: [githubRepositoryId], references: [id], onDelete: SetNull)
+  repositoryFullName String
+  branch             String
+  autoDeploy         Boolean           @default(false)
+  onPush             Boolean           @default(true)
+  onMerge            Boolean           @default(true)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([repositoryFullName, branch])
+}
+
+/// Deduplicação por X-GitHub-Delivery.
+model GitHubWebhookDelivery {
+  deliveryId  String    @id
+  event       String
+  action      String?
+  status      String    @default("RECEIVED")
+  error       String?
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+}
+
+enum DeploymentRunStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+  SUPERSEDED
+}
+
+enum DeploymentTrigger {
+  MANUAL
+  GITHUB_PUSH
+  GITHUB_MERGE
+}
+
+/// Uma tentativa de deploy de um Resource: de onde veio, qual commit, e como terminou.
+model DeploymentRun {
+  id                  String              @id @default(cuid())
+  applicationId       String
+  application         Application         @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  projectId           String?
+  project             Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  repository          String?
+  branch              String?
+  commitSha           String?
+  commitMessage       String?
+  commitAuthor        String?
+  commitUrl           String?
+  triggerSource       DeploymentTrigger
+  status              DeploymentRunStatus @default(QUEUED)
+  deliveryId          String?
+  coolifyDeploymentId String?
+  /// Commit que o provider (Coolify) reporta ter implantado de fato.
+  deployedCommitSha   String?
+  userId              String?
+  error               String?
+  receivedAt          DateTime            @default(now())
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  createdAt           DateTime            @default(now())
+
+  /// Mesmo repo + branch + commit nunca vira dois deploys do mesmo Resource.
+  @@unique([applicationId, repository, branch, commitSha])
+  @@index([applicationId, status])
+  @@index([coolifyDeploymentId])
+  @@index([applicationId, finishedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Clientes e Central de Cobranças
+// ---------------------------------------------------------------------------
+
+model Client {
+  id        String   @id @default(cuid())
+  name      String
+  tradeName String?
+  document  String?
+  phone     String?
+  /// Sempre normalizado (somente dígitos, formato internacional, ex.: 5511999998888).
+  whatsapp  String?
+  email     String?
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects    ClientProject[]
+  charges     Charge[]
+  recurrences BillingRecurrence[]
+  messages    WhatsAppMessage[]
+
+  @@index([name])
+}
+
+model ClientProject {
+  clientId  String
+  client    Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([clientId, projectId])
+  @@index([projectId])
+}
+
+model BillingReason {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  charges     Charge[]
+  recurrences BillingRecurrence[]
+}
+
+enum RecurrencePeriod {
+  WEEKLY
+  MONTHLY
+  BIMONTHLY
+  QUARTERLY
+  SEMIANNUAL
+  ANNUAL
+  CUSTOM
+}
+
+enum RecurrenceStatus {
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum ChargeStatus {
+  PENDING
+  PAID
+  CANCELLED
+}
+
+model BillingRecurrence {
+  id              String           @id @default(cuid())
+  clientId        String
+  client          Client           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  projectId       String?
+  project         Project?         @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  reasonId        String?
+  reason          BillingReason?   @relation(fields: [reasonId], references: [id], onDelete: SetNull)
+  description     String
+  amountCents     Int
+  period          RecurrencePeriod @default(MONTHLY)
+  /// Só para CUSTOM: intervalo em dias.
+  intervalDays    Int?
+  /// Dia do mês do vencimento (1-31, ajustado ao último dia quando o mês é menor).
+  dueDay          Int?
+  startDate       DateTime         @db.Date
+  endDate         DateTime?        @db.Date
+  status          RecurrenceStatus @default(ACTIVE)
+  whatsappEnabled Boolean          @default(true)
+  notes           String?
+  createdByUserId String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  charges       Charge[]
+  reminderRules ChargeReminderRule[]
+
+  @@index([status])
+  @@index([clientId])
+}
+
+model Charge {
+  id              String             @id @default(cuid())
+  clientId        String
+  client          Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  projectId       String?
+  project         Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  recurrenceId    String?
+  recurrence      BillingRecurrence? @relation(fields: [recurrenceId], references: [id], onDelete: SetNull)
+  reasonId        String?
+  reason          BillingReason?     @relation(fields: [reasonId], references: [id], onDelete: SetNull)
+  description     String
+  /// Valores sempre em centavos (inteiro) — nunca float.
+  amountCents     Int
+  /// Data civil (sem fuso): o dia 10 nunca vira dia 9.
+  dueDate         DateTime           @db.Date
+  /// Período cobrado (ex.: 2026-11). Chave de idempotência da recorrência.
+  competence      String?
+  status          ChargeStatus       @default(PENDING)
+  notes           String?
+  whatsappEnabled Boolean            @default(true)
+  paidAt          DateTime?
+  cancelledAt     DateTime?
+  createdByUserId String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  payments      ChargePayment[]
+  reminderRules ChargeReminderRule[]
+  reminders     ChargeReminder[]
+  messages      WhatsAppMessage[]
+
+  /// Uma recorrência nunca gera duas cobranças para a mesma competência.
+  @@unique([recurrenceId, competence])
+  @@index([dueDate, status])
+  @@index([clientId])
+  @@index([projectId])
+}
+
+model ChargePayment {
+  id               String    @id @default(cuid())
+  chargeId         String
+  charge           Charge    @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+  amountCents      Int
+  paidAt           DateTime
+  method           String?
+  notes            String?
+  reversedAt       DateTime?
+  reversedByUserId String?
+  createdByUserId  String?
+  createdAt        DateTime  @default(now())
+
+  @@index([chargeId])
+}
+
+enum ReminderDirection {
+  BEFORE
+  ON
+  AFTER
+}
+
+/// Régua de cobrança. Pertence a uma Charge ou é o modelo de uma Recorrência
+/// (copiado para cada cobrança gerada).
+model ChargeReminderRule {
+  id           String             @id @default(cuid())
+  chargeId     String?
+  charge       Charge?            @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+  recurrenceId String?
+  recurrence   BillingRecurrence? @relation(fields: [recurrenceId], references: [id], onDelete: Cascade)
+  direction    ReminderDirection
+  offsetDays   Int                @default(0)
+  /// HH:mm no fuso configurado.
+  sendTime     String             @default("09:00")
+  template     String?
+  enabled      Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+
+  reminders ChargeReminder[]
+
+  @@index([chargeId])
+  @@index([recurrenceId])
+}
+
+enum ReminderStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+/// Um aviso agendado. A unique (cobrança, regra, horário) é a chave de idempotência.
+model ChargeReminder {
+  id            String             @id @default(cuid())
+  chargeId      String
+  charge        Charge             @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+  ruleId        String
+  rule          ChargeReminderRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  scheduledAt   DateTime
+  status        ReminderStatus     @default(PENDING)
+  attempts      Int                @default(0)
+  nextAttemptAt DateTime?
+  lockedAt      DateTime?
+  lastError     String?
+  skippedReason String?
+  sentAt        DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@unique([chargeId, ruleId, scheduledAt])
+  @@index([status, scheduledAt])
+}
+
+/// Template editável por tipo de aviso (BEFORE/ON/AFTER).
+model BillingTemplate {
+  kind      ReminderDirection @id
+  body      String
+  updatedAt DateTime          @updatedAt
+}
+
+enum WhatsAppMessageStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+}
+
+enum WhatsAppMessageKind {
+  AUTOMATIC
+  MANUAL
+}
+
+/// Log de cada tentativa de envio pelo canal WhatsApp.
+model WhatsAppMessage {
+  id                String                @id @default(cuid())
+  clientId          String?
+  client            Client?               @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  chargeId          String?
+  charge            Charge?               @relation(fields: [chargeId], references: [id], onDelete: SetNull)
+  reminderId        String?
+  kind              WhatsAppMessageKind
+  toPhone           String
+  body              String
+  status            WhatsAppMessageStatus @default(PENDING)
+  providerMessageId String?
+  error             String?
+  createdByUserId   String?
+  sentAt            DateTime?
+  createdAt         DateTime              @default(now())
+
+  @@index([chargeId])
+  @@index([clientId])
 }

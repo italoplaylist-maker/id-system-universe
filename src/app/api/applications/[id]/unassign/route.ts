@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSessionUser, getRequestMeta } from "@/server/auth/session";
+import { assertApplicationAccess } from "@/server/auth/project-access";
 import { requirePermission, apiError } from "@/server/http/api-helpers";
 import { unassignResource } from "@/server/projects/project-service";
 
@@ -10,6 +11,7 @@ export async function POST(_request: Request, { params }: { params: Params }) {
     const user = await requireSessionUser();
     requirePermission(user, "project:write");
     const { id } = await params;
+    await assertApplicationAccess(user, id);
     const meta = await getRequestMeta();
     await unassignResource(id, { userId: user.id, ip: meta.ip, userAgent: meta.userAgent });
     return NextResponse.json({ ok: true });

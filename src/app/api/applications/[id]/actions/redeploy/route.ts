@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireSessionUser, getRequestMeta } from "@/server/auth/session";
+import { assertApplicationAccess } from "@/server/auth/project-access";
 import { requirePermission, apiError } from "@/server/http/api-helpers";
 import { redeployApplication } from "@/server/applications/application-service";
 import { consumeRateLimit } from "@/server/security/rate-limit";
@@ -13,6 +14,7 @@ export async function POST(request: Request, { params }: { params: Params }) {
   try {
     const user = await requireSessionUser();
     const { id } = await params;
+    await assertApplicationAccess(user, id);
     consumeRateLimit(`action:${user.id}:${id}`, 6, 60_000);
 
     const raw = await request.json().catch(() => ({}));

@@ -6,6 +6,7 @@ import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import type { Application, Project } from "@prisma/client";
 import type { ProjectSuggestion, UniverseProject, UniverseProjectDetail, UniverseProjectHealth } from "@/types/domain";
 import { toUniverseApplication } from "@/server/applications/application-mapper";
+import { projectWhere, type ProjectScope } from "@/server/auth/project-access";
 
 type ApplicationForHealth = Pick<Application, "status" | "pendingOperation">;
 
@@ -46,9 +47,9 @@ function toUniverseProject(project: Project & { resources: (ApplicationForHealth
   };
 }
 
-export async function listProjects(options: { includeArchived?: boolean } = {}): Promise<UniverseProject[]> {
+export async function listProjects(options: { includeArchived?: boolean; scope?: ProjectScope } = {}): Promise<UniverseProject[]> {
   const rows = await prisma.project.findMany({
-    where: options.includeArchived ? {} : { archivedAt: null },
+    where: { ...(options.includeArchived ? {} : { archivedAt: null }), ...(options.scope ? projectWhere(options.scope) : {}) },
     include: { resources: { select: { status: true, pendingOperation: true, providerId: true } } },
     orderBy: { name: "asc" },
   });

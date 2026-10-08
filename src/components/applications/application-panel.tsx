@@ -18,11 +18,12 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LogsTerminal } from "@/components/terminal/logs-terminal";
 import { DeploymentList } from "@/components/deployments/deployment-list";
+import { ResourceGitHubTab } from "@/components/github/resource-github-tab";
 import { can } from "@/server/auth/rbac";
 import { cn } from "@/lib/cn";
 import { ApiClientError } from "@/lib/api-client";
 
-type Tab = "overview" | "logs" | "deployments";
+type Tab = "overview" | "logs" | "deployments" | "github";
 type PendingConfirm = "start" | "stop" | "restart" | "redeploy" | "force-redeploy" | null;
 
 export function ApplicationPanel() {
@@ -83,9 +84,9 @@ export function ApplicationPanel() {
   const canRestart = role && can(role, "application:restart");
   const canRedeploy = isDeployable && role && can(role, "application:redeploy");
   const canForceRedeploy = isDeployable && role && can(role, "application:force-redeploy");
-  const tabs = isDeployable ? (["overview", "logs", "deployments"] as const) : (["overview", "logs"] as const);
+  const tabs = isDeployable ? (["overview", "logs", "deployments", "github"] as const) : (["overview", "logs"] as const);
   // Switching from an Application to a Service/Database while "Deployments" is open shouldn't render a tab that no longer exists.
-  const activeTab = tab === "deployments" && !isDeployable ? "overview" : tab;
+  const activeTab = (tab === "deployments" || tab === "github") && !isDeployable ? "overview" : tab;
 
   return (
     <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l border-border bg-surface-raised shadow-2xl">
@@ -113,7 +114,7 @@ export function ApplicationPanel() {
             onClick={() => setTab(t)}
             className={cn("flex-1 border-b-2 px-3 py-2 capitalize", activeTab === t ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground")}
           >
-            {t === "logs" ? "Runtime Logs" : t}
+            {t === "logs" ? "Runtime Logs" : t === "github" ? "GitHub" : t}
           </button>
         ))}
       </div>
@@ -194,6 +195,7 @@ export function ApplicationPanel() {
 
         {activeTab === "logs" && <LogsTerminal applicationId={selectedApplicationId} />}
         {activeTab === "deployments" && isDeployable && <DeploymentList applicationId={selectedApplicationId} />}
+        {activeTab === "github" && isDeployable && <ResourceGitHubTab applicationId={selectedApplicationId} />}
       </div>
 
       <ConfirmDialog

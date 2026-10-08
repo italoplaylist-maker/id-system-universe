@@ -34,7 +34,7 @@ export async function bootstrapAdmin(input: unknown) {
 
   const passwordHash = await hashPassword(parsed.data.password);
   return prisma.user.create({
-    data: { email: parsed.data.email.toLowerCase(), passwordHash, role: "ADMIN" },
+    data: { email: parsed.data.email.toLowerCase(), passwordHash, role: "SUPERADMIN" },
     select: { id: true, email: true, role: true },
   });
 }

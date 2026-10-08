@@ -1,3 +1,4 @@
+import { applicationWhere, type ProjectScope } from "@/server/auth/project-access";
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { encryptSecret } from "@/server/crypto/encryption";
@@ -72,14 +73,25 @@ function sanitize(row: InfrastructureProvider & { _count?: { applications: numbe
   };
 }
 
-export async function listProviders(): Promise<SanitizedProvider[]> {
+/**
+ * `scope` restringe a servidores/providers que hospedam recursos dos Projects
+ * visíveis ao usuário; para quem não tem escopo global, também omite detalhes
+ * de infraestrutura (URL, último erro) e conta somente os recursos visíveis.
+ */
+export async function listProviders(scope?: ProjectScope): Promise<SanitizedProvider[]> {
+  const restricted = scope && !scope.all ? scope : undefined;
   const rows = await prisma.infrastructureProvider.findMany({
+    where: restricted ? { applications: { some: applicationWhere(restricted) } } : {},
     orderBy: { createdAt: "asc" },
-    include: { _count: { select: { applications: true } } },
+    include: { _count: { select: { applications: restricted ? { where: applicationWhere(restricted) } : true } } },
   });
 
   const projectLinks = await prisma.application.findMany({
-    where: { providerId: { in: rows.map((r) => r.id) }, projectId: { not: null } },
+    where: {
+      providerId: { in: rows.map((r) => r.id) },
+      projectId: { not: null },
+      ...(restricted ? { AND: [applicationWhere(restricted)] } : {}),
+    },
     select: { providerId: true, projectId: true },
     distinct: ["providerId", "projectId"],
   });
@@ -88,7 +100,11 @@ export async function listProviders(): Promise<SanitizedProvider[]> {
     projectCounts.set(link.providerId, (projectCounts.get(link.providerId) ?? 0) + 1);
   }
 
-  return rows.map((row) => sanitize(row, projectCounts.get(row.id) ?? 0));
+  return rows.map((row) => {
+    const sanitized = sanitize(row, projectCounts.get(row.id) ?? 0);
+    if (!restricted) return sanitized;
+    return { ...sanitized, baseUrl: "", lastError: null, maskedToken: "" };
+  });
 }
 
 export async function getProviderRowOrThrow(id: string) {

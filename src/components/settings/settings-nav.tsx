@@ -5,8 +5,9 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 
 const TABS = [
-  { href: "/settings/infrastructure", label: "Infrastructure" },
-  { href: "/settings/users", label: "Users" },
+  { href: "/settings/integrations", label: "Integrações" },
+  { href: "/settings/infrastructure", label: "Infraestrutura" },
+  { href: "/settings/users", label: "Usuários" },
 ] as const;
 
 export function SettingsNav() {

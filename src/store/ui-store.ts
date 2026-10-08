@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 export type ViewMode = "UNIVERSE" | "LIST";
-export type PanelTab = "overview" | "logs" | "deployments";
+export type PanelTab = "overview" | "logs" | "deployments" | "github";
 
 let requestedTabTokenCounter = 0;
 

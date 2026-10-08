@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSessionUser, getRequestMeta } from "@/server/auth/session";
+import { getProjectScope } from "@/server/auth/project-access";
 import { requirePermission, apiError } from "@/server/http/api-helpers";
 import { createProvider, listProviders } from "@/server/providers/provider-service";
 import { syncProviderApplications } from "@/server/applications/application-service";
@@ -8,7 +9,8 @@ export async function GET() {
   try {
     const user = await requireSessionUser();
     requirePermission(user, "provider:read");
-    const providers = await listProviders();
+    const scope = await getProjectScope(user);
+    const providers = await listProviders(scope);
     return NextResponse.json({ providers });
   } catch (error) {
     return apiError(error);

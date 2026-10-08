@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSessionUser, getRequestMeta } from "@/server/auth/session";
+import { getProjectScope } from "@/server/auth/project-access";
 import { requirePermission, apiError } from "@/server/http/api-helpers";
 import { createProject, listProjects } from "@/server/projects/project-service";
 
@@ -9,7 +10,8 @@ export async function GET(request: Request) {
     requirePermission(user, "project:read");
     const url = new URL(request.url);
     const includeArchived = url.searchParams.get("includeArchived") === "true";
-    const projects = await listProjects({ includeArchived });
+    const scope = await getProjectScope(user);
+    const projects = await listProjects({ includeArchived, scope });
     return NextResponse.json({ projects });
   } catch (error) {
     return apiError(error);
