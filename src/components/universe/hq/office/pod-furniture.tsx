@@ -237,7 +237,7 @@ export function PodMonitor({
       </mesh>
       {/* panel — faces the employee (-z) */}
       <group position={[0, panelY, POD.DESK_CENTER_Z + 0.24]}>
-        <RoundedBox args={[width + 0.02, height + 0.02, 0.022]} radius={0.008} smoothness={3} castShadow>
+        <RoundedBox args={[width + 0.02, height + 0.02, 0.022]} radius={0.008} smoothness={3} castShadow userData={{ monitorClick: onClick }}>
           <meshStandardMaterial color="#101216" roughness={0.45} metalness={0.45} />
         </RoundedBox>
         {/* back shell, the side the camera sees */}
@@ -249,7 +249,7 @@ export function PodMonitor({
           <meshStandardMaterial color={off ? "#4a4f5a" : accent} emissive={off ? "#000000" : accent} emissiveIntensity={off ? 0 : 0.9} />
         </mesh>
         {/* screen */}
-        <mesh position={[0, 0, -0.0116]} rotation={[0, Math.PI, 0]}>
+        <mesh position={[0, 0, -0.0116]} rotation={[0, Math.PI, 0]} userData={{ monitorClick: onClick }}>
           <planeGeometry args={[width, height]} />
           {off ? <meshStandardMaterial color="#05070a" roughness={0.25} metalness={0.2} /> : <meshBasicMaterial ref={materialRef} toneMapped={false} />}
         </mesh>

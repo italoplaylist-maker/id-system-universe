@@ -377,7 +377,12 @@ export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, s
           visible={false}
           onClick={(e) => {
             e.stopPropagation();
-            onFocusProject();
+            // From the default camera the employee stands between you and the monitors, so this
+            // box is the nearest hit even when the click was aimed at a screen — a monitor in
+            // the ray wins and opens that resource's settings instead of just focusing the project.
+            const monitor = e.intersections.find((hit) => typeof hit.object.userData.monitorClick === "function");
+            if (monitor) (monitor.object.userData.monitorClick as () => void)();
+            else onFocusProject();
           }}
           onPointerOver={(e) => {
             e.stopPropagation();
