@@ -107,7 +107,7 @@ function GlassWall({ length, height, mullions }: { length: number; height: numbe
   );
 }
 
-export function OfficeShell({ layout }: { layout: OfficeLayout }) {
+export function OfficeShell({ layout, nocEnabled = false }: { layout: OfficeLayout; nocEnabled?: boolean }) {
   const { width, depth } = layout;
   const H = OFFICE.WALL_HEIGHT;
   const T = OFFICE.WALL_THICKNESS;
@@ -115,8 +115,13 @@ export function OfficeShell({ layout }: { layout: OfficeLayout }) {
   const floorTexture = useMemo(() => makeFloorTexture(width, depth), [width, depth]);
   useEffect(() => () => floorTexture.dispose(), [floorTexture]);
 
-  const windowCount = Math.max(2, Math.round(depth / 4.2));
-  const windowStep = (depth - 1.2) / windowCount;
+  // With the NOC wall, windows only cover the rest of the west wall (from the end of the NOC panel to the front).
+  const winStart = nocEnabled ? layout.noc.z1 + 0.15 : -depth / 2;
+  const winEnd = depth / 2;
+  const winLen = winEnd - winStart;
+  const winCenter = (winStart + winEnd) / 2;
+  const windowCount = Math.max(1, Math.round(winLen / 4.2));
+  const windowStep = (winLen - 1.2) / windowCount;
 
   return (
     <group>
@@ -162,12 +167,12 @@ export function OfficeShell({ layout }: { layout: OfficeLayout }) {
       <group position={[-width / 2, 0, 0]}>
         <FadingWall outward={[-1, 0, 0]} position={[0, 0.5, 0]} args={[T, 1.0, depth + T]} color={WALL_COLOR} />
         <FadingWall outward={[-1, 0, 0]} position={[0, H - 0.25, 0]} args={[T, 0.5, depth + T]} color={WALL_COLOR} />
-        <mesh position={[0.02, 2.15, 0]}>
-          <planeGeometry args={[depth, 2.4]} />
+        <mesh position={[0.02, 2.15, winCenter]}>
+          <planeGeometry args={[winLen, 2.4]} />
           <meshStandardMaterial color="#bcd7ff" transparent opacity={0.16} roughness={0.08} metalness={0.2} depthWrite={false} side={THREE.DoubleSide} />
         </mesh>
         {Array.from({ length: windowCount + 1 }).map((_, i) => (
-          <mesh key={i} position={[0.04, 2.15, -depth / 2 + 0.6 + i * windowStep]} castShadow>
+          <mesh key={i} position={[0.04, 2.15, winStart + 0.6 + i * windowStep]} castShadow>
             <boxGeometry args={[0.1, 2.4, 0.07]} />
             <meshStandardMaterial color={TRIM} metalness={0.7} roughness={0.4} />
           </mesh>
@@ -176,7 +181,7 @@ export function OfficeShell({ layout }: { layout: OfficeLayout }) {
         {Array.from({ length: windowCount }).map((_, i) => {
           const slats = 24;
           const lowered = 6 + ((i * 7) % 8);
-          const bayCenter = -depth / 2 + 0.6 + (i + 0.5) * windowStep;
+          const bayCenter = winStart + 0.6 + (i + 0.5) * windowStep;
           return (
             <group key={i} position={[0.1, 3.35, bayCenter]}>
               {Array.from({ length: lowered }).map((__, k) => (
