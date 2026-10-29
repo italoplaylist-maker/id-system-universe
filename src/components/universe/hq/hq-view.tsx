@@ -186,7 +186,7 @@ export function HqView() {
         <WeatherHud timeLabel={timeLabel} />
       </div>
 
-      {selectedAgentId && <TimelinePanel sessionId={selectedAgentId} onClose={() => setSelectedAgentId(null)} />}
+      {selectedAgentId && <TimelinePanel sessionId={selectedAgentId} onClose={() => setSelectedAgentId(null)} canSend={canManageAgents} />}
 
       <div className="absolute bottom-4 right-4 flex items-center gap-2">
         {canManageAgents && <FeedsDialog />}

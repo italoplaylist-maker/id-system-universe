@@ -721,25 +721,26 @@ model AgentFeed {
 }
 
 model AgentSession {
-  id             String       @id @default(cuid())
+  id             String         @id @default(cuid())
   feedId         String
-  feed           AgentFeed    @relation(fields: [feedId], references: [id], onDelete: Cascade)
+  feed           AgentFeed      @relation(fields: [feedId], references: [id], onDelete: Cascade)
   /// session_id enviado pelo hook do Claude Code.
   externalId     String
   repo           String?
   branch         String?
   model          String?
   /// Último estado reportado: WORKING | WAITING | ENDED. ERROR e "ocioso" são derivados na leitura.
-  phase          String       @default("WORKING")
+  phase          String         @default("WORKING")
   lastTool       String?
   lastTarget     String?
-  lastToolFailed Boolean      @default(false)
-  toolCount      Int          @default(0)
-  failedCount    Int          @default(0)
-  startedAt      DateTime     @default(now())
-  lastEventAt    DateTime     @default(now())
+  lastToolFailed Boolean        @default(false)
+  toolCount      Int            @default(0)
+  failedCount    Int            @default(0)
+  startedAt      DateTime       @default(now())
+  lastEventAt    DateTime       @default(now())
   endedAt        DateTime?
   events         AgentEvent[]
+  commands       AgentCommand[]
 
   @@unique([feedId, externalId])
   @@index([lastEventAt])
@@ -757,4 +758,19 @@ model AgentEvent {
 
   @@index([sessionId, ts])
   @@index([ts])
+}
+
+/// Pedido enviado pelo painel a uma sessão ativa. Entregue pelo hook (Stop/PostToolUse/UserPromptSubmit).
+model AgentCommand {
+  id          String       @id @default(cuid())
+  sessionId   String
+  session     AgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  text        String
+  /// PENDING | DELIVERED | CANCELLED
+  status      String       @default("PENDING")
+  createdById String?
+  createdAt   DateTime     @default(now())
+  deliveredAt DateTime?
+
+  @@index([sessionId, status, createdAt])
 }

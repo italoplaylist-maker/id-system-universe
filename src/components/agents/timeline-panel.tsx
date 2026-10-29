@@ -1,9 +1,12 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, MessageSquare, Play, Square, X } from "lucide-react";
+import { useState } from "react";
+import { AlertTriangle, CheckCircle2, Clock, MessageSquare, Play, Send, Square, X } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { formatAgo } from "@/lib/format-metrics";
-import { useAgentTimeline, type AgentTimelineItem } from "@/hooks/use-agents";
+import { useAgentCommandMutations, useAgentCommands, useAgentTimeline, type AgentTimelineItem } from "@/hooks/use-agents";
 import { agentTitle } from "@/components/universe/hq/office/agent-desk";
 
 const STATE = { WORKING: { label: "Trabalhando", cls: "text-status-deploying" }, IDLE: { label: "Aguardando", cls: "text-muted" }, ERROR: { label: "Erro na ferramenta", cls: "text-status-error" } } as const;
@@ -23,7 +26,68 @@ function describe(e: AgentTimelineItem): { icon: React.ReactNode; text: string }
   }
 }
 
-export function TimelinePanel({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
+function CommandBox({ sessionId, idle }: { sessionId: string; idle: boolean }) {
+  const [text, setText] = useState("");
+  const { data: commands } = useAgentCommands(sessionId);
+  const { send, cancel } = useAgentCommandMutations(sessionId);
+  const submit = async () => {
+    try {
+      await send.mutateAsync(text);
+      setText("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao enviar o pedido.");
+    }
+  };
+  return (
+    <div className="space-y-2 border-b border-border p-4">
+      <label htmlFor="agent-command" className="text-xs font-medium text-foreground">Enviar pedido ao agente</label>
+      <textarea
+        id="agent-command"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim()) void submit();
+        }}
+        maxLength={2000}
+        rows={3}
+        placeholder="Ex.: depois disso, rode os testes e me diga o resultado"
+        className="w-full resize-none rounded-md border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
+      />
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] leading-snug text-muted">
+          {idle
+            ? "O agente está aguardando você: o pedido entra na sua próxima mensagem ou quando ele voltar a trabalhar."
+            : "Chega quando o agente terminar o passo atual — não interrompe o que ele está fazendo."}
+        </p>
+        <Button size="sm" variant="primary" disabled={!text.trim() || send.isPending} onClick={() => void submit()}>
+          <Send className="h-3.5 w-3.5" />Enviar
+        </Button>
+      </div>
+      {commands && commands.length > 0 && (
+        <ul className="space-y-1.5 pt-1">
+          {commands.map((c) => (
+            <li key={c.id} className="flex items-start gap-2 rounded-md border border-border bg-surface px-2.5 py-2 text-xs">
+              {c.status === "PENDING" ? <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning" /> : <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-running" />}
+              <div className="min-w-0 flex-1">
+                <p className="break-words text-foreground">{c.text}</p>
+                <p className="text-muted">
+                  {c.status === "PENDING" ? "Na fila — aguardando o agente" : `Entregue às ${new Date(c.deliveredAt ?? c.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`}
+                </p>
+              </div>
+              {c.status === "PENDING" && (
+                <button type="button" className="text-muted hover:text-foreground" onClick={() => cancel.mutate(c.id)} aria-label="Cancelar pedido">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export function TimelinePanel({ sessionId, onClose, canSend = false }: { sessionId: string; onClose: () => void; canSend?: boolean }) {
   const { data, isLoading } = useAgentTimeline(sessionId);
   const s = data?.session;
   return (
@@ -44,6 +108,7 @@ export function TimelinePanel({ sessionId, onClose }: { sessionId: string; onClo
           <div className="p-3"><p className="text-lg font-semibold">{formatAgo(s.lastEventAt).replace("há ", "")}</p><p className="text-muted">último sinal</p></div>
         </div>
       )}
+      {canSend && s && <CommandBox sessionId={sessionId} idle={s.state === "IDLE"} />}
       <ul className="min-h-0 flex-1 divide-y divide-border overflow-y-auto text-sm">
         {data?.events.map((e) => {
           const d = describe(e);

@@ -90,9 +90,11 @@ export const hookEventSchema = z.object({
   model: z.string().max(80).optional(),
   /** Epoch ms no momento do hook — eventos chegam fora de ordem (cada hook envia em paralelo). */
   at: z.number().int().positive().optional(),
+  /** O hook está esperando a resposta e sabe entregar um pedido pendente ao Claude. */
+  deliver: z.boolean().optional(),
 });
 
-export async function ingestHookEvent(token: string, body: unknown): Promise<{ ok: true }> {
+export async function ingestHookEvent(token: string, body: unknown): Promise<{ ok: true; pending: boolean; command?: string }> {
   const feed = await feedByToken(token);
   // Folga grande: uma sessão ativa dispara dezenas de eventos por minuto.
   consumeRateLimit(`claude:${feed.id}`, 900, 60_000);
@@ -138,7 +140,13 @@ export async function ingestHookEvent(token: string, body: unknown): Promise<{ o
   if (e.event !== "tool_start") {
     await prisma.agentEvent.create({ data: { sessionId: session.id, ts: at, kind: e.event, tool: e.tool, target, ok: e.ok ?? true } });
   }
-  return { ok: true };
+  if (e.event === "session_end") return { ok: true, pending: false };
+  // Pedidos do painel: entregues só a quem está esperando a resposta (e sabe repassar ao Claude).
+  if (e.deliver) {
+    const command = await claimPendingCommands(session.id);
+    if (command) return { ok: true, pending: false, command };
+  }
+  return { ok: true, pending: (await prisma.agentCommand.count({ where: { sessionId: session.id, status: "PENDING" } })) > 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -225,4 +233,67 @@ export async function pruneAgentData(now: Date = new Date()): Promise<number> {
   const sessions = await prisma.agentSession.deleteMany({ where: { lastEventAt: { lt: cutoff } } });
   const events = await prisma.agentEvent.deleteMany({ where: { ts: { lt: cutoff } } });
   return sessions.count + events.count;
+}
+
+// ---------------------------------------------------------------------------
+// Pedidos do painel para sessões ativas (somente quem tem permissão de escrita)
+// ---------------------------------------------------------------------------
+
+export interface AgentCommandView {
+  id: string;
+  text: string;
+  status: "PENDING" | "DELIVERED" | "CANCELLED";
+  createdAt: string;
+  deliveredAt: string | null;
+}
+
+const commandSchema = z.object({ text: z.string().trim().min(1, "Escreva o pedido.").max(2000, "O pedido pode ter no máximo 2000 caracteres.") });
+const MAX_PENDING_PER_SESSION = 5;
+const MAX_DELIVERED_CHARS = 4000;
+
+function toView(c: { id: string; text: string; status: string; createdAt: Date; deliveredAt: Date | null }): AgentCommandView {
+  return { id: c.id, text: c.text, status: c.status as AgentCommandView["status"], createdAt: c.createdAt.toISOString(), deliveredAt: c.deliveredAt?.toISOString() ?? null };
+}
+
+export async function queueCommand(sessionId: string, input: unknown, actor: Actor): Promise<AgentCommandView> {
+  const parsed = commandSchema.safeParse(input);
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Pedido inválido.");
+  consumeRateLimit(`agent-command:${actor.userId}`, 20, 60_000);
+  const session = await prisma.agentSession.findUnique({ where: { id: sessionId } });
+  if (!session) throw new NotFoundError("Sessão não encontrada.");
+  if (deriveAgentState(session, new Date()) === "ENDED") throw new ValidationError("Esta sessão já terminou — o pedido não chegaria a ninguém.");
+  if ((await prisma.agentCommand.count({ where: { sessionId, status: "PENDING" } })) >= MAX_PENDING_PER_SESSION) {
+    throw new ValidationError("Já há pedidos demais na fila desta sessão. Aguarde a entrega ou cancele algum.");
+  }
+  const command = await prisma.agentCommand.create({ data: { sessionId, text: parsed.data.text, createdById: actor.userId } });
+  await recordAuditEvent({ userId: actor.userId, action: "AGENT_COMMAND_QUEUED", status: "SUCCESS", entityType: "AgentSession", entityId: sessionId, metadata: { length: parsed.data.text.length }, ipAddress: actor.ip, userAgent: actor.userAgent });
+  return toView(command);
+}
+
+export async function listCommands(sessionId: string): Promise<AgentCommandView[]> {
+  const rows = await prisma.agentCommand.findMany({ where: { sessionId, status: { not: "CANCELLED" } }, orderBy: { createdAt: "desc" }, take: 10 });
+  return rows.map(toView);
+}
+
+export async function cancelCommand(sessionId: string, commandId: string): Promise<void> {
+  const result = await prisma.agentCommand.updateMany({ where: { id: commandId, sessionId, status: "PENDING" }, data: { status: "CANCELLED" } });
+  if (result.count === 0) throw new NotFoundError("Pedido não encontrado ou já entregue.");
+}
+
+/** Entrega atômica: cada pedido chega ao Claude exatamente uma vez, mesmo com dois hooks concorrentes. */
+export async function claimPendingCommands(sessionId: string): Promise<string | null> {
+  const pending = await prisma.agentCommand.findMany({ where: { sessionId, status: "PENDING" }, orderBy: { createdAt: "asc" }, take: MAX_PENDING_PER_SESSION });
+  const claimed: string[] = [];
+  let size = 0;
+  for (const c of pending) {
+    if (claimed.length > 0 && size + c.text.length > MAX_DELIVERED_CHARS) break;
+    const won = await prisma.agentCommand.updateMany({ where: { id: c.id, status: "PENDING" }, data: { status: "DELIVERED", deliveredAt: new Date() } });
+    if (won.count === 1) {
+      claimed.push(c.text);
+      size += c.text.length;
+    }
+  }
+  if (claimed.length === 0) return null;
+  const body = claimed.length === 1 ? claimed[0] : claimed.map((t, i) => `${i + 1}. ${t}`).join("\n");
+  return `[Pedido enviado pelo painel ID System Universe]\n${body}`;
 }

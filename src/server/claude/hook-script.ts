@@ -3,12 +3,12 @@
  * Envia apenas: tipo do evento, nome da ferramenta e um alvo curto (arquivo/comando truncado).
  * NUNCA envia o texto do prompt, o conteúdo de arquivos nem a saída dos comandos.
  */
-export const HOOK_VERSION = "1.0.0";
+export const HOOK_VERSION = "1.1.0";
 
 export const HOOK_SCRIPT = `#!/usr/bin/env python3
 # ID System Universe — hook do Claude Code v${HOOK_VERSION}
 # Variáveis: ISU_URL (https://seu-painel) e ISU_CLAUDE_TOKEN (isc_...). Sem elas, não faz nada.
-import json, os, subprocess, sys, time, urllib.request
+import json, os, subprocess, sys, tempfile, time, urllib.request
 
 EVENTS = {
     "SessionStart": "session_start", "UserPromptSubmit": "prompt", "PreToolUse": "tool_start",
@@ -51,6 +51,15 @@ def git(cwd, *args):
     except Exception:
         return ""
 
+def flag_path(sid):
+    safe = "".join(c for c in sid if c.isalnum() or c in "-_")[:80]
+    return os.path.join(tempfile.gettempdir(), "isu-pending-" + safe)
+
+def send(url, token, body, timeout):
+    req = urllib.request.Request(url + "/api/claude/events", data=json.dumps(body).encode(), method="POST",
+                                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+    return json.loads(urllib.request.urlopen(req, timeout=timeout).read() or b"{}")
+
 def main():
     url, token = os.environ.get("ISU_URL", "").rstrip("/"), os.environ.get("ISU_CLAUDE_TOKEN", "")
     if not url or not token:
@@ -78,13 +87,36 @@ def main():
             body["branch"] = branch[:120]
         if isinstance(data.get("model"), str):
             body["model"] = data["model"][:80]
-    # O Claude não espera pela rede: o pai sai já, o filho envia.
+
+    flag = flag_path(sid)
+    # Pedidos do painel: ao terminar a resposta (Stop), ao receber uma mensagem sua (UserPromptSubmit)
+    # ou, no meio do trabalho, quando um evento anterior avisou que há pedido na fila (arquivo-sinal).
+    wait = event in ("stop", "prompt") or (event == "tool_end" and os.path.exists(flag))
+    if wait:
+        body["deliver"] = True
+        try:
+            resp = send(url, token, body, 3)
+        except Exception:
+            return
+        try:
+            os.remove(flag)
+        except OSError:
+            pass
+        command = resp.get("command")
+        if command:
+            if event == "prompt":
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": command}}))
+            else:
+                print(json.dumps({"decision": "block", "reason": command}))
+        return
+
+    # O Claude não espera pela rede: o pai sai já, o filho envia e, se houver pedido na fila, deixa o sinal.
     if hasattr(os, "fork") and os.fork() != 0:
         return
-    req = urllib.request.Request(url + "/api/claude/events", data=json.dumps(body).encode(), method="POST",
-                                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
     try:
-        urllib.request.urlopen(req, timeout=4).read()
+        resp = send(url, token, body, 4)
+        if resp.get("pending"):
+            open(flag, "w").close()
     except Exception:
         pass
 

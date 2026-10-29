@@ -2,7 +2,7 @@ import { prisma, resetDb, makeUser } from "./helpers";
 import assert from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
 import { UnauthorizedLikeError, ValidationError } from "@/lib/errors";
-import { createFeed, deriveAgentState, getSessionTimeline, ingestHookEvent, listActiveSessions, pruneAgentData, redactSecrets, rotateFeedToken } from "@/server/claude/agent-service";
+import { cancelCommand, createFeed, deriveAgentState, listCommands, queueCommand, getSessionTimeline, ingestHookEvent, listActiveSessions, pruneAgentData, redactSecrets, rotateFeedToken } from "@/server/claude/agent-service";
 
 let actor: { userId: string };
 let token: string;
@@ -103,5 +103,64 @@ describe("Agentes Claude em tempo real", () => {
     await prisma.agentEvent.updateMany({ data: { ts: new Date(Date.now() - 4 * 86_400_000) } });
     assert.ok((await pruneAgentData()) >= 1);
     assert.equal(await prisma.agentSession.count(), 0);
+  });
+
+  describe("pedidos do painel", () => {
+    async function activeSession() {
+      await ingestHookEvent(token, ev({ event: "session_start" }));
+      return (await listActiveSessions())[0];
+    }
+
+    it("entrega o pedido uma única vez, no Stop, e só para quem pede entrega", async () => {
+      const s = await activeSession();
+      await queueCommand(s.id, { text: "rode os testes" }, actor);
+      // evento sem `deliver` apenas sinaliza que há pedido
+      const signal = await ingestHookEvent(token, ev({ event: "tool_start", tool: "Edit" }));
+      assert.equal(signal.pending, true);
+      assert.equal(signal.command, undefined);
+      const stop = await ingestHookEvent(token, ev({ event: "stop", deliver: true }));
+      assert.match(stop.command ?? "", /rode os testes/);
+      assert.match(stop.command ?? "", /painel ID System Universe/);
+      const again = await ingestHookEvent(token, ev({ event: "stop", deliver: true }));
+      assert.equal(again.command, undefined);
+      assert.equal(again.pending, false);
+      assert.equal((await listCommands(s.id))[0].status, "DELIVERED");
+    });
+
+    it("junta vários pedidos em ordem e entrega no prompt", async () => {
+      const s = await activeSession();
+      await queueCommand(s.id, { text: "primeiro" }, actor);
+      await queueCommand(s.id, { text: "segundo" }, actor);
+      const r = await ingestHookEvent(token, ev({ event: "prompt", deliver: true }));
+      assert.match(r.command ?? "", /1\. primeiro\n2\. segundo/);
+    });
+
+    it("pedido cancelado não é entregue; entregue não cancela", async () => {
+      const s = await activeSession();
+      const c = await queueCommand(s.id, { text: "cancele-me" }, actor);
+      await cancelCommand(s.id, c.id);
+      assert.equal((await ingestHookEvent(token, ev({ event: "stop", deliver: true }))).command, undefined);
+      const d = await queueCommand(s.id, { text: "entregue" }, actor);
+      await ingestHookEvent(token, ev({ event: "stop", deliver: true }));
+      await assert.rejects(cancelCommand(s.id, d.id));
+    });
+
+    it("não vaza pedido entre sessões", async () => {
+      const a = await activeSession();
+      await ingestHookEvent(token, ev({ sessionId: "s2", event: "session_start" }));
+      await queueCommand(a.id, { text: "só da A" }, actor);
+      assert.equal((await ingestHookEvent(token, ev({ sessionId: "s2", event: "stop", deliver: true }))).command, undefined);
+      assert.match((await ingestHookEvent(token, ev({ event: "stop", deliver: true }))).command ?? "", /só da A/);
+    });
+
+    it("valida texto, limite de fila e sessão encerrada", async () => {
+      const s = await activeSession();
+      await assert.rejects(queueCommand(s.id, { text: "   " }, actor), ValidationError);
+      await assert.rejects(queueCommand(s.id, { text: "x".repeat(2001) }, actor), ValidationError);
+      for (let i = 0; i < 5; i++) await queueCommand(s.id, { text: `p${i}` }, actor);
+      await assert.rejects(queueCommand(s.id, { text: "sexto" }, actor), ValidationError);
+      await ingestHookEvent(token, ev({ event: "session_end" }));
+      await assert.rejects(queueCommand(s.id, { text: "tarde demais" }, actor), ValidationError);
+    });
   });
 });
