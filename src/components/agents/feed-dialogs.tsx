@@ -10,17 +10,6 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useAgentFeedMutations, useAgentFeeds } from "@/hooks/use-agents";
 import { formatAgo } from "@/lib/format-metrics";
 
-const HOOK_CMD = "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/isu-hook.py\"";
-const EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "Notification", "SessionEnd"];
-
-const entry = (matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: HOOK_CMD }] }];
-
-export const SETTINGS_SNIPPET = JSON.stringify(
-  { hooks: Object.fromEntries(EVENTS.map((e) => [e, entry(e.endsWith("ToolUse") ? "*" : undefined)])) },
-  null,
-  2,
-);
-
 function CopyBlock({ label, text }: { label: string; text: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -52,24 +41,20 @@ export function FeedInstructions({ token }: { token: string }) {
       <p className="rounded-md border border-status-warning/40 bg-status-warning/10 p-3 text-xs text-status-warning">
         Guarde o token agora: ele não é exibido de novo. Se perder, gere um novo (o antigo deixa de funcionar).
       </p>
+      <p className="text-xs text-muted">São dois passos, feitos uma única vez no ambiente de nuvem (menu do ambiente na barra de título → Editar). Vale para todos os repositórios — não precisa instalar nada neles.</p>
       <div className="space-y-1.5">
-        <p className="font-medium text-foreground">1. Variáveis do ambiente de nuvem</p>
-        <p className="text-xs text-muted">No ambiente (menu do ambiente na barra de título → Editar), adicione e libere o domínio do painel em Acesso à rede:</p>
+        <p className="font-medium text-foreground">1. Variáveis de ambiente</p>
+        <p className="text-xs text-muted">Libere também o domínio do painel em Acesso à rede.</p>
       </div>
       <CopyBlock label="Variáveis" text={`ISU_URL=${origin}\nISU_CLAUDE_TOKEN=${token}`} />
       <div className="space-y-1.5">
-        <p className="font-medium text-foreground">2. Script do hook no repositório</p>
+        <p className="font-medium text-foreground">2. Setup script</p>
         <p className="text-xs text-muted">
-          Salve em <code>.claude/hooks/isu-hook.py</code> (baixe de <a className="underline" href="/api/claude/hook" target="_blank" rel="noreferrer">/api/claude/hook</a>). Ele envia só o tipo do evento, a ferramenta e um alvo curto — nunca o texto do prompt, o conteúdo dos arquivos ou a saída dos comandos.
+          Cole este comando em “Setup script”. Ele instala o hook na conta do ambiente (<code>~/.claude</code>), sem alterar nenhum repositório. O hook envia só o tipo do evento, a ferramenta e um alvo curto — nunca o prompt, o conteúdo dos arquivos ou a saída dos comandos.
         </p>
       </div>
-      <CopyBlock label="Comando para baixar" text={`mkdir -p .claude/hooks && curl -fsSL ${origin}/api/claude/hook -o .claude/hooks/isu-hook.py`} />
-      <div className="space-y-1.5">
-        <p className="font-medium text-foreground">3. Registrar os hooks</p>
-        <p className="text-xs text-muted">Em <code>.claude/settings.json</code> do repositório (mescle com o que já existir):</p>
-      </div>
-      <CopyBlock label=".claude/settings.json" text={SETTINGS_SNIPPET} />
-      <p className="text-xs text-muted">Novas sessões desse repositório passam a aparecer na sala em segundos.</p>
+      <CopyBlock label="Setup script" text={`curl -fsSL ${origin}/api/claude/install | bash -s -- ${origin}`} />
+      <p className="text-xs text-muted">Pronto: toda sessão nova, em qualquer repositório, aparece na sala em segundos.</p>
     </div>
   );
 }
