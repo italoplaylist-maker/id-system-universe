@@ -79,35 +79,92 @@ function FadingWall({ outward, position, args, color }: { outward: [number, numb
 }
 
 /** Floor-to-ceiling glass with slim steel mullions — you see the whole office through it. */
-function GlassWall({ length, height, mullions }: { length: number; height: number; mullions: number }) {
+function GlassWall({ length, height, mullions, gap }: { length: number; height: number; mullions: number; gap?: { center: number; width: number } }) {
   const step = length / mullions;
+  const inGap = (x: number) => !!gap && Math.abs(x - gap.center) < gap.width / 2 + 0.03;
+  // Rails run the full length except across the doorway.
+  const segments = (y: number, thickness: number, depthZ: number) => {
+    const spans: Array<[number, number]> = gap
+      ? [[-length / 2, gap.center - gap.width / 2], [gap.center + gap.width / 2, length / 2]]
+      : [[-length / 2, length / 2]];
+    return spans.filter(([a, b]) => b - a > 0.01).map(([a, b]) => (
+      <mesh key={`${y}-${a}`} position={[(a + b) / 2, y, 0]}>
+        <boxGeometry args={[b - a, thickness, depthZ]} />
+        <meshStandardMaterial color={TRIM} metalness={0.7} roughness={0.35} />
+      </mesh>
+    ));
+  };
   return (
     <group>
       <mesh position={[0, height / 2, 0]}>
         <planeGeometry args={[length, height]} />
         <meshStandardMaterial color="#cfe6ff" transparent opacity={0.1} roughness={0.05} metalness={0.3} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
-      {Array.from({ length: mullions + 1 }).map((_, i) => (
-        <mesh key={i} position={[-length / 2 + i * step, height / 2, 0]} castShadow>
-          <boxGeometry args={[0.045, height, 0.045]} />
-          <meshStandardMaterial color={TRIM} metalness={0.7} roughness={0.35} />
-        </mesh>
-      ))}
-      {[0.05, height - 0.04].map((y) => (
-        <mesh key={y} position={[0, y, 0]}>
-          <boxGeometry args={[length, 0.06, 0.06]} />
-          <meshStandardMaterial color={TRIM} metalness={0.7} roughness={0.35} />
-        </mesh>
-      ))}
-      <mesh position={[0, 1.05, 0]}>
-        <boxGeometry args={[length, 0.04, 0.045]} />
-        <meshStandardMaterial color={TRIM} metalness={0.7} roughness={0.35} />
-      </mesh>
+      {Array.from({ length: mullions + 1 }).map((_, i) => {
+        const x = -length / 2 + i * step;
+        if (inGap(x)) return null;
+        return (
+          <mesh key={i} position={[x, height / 2, 0]} castShadow>
+            <boxGeometry args={[0.045, height, 0.045]} />
+            <meshStandardMaterial color={TRIM} metalness={0.7} roughness={0.35} />
+          </mesh>
+        );
+      })}
+      {segments(0.05, 0.06, 0.06)}
+      {segments(height - 0.04, 0.06, 0.06)}
+      {segments(1.05, 0.04, 0.045)}
     </group>
   );
 }
 
-export function OfficeShell({ layout, nocEnabled = false }: { layout: OfficeLayout; nocEnabled?: boolean }) {
+/** Steel door frame in the partition, with a glass leaf left slightly ajar toward the agents room. */
+function PartitionDoor({ x, width }: { x: number; width: number }) {
+  const H = 2.3;
+  return (
+    <group position={[x, 0, 0]}>
+      {[-1, 1].map((s) => (
+        <mesh key={s} position={[(s * width) / 2, H / 2, 0]} castShadow>
+          <boxGeometry args={[0.08, H, 0.14]} />
+          <meshStandardMaterial color={TRIM} metalness={0.75} roughness={0.35} />
+        </mesh>
+      ))}
+      <mesh position={[0, H + 0.04, 0]} castShadow>
+        <boxGeometry args={[width + 0.16, 0.1, 0.14]} />
+        <meshStandardMaterial color={TRIM} metalness={0.75} roughness={0.35} />
+      </mesh>
+      <mesh position={[0, 0.01, 0]}>
+        <boxGeometry args={[width, 0.02, 0.16]} />
+        <meshStandardMaterial color="#2a303c" roughness={0.8} />
+      </mesh>
+      {/* leaf, hinged on the -x post, opened ~65° toward +z (the agents room) */}
+      <group position={[-width / 2 + 0.04, 0, 0]} rotation={[0, -1.15, 0]}>
+        <mesh position={[(width - 0.08) / 2, H / 2, 0]}>
+          <boxGeometry args={[width - 0.08, H - 0.04, 0.035]} />
+          <meshStandardMaterial color="#cfe6ff" transparent opacity={0.28} roughness={0.08} metalness={0.3} depthWrite={false} />
+        </mesh>
+        {[0, 1].map((k) => (
+          <mesh key={k} position={[k === 0 ? 0.03 : width - 0.1, H / 2, 0]}>
+            <boxGeometry args={[0.06, H - 0.04, 0.05]} />
+            <meshStandardMaterial color={TRIM} metalness={0.7} roughness={0.4} />
+          </mesh>
+        ))}
+        <mesh position={[width - 0.2, 1.0, 0.04]}>
+          <boxGeometry args={[0.03, 0.03, 0.08]} />
+          <meshStandardMaterial color="#c9ced8" metalness={0.9} roughness={0.25} />
+        </mesh>
+      </group>
+    </group>
+  );
+}
+
+export const PARTITION_DOOR_WIDTH = 1.15;
+
+/** z (world, in the main room's frame) of the doorway in the east partition. */
+export function partitionDoorZ(depth: number): number {
+  return depth / 2 - 1.9;
+}
+
+export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", eastDoor = false }: { layout: OfficeLayout; nocEnabled?: boolean; westWall?: "windows" | "none"; eastDoor?: boolean }) {
   const { width, depth } = layout;
   const H = OFFICE.WALL_HEIGHT;
   const T = OFFICE.WALL_THICKNESS;
@@ -163,8 +220,8 @@ export function OfficeShell({ layout, nocEnabled = false }: { layout: OfficeLayo
         <meshStandardMaterial color={PALETTE.brand} emissive={PALETTE.brand} emissiveIntensity={0.9} />
       </mesh>
 
-      {/* west wall: solid base, tall window band with blinds, solid header */}
-      <group position={[-width / 2, 0, 0]}>
+      {/* west wall: solid base, tall window band with blinds, solid header (absent when it is the shared partition) */}
+      {westWall === "windows" && <group position={[-width / 2, 0, 0]}>
         <FadingWall outward={[-1, 0, 0]} position={[0, 0.5, 0]} args={[T, 1.0, depth + T]} color={WALL_COLOR} />
         <FadingWall outward={[-1, 0, 0]} position={[0, H - 0.25, 0]} args={[T, 0.5, depth + T]} color={WALL_COLOR} />
         <mesh position={[0.02, 2.15, winCenter]}>
@@ -193,11 +250,17 @@ export function OfficeShell({ layout, nocEnabled = false }: { layout: OfficeLayo
             </group>
           );
         })}
-      </group>
+      </group>}
 
-      {/* east wall: full glass */}
+      {/* east wall: full glass (with a door when the agents room is attached) */}
       <group position={[width / 2, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
-        <GlassWall length={depth} height={H} mullions={Math.max(4, Math.round(depth / 2.4))} />
+        <GlassWall
+          length={depth}
+          height={H}
+          mullions={Math.max(4, Math.round(depth / 2.4))}
+          gap={eastDoor ? { center: -partitionDoorZ(depth), width: PARTITION_DOOR_WIDTH } : undefined}
+        />
+        {eastDoor && <PartitionDoor x={-partitionDoorZ(depth)} width={PARTITION_DOOR_WIDTH} />}
       </group>
 
       {/* baseboards */}
@@ -205,10 +268,12 @@ export function OfficeShell({ layout, nocEnabled = false }: { layout: OfficeLayo
         <boxGeometry args={[width - 0.2, 0.14, 0.03]} />
         <meshStandardMaterial color={TRIM} roughness={0.6} />
       </mesh>
-      <mesh position={[-width / 2 + T / 2 + 0.02, 0.07, 0]}>
-        <boxGeometry args={[0.03, 0.14, depth - 0.2]} />
-        <meshStandardMaterial color={TRIM} roughness={0.6} />
-      </mesh>
+      {westWall === "windows" && (
+        <mesh position={[-width / 2 + T / 2 + 0.02, 0.07, 0]}>
+          <boxGeometry args={[0.03, 0.14, depth - 0.2]} />
+          <meshStandardMaterial color={TRIM} roughness={0.6} />
+        </mesh>
+      )}
 
       {/* slim steel top frame — no ceiling (architectural cutaway), nothing hanging between the camera and the desks */}
       <mesh position={[0, H + 0.03, backZ]}>

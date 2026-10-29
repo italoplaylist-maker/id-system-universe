@@ -19,6 +19,10 @@ import { HQ_LOCATION } from "@/lib/hq-location";
 import { DEMO_APPLICATIONS, DEMO_PROJECTS, DEMO_PROVIDERS } from "@/lib/demo-data";
 import { Button } from "@/components/ui/button";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
+import { TimelinePanel } from "@/components/agents/timeline-panel";
+import { FeedsDialog } from "@/components/agents/feed-dialogs";
+import { useSession } from "@/hooks/use-session";
+import { canUser } from "@/server/auth/rbac";
 import { ProjectManagerDrawer } from "@/components/projects/project-manager-drawer";
 
 /**
@@ -28,6 +32,9 @@ import { ProjectManagerDrawer } from "@/components/projects/project-manager-draw
  */
 export function HqView() {
   const [webglOk, setWebglOk] = useState<boolean | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const { data: sessionUser } = useSession();
+  const canManageAgents = sessionUser ? canUser(sessionUser, "provider:write") : false;
   const router = useRouter();
   const { selectedApplicationId, selectApplication, reducedGraphics, setReducedGraphics, demoMode, setDemoMode, setViewMode } = useUiStore();
   const cameraMode = useCameraStore((s) => s.mode);
@@ -57,6 +64,10 @@ export function HqView() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
+      if (selectedAgentId) {
+        setSelectedAgentId(null);
+        return;
+      }
       if (selectedApplicationId) {
         selectApplication(null);
         return;
@@ -65,7 +76,7 @@ export function HqView() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedApplicationId, selectApplication, cameraMode, backOneLevel]);
+  }, [selectedAgentId, selectedApplicationId, selectApplication, cameraMode, backOneLevel]);
 
   useEffect(() => {
     // WebGL support can only be known client-side (canvas probing needs
@@ -128,6 +139,7 @@ export function HqView() {
                 toast.message("This is demo data. Connect a real Coolify instance to control resources.");
                 return;
               }
+              setSelectedAgentId(null);
               selectApplication(id);
             }}
             onOpenProvider={() => {
@@ -138,6 +150,11 @@ export function HqView() {
               router.push("/settings/infrastructure");
             }}
             onOpenServers={() => router.push("/servers")}
+            selectedAgentId={selectedAgentId}
+            onSelectAgent={(id) => {
+              selectApplication(null);
+              setSelectedAgentId(id);
+            }}
             reducedGraphics={reducedGraphics}
             env={env}
           />
@@ -169,7 +186,10 @@ export function HqView() {
         <WeatherHud timeLabel={timeLabel} />
       </div>
 
+      {selectedAgentId && <TimelinePanel sessionId={selectedAgentId} onClose={() => setSelectedAgentId(null)} />}
+
       <div className="absolute bottom-4 right-4 flex items-center gap-2">
+        {canManageAgents && <FeedsDialog />}
         {cameraMode !== "overview" && (
           <button
             onClick={() => resetCamera()}

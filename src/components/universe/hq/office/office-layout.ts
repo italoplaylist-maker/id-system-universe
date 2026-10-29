@@ -58,14 +58,14 @@ function columnsFor(count: number): number {
   return Math.max(3, Math.min(8, Math.round(Math.sqrt(Math.max(count, 1) * 1.8))));
 }
 
-export function computeOfficeLayout(projects: Pick<UniverseProject, "id" | "name" | "accent">[], providers: Pick<UniverseProviderSummary, "id" | "name" | "color">[]): OfficeLayout {
+export function computeOfficeLayout(projects: Pick<UniverseProject, "id" | "name" | "accent">[], providers: Pick<UniverseProviderSummary, "id" | "name" | "color">[], options: { minWidth?: number; minDepth?: number } = {}): OfficeLayout {
   const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name, "pt-BR") || a.id.localeCompare(b.id));
   const count = sorted.length;
   const cols = columnsFor(count);
   const rows = Math.max(1, Math.ceil(count / cols));
 
-  const width = Math.max(OFFICE.MIN_WIDTH, cols * OFFICE.SLOT_X + OFFICE.SIDE_MARGIN * 2);
-  const depth = OFFICE.BACK_ZONE + rows * OFFICE.SLOT_Z + OFFICE.FRONT_ZONE;
+  const width = Math.max(options.minWidth ?? OFFICE.MIN_WIDTH, cols * OFFICE.SLOT_X + OFFICE.SIDE_MARGIN * 2);
+  const depth = Math.max(options.minDepth ?? 0, OFFICE.BACK_ZONE + rows * OFFICE.SLOT_Z + OFFICE.FRONT_ZONE);
   const backZ = -depth / 2;
   const firstRowZ = backZ + OFFICE.BACK_ZONE + OFFICE.SLOT_Z / 2;
 
@@ -79,7 +79,8 @@ export function computeOfficeLayout(projects: Pick<UniverseProject, "id" | "name
   });
 
   // Racks stand against the back wall to the left of the screen, in a tidy row; overflow forms a second row in front.
-  const screenWidth = Math.min(10.4, width - 7);
+  // Sem racks (ex.: sala dos agentes) o telão pode ocupar quase toda a parede.
+  const screenWidth = Math.min(10.4, width - (providers.length > 0 ? 7 : 3));
   const rackZoneRight = -screenWidth / 2 - 0.9;
   const rackZoneLeft = -width / 2 + 1.1;
   const perRow = Math.max(1, Math.floor((rackZoneRight - rackZoneLeft) / 0.95));

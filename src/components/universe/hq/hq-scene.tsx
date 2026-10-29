@@ -4,8 +4,13 @@ import { Suspense, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
-import { computeOfficeLayout } from "./office/office-layout";
-import { OfficeShell } from "./office/office-shell";
+import { computeOfficeLayout, OFFICE } from "./office/office-layout";
+import { OfficeShell, partitionDoorZ } from "./office/office-shell";
+import { AgentDesk, agentTitle } from "./office/agent-desk";
+import { AgentsBoard } from "./office/agents-board";
+import { TallPlant } from "./office/office-props";
+import { Html } from "@react-three/drei";
+import { useAgentSessions } from "@/hooks/use-agents";
 import { OfficeProps } from "./office/office-props";
 import { NocWall } from "./office/noc-wall";
 import { useServers } from "@/hooks/use-servers";
@@ -32,9 +37,13 @@ interface HqSceneProps {
   onSelectApplication: (id: string) => void;
   onOpenProvider: (providerId: string) => void;
   onOpenServers: () => void;
+  selectedAgentId: string | null;
+  onSelectAgent: (id: string) => void;
   reducedGraphics: boolean;
   env: EnvironmentState;
 }
+
+const AGENT_ACCENTS = ["#e8283f", "#38bdf8", "#a78bfa", "#2dd4bf", "#fb923c", "#f0abfc", "#34d399", "#fbbf24"];
 
 const HEALTH_LABEL: Record<UniverseProject["health"], string> = {
   HEALTHY: "Saudável",
@@ -60,6 +69,8 @@ export function HqScene({
   onSelectApplication,
   onOpenProvider,
   onOpenServers,
+  selectedAgentId,
+  onSelectAgent,
   reducedGraphics,
   env,
 }: HqSceneProps) {
@@ -88,7 +99,49 @@ export function HqScene({
 
   // One big open-plan office: a desk per Project (unassigned resources are an administrative
   // state, not a desk — they only show up as a HUD pill pointing at /projects).
-  const layout = useMemo(() => computeOfficeLayout(activeProjects, enabledProviders), [activeProjects, enabledProviders]);
+  const { data: sessionUser } = useSession();
+  // A sala dos agentes só existe para quem pode ler infraestrutura (a API exige escopo global).
+  const { data: agentSessions } = useAgentSessions(sessionUser ? canUser(sessionUser, "provider:read") : false);
+  const agentsEnabled = agentSessions !== undefined;
+
+  const agentEntries = useMemo(
+    () => (agentSessions ?? []).map((s, i) => ({ session: s, name: agentTitle(s), accent: AGENT_ACCENTS[i % AGENT_ACCENTS.length] })),
+    [agentSessions],
+  );
+  // Duas salas lado a lado com a mesma profundidade (paredes de fundo alinhadas).
+  const { layout, agentsLayout } = useMemo(() => {
+    const agentInputs = agentEntries.map((e) => ({ id: e.session.id, name: e.name, accent: e.accent }));
+    const mainNatural = computeOfficeLayout(activeProjects, enabledProviders).depth;
+    const agentsNatural = agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 10 }).depth : 0;
+    const minDepth = Math.max(mainNatural, agentsNatural);
+    return {
+      layout: computeOfficeLayout(activeProjects, enabledProviders, { minDepth }),
+      agentsLayout: agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 10, minDepth }) : null,
+    };
+  }, [activeProjects, enabledProviders, agentEntries, agentsEnabled]);
+  const agentsOffsetX = agentsLayout ? layout.width / 2 + agentsLayout.width / 2 : 0;
+
+  // O "mundo" que a câmera, o céu, a sombra e a luz enxergam: as duas salas juntas.
+  const world = useMemo(() => {
+    if (!agentsLayout) return { width: layout.width, depth: layout.depth, center: layout.center, radius: layout.radius, bounds: layout.bounds };
+    const extra = agentsLayout.width;
+    const bounds = { ...layout.bounds, maxX: layout.bounds.maxX + extra };
+    const width = layout.width + extra;
+    const center: [number, number, number] = [extra / 2, layout.center[1], layout.center[2]];
+    const radius = Math.sqrt((width / 2) ** 2 + (layout.depth / 2) ** 2 + (OFFICE.WALL_HEIGHT / 2) ** 2) + 2;
+    return { width, depth: layout.depth, center, radius, bounds };
+  }, [layout, agentsLayout]);
+  const agentById = useMemo(() => new Map(agentEntries.map((e) => [e.session.id, e])), [agentEntries]);
+  const agentStats = useMemo(() => {
+    const list = agentSessions ?? [];
+    return {
+      active: list.length,
+      working: list.filter((s) => s.state === "WORKING").length,
+      idle: list.filter((s) => s.state === "IDLE").length,
+      errors: list.filter((s) => s.state === "ERROR").length,
+      tools: list.reduce((n, s) => n + s.toolCount, 0),
+    };
+  }, [agentSessions]);
 
   const resourcesByProject = useMemo(() => {
     const map = new Map<string, UniverseApplication[]>();
@@ -105,7 +158,6 @@ export function HqScene({
   const projectById = useMemo(() => new Map(activeProjects.map((p) => [p.id, p])), [activeProjects]);
   const deskStates = useMemo(() => new Map(layout.desks.map((d) => [d.projectId, deskStateFor(resourcesByProject.get(d.projectId) ?? [])])), [layout.desks, resourcesByProject]);
 
-  const { data: sessionUser } = useSession();
   const canSeeBilling = sessionUser ? canUser(sessionUser, "billing:view") : false;
   const { data: billingCounts } = useBillingCounts(canSeeBilling);
   // A parede do NOC só existe para quem pode ler servidores (a API exige escopo global).
@@ -126,7 +178,7 @@ export function HqScene({
     [applications, activeProjects, layout.desks, deskStates, canSeeBilling, billingCounts],
   );
 
-  const [centerX, , centerZ] = layout.center;
+  const [centerX, , centerZ] = world.center;
 
   return (
     <Canvas
@@ -137,35 +189,36 @@ export function HqScene({
       onPointerMissed={() => selectedProjectId && setSelectedProjectId(null)}
     >
       <color attach="background" args={[bgColor]} />
-      <fog attach="fog" args={[bgColor, layout.radius * 1.9, layout.radius * 3.6]} />
+      <fog attach="fog" args={[bgColor, world.radius * 1.9, world.radius * 3.6]} />
 
-      <SkyScene env={env} weatherCondition={weatherCondition} radius={layout.radius} reducedGraphics={reducedGraphics} />
-      <ExteriorScene center={layout.center} buildingRadius={layout.radius} nightFactor={nightFactor} reducedGraphics={reducedGraphics} />
-      {!reducedGraphics && isRaining && <RainEffect center={layout.center} radius={layout.radius} heavy={weatherCondition === "CHUVA_FORTE"} />}
+      <SkyScene env={env} weatherCondition={weatherCondition} radius={world.radius} reducedGraphics={reducedGraphics} />
+      <ExteriorScene center={world.center} buildingRadius={world.radius} nightFactor={nightFactor} reducedGraphics={reducedGraphics} />
+      {!reducedGraphics && isRaining && <RainEffect center={world.center} radius={world.radius} heavy={weatherCondition === "CHUVA_FORTE"} />}
 
       <hemisphereLight args={["#a8c4e8", "#1c2740", THREE.MathUtils.lerp(1.0, 1.7, env.daylightFactor)] as const} />
       <ambientLight intensity={THREE.MathUtils.lerp(0.7, 1.1, env.daylightFactor)} />
       <directionalLight
         position={[
-          centerX + env.sunDirection[0] * Math.max(layout.radius * 2.2, 18),
-          Math.max(8, layout.bounds.maxY + 4, env.sunDirection[1] * Math.max(layout.radius * 2.2, 18)),
-          centerZ + env.sunDirection[2] * Math.max(layout.radius * 2.2, 18),
+          centerX + env.sunDirection[0] * Math.max(world.radius * 2.2, 18),
+          Math.max(8, world.bounds.maxY + 4, env.sunDirection[1] * Math.max(world.radius * 2.2, 18)),
+          centerZ + env.sunDirection[2] * Math.max(world.radius * 2.2, 18),
         ]}
         intensity={2.6 * Math.max(sunStrength, 0.08)}
         color={env.sun.altitude < 0.12 ? "#ffb46b" : "#ffffff"}
         castShadow={!reducedGraphics}
         shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-layout.width / 1.6}
-        shadow-camera-right={layout.width / 1.6}
-        shadow-camera-top={layout.depth}
-        shadow-camera-bottom={-layout.depth}
-        shadow-camera-far={layout.radius * 6}
+        shadow-camera-left={-world.width / 1.6}
+        shadow-camera-right={world.width / 1.6}
+        shadow-camera-top={world.depth}
+        shadow-camera-bottom={-world.depth}
+        shadow-camera-far={world.radius * 6}
       />
-      <directionalLight position={[centerX - 8, Math.max(9, layout.bounds.maxY + 4), centerZ + 6]} intensity={0.9} color="#ffd9a8" />
+      <directionalLight position={[centerX - 8, Math.max(9, world.bounds.maxY + 4), centerZ + 6]} intensity={0.9} color="#ffd9a8" />
       {/* a few warm interior fills — a handful of lights, never one per desk */}
       <pointLight position={[-layout.width * 0.25, 3.4, 0]} intensity={1.6} color="#ffe2b8" distance={layout.width * 0.7} decay={1.6} />
       <pointLight position={[layout.width * 0.25, 3.4, 0]} intensity={1.6} color="#ffe2b8" distance={layout.width * 0.7} decay={1.6} />
       <pointLight position={[0, 3.2, layout.depth * 0.3]} intensity={1.2} color="#fff0d6" distance={layout.width * 0.7} decay={1.6} />
+      {agentsLayout && <pointLight position={[agentsOffsetX, 3.4, 0]} intensity={1.6} color="#dfe9ff" distance={agentsLayout.width * 1.2} decay={1.6} />}
 
       {/* Double-click empty floor = "look here" (Focus modes only; Overview is a locked maquette). */}
       <mesh
@@ -178,13 +231,13 @@ export function HqScene({
           focusPoint([e.point.x, 0.6, e.point.z]);
         }}
       >
-        <planeGeometry args={[layout.radius * 2.6, layout.radius * 2.8]} />
+        <planeGeometry args={[world.radius * 2.6, world.radius * 2.8]} />
         <meshStandardMaterial color="#141c28" roughness={1} />
       </mesh>
-      {!reducedGraphics && <ContactShadows position={[centerX, 0.003, centerZ]} opacity={0.4} scale={layout.radius * 2.4} blur={2.2} far={4} color="#000000" />}
+      {!reducedGraphics && <ContactShadows position={[centerX, 0.003, centerZ]} opacity={0.4} scale={world.radius * 2.4} blur={2.2} far={4} color="#000000" />}
 
       <Suspense fallback={null}>
-        <OfficeShell layout={layout} nocEnabled={nocEnabled} />
+        <OfficeShell layout={layout} nocEnabled={nocEnabled} eastDoor={agentsLayout !== null} />
         {nocEnabled && <NocWall layout={layout} servers={monitoredServers} onOpen={onOpenServers} />}
         <CommandScreen layout={layout} stats={stats} />
         <OfficeProps layout={layout} />
@@ -230,9 +283,62 @@ export function HqScene({
             />
           );
         })}
+
+        {agentsLayout && (
+          <group position={[agentsOffsetX, 0, 0]}>
+            <OfficeShell layout={agentsLayout} westWall="none" />
+            <AgentsBoard layout={agentsLayout} stats={agentStats} />
+            {[-1, 1].map((sd) => (
+              <group key={sd} position={[sd * (agentsLayout.width / 2 - 1.0), 0, -agentsLayout.depth / 2 + 0.9]}>
+                <TallPlant scale={0.95} />
+              </group>
+            ))}
+            {agentsLayout.desks.map((slot) => {
+              const entry = agentById.get(slot.projectId);
+              if (!entry) return null;
+              const worldPos: [number, number, number] = [slot.x + agentsOffsetX, 1.0, slot.z];
+              return (
+                <AgentDesk
+                  key={slot.projectId}
+                  slot={slot}
+                  session={entry.session}
+                  selected={selectedAgentId === slot.projectId}
+                  dimmedByFocus={focusId !== null && cameraMode !== "overview" && cameraMode !== "free" && focusId !== slot.projectId}
+                  reduced={reducedGraphics}
+                  onFocus={() => {
+                    onSelectAgent(slot.projectId);
+                    focusProject(slot.projectId, worldPos, 2.6, `Agente · ${slot.name}`);
+                  }}
+                />
+              );
+            })}
+          </group>
+        )}
+        {agentsLayout && (
+          <Html position={[layout.width / 2, 3.0, partitionDoorZ(layout.depth)]} center zIndexRange={[20, 0]}>
+            <button
+              type="button"
+              onClick={() => focusProject("agents-room", [agentsOffsetX, 1.0, 0], agentsLayout.radius * 0.5, "Sala dos Agentes")}
+              style={{
+                padding: "3px 10px",
+                borderRadius: 999,
+                background: "rgba(10,13,20,0.85)",
+                border: "1px solid rgba(255,255,255,0.18)",
+                color: "#f1f4fa",
+                fontFamily: "ui-sans-serif, system-ui",
+                fontSize: 11,
+                fontWeight: 650,
+                whiteSpace: "nowrap",
+                cursor: "pointer",
+              }}
+            >
+              Sala dos Agentes · {agentStats.working > 0 ? `${agentStats.working} trabalhando` : `${agentStats.active} ativo${agentStats.active === 1 ? "" : "s"}`}
+            </button>
+          </Html>
+        )}
       </Suspense>
 
-      <UniverseCameraController overviewCenter={layout.center} overviewRadius={layout.radius} overviewBounds={layout.bounds} />
+      <UniverseCameraController overviewCenter={world.center} overviewRadius={world.radius} overviewBounds={world.bounds} />
     </Canvas>
   );
 }
