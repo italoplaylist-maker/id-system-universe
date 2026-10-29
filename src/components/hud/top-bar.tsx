@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, Settings, LogOut, LayoutGrid, Box, RefreshCw, Building2, Receipt } from "lucide-react";
+import { Search, Settings, LogOut, LayoutGrid, Box, RefreshCw, Building2, Receipt, Activity } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/hooks/use-session";
 import { useApplications } from "@/hooks/use-applications";
@@ -70,6 +70,11 @@ export function TopBar() {
         <Link href="/projects" className="rounded-md p-2 text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Projetos">
           <Building2 className="h-4 w-4" />
         </Link>
+        {user && canUser(user, "provider:read") && (
+          <Link href="/servers" className="rounded-md p-2 text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Servidores (NOC)" title="Servidores (NOC)">
+            <Activity className="h-4 w-4" />
+          </Link>
+        )}
         {user && canUser(user, "billing:view") && (
           <Link href="/billing" className="rounded-md p-2 text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Central de Cobranças" title="Central de Cobranças">
             <Receipt className="h-4 w-4" />

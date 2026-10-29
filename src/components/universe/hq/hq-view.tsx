@@ -137,6 +137,7 @@ export function HqView() {
               }
               router.push("/settings/infrastructure");
             }}
+            onOpenServers={() => router.push("/servers")}
             reducedGraphics={reducedGraphics}
             env={env}
           />

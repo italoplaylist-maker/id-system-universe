@@ -41,4 +41,8 @@ export async function register() {
   setInterval(safely("billing_tick", () => runBillingTick()), 60_000);
   setTimeout(safely("billing_tick", () => runBillingTick()), 10_000);
   setInterval(safely("github_repo_sync", syncAllInstallations), 30 * 60_000);
+
+  const { runMonitoringTick, pruneOldMetrics } = await import("@/server/monitoring/alerts");
+  setInterval(safely("monitoring_tick", () => runMonitoringTick()), 30_000);
+  setInterval(safely("metrics_prune", () => pruneOldMetrics()), 60 * 60_000);
 }

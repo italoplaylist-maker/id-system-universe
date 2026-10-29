@@ -42,6 +42,8 @@ export interface OfficeLayout {
   desks: DeskSlot[];
   racks: RackSlot[];
   screen: { width: number; height: number; y: number; z: number };
+  /** Trecho da parede oeste reservado à parede do NOC (z de início/fim, comprimento). */
+  noc: { z0: number; z1: number; length: number };
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number; minY: number; maxY: number };
   center: [number, number, number];
   radius: number;
@@ -87,6 +89,7 @@ export function computeOfficeLayout(projects: UniverseProject[], providers: Univ
     return { providerId: provider.id, name: provider.name, color: provider.color, x: rackZoneLeft + 0.5 + rackCol * 0.95, z: backZ + 0.7 + rackRow * 1.5 };
   });
 
+  const nocLength = Math.min(7.2, depth - 4.5);
   const screenHeight = (screenWidth * SCREEN_CANVAS.height) / SCREEN_CANVAS.width;
   // Padded past the walls: foundation plinth, entrance steps, and a little air so nothing touches the viewport edge.
   const bounds = { minX: -width / 2 - 0.9, maxX: width / 2 + 0.9, minZ: backZ - 0.5, maxZ: depth / 2 + 1.9, minY: -0.3, maxY: OFFICE.WALL_HEIGHT + 0.5 };
@@ -98,6 +101,7 @@ export function computeOfficeLayout(projects: UniverseProject[], providers: Univ
     depth,
     desks,
     racks,
+    noc: { z0: backZ + 0.5, z1: backZ + 0.5 + nocLength, length: nocLength },
     screen: { width: screenWidth, height: screenHeight, y: 2.3, z: backZ + OFFICE.WALL_THICKNESS / 2 + 0.06 },
     bounds,
     center,

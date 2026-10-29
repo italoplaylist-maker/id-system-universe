@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { SESSION_COOKIE } from "@/server/auth/session";
+import { getAppOrigin } from "@/server/http/public-url";
 
 /**
  * Fast, cookie-presence-only redirect for UX. This is NOT the authority on
@@ -11,7 +12,12 @@ import { SESSION_COOKIE } from "@/server/auth/session";
  * an unauthenticated visitor doesn't see a flash of protected UI.
  */
 const PUBLIC_PATHS = ["/login", "/onboarding"];
-const PUBLIC_API_PREFIXES = ["/api/health", "/api/auth", "/api/webhooks"];
+const PUBLIC_API_PREFIXES = ["/api/health", "/api/auth", "/api/webhooks", "/api/agent"];
+
+/** No proxy a requisição traz o Host público; APP_URL, quando definido, tem precedência. */
+function redirectTo(request: NextRequest, path: string) {
+  return NextResponse.redirect(new URL(path, getAppOrigin() ?? request.url));
+}
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -24,8 +30,7 @@ export function proxy(request: NextRequest) {
   const isPublicPage = PUBLIC_PATHS.includes(pathname);
 
   if (!hasSession && !isPublicPage && !pathname.startsWith("/api")) {
-    const loginUrl = new URL("/login", request.url);
-    return NextResponse.redirect(loginUrl);
+    return redirectTo(request, "/login");
   }
 
   if (!hasSession && pathname.startsWith("/api")) {
@@ -33,7 +38,7 @@ export function proxy(request: NextRequest) {
   }
 
   if (hasSession && pathname === "/login") {
-    return NextResponse.redirect(new URL("/", request.url));
+    return redirectTo(request, "/");
   }
 
   return NextResponse.next();

@@ -64,3 +64,10 @@ export function toClientError(error: unknown): { message: string; statusCode: nu
   }
   return { message: "Something went wrong. Please try again.", statusCode: 500, code: "INTERNAL_ERROR" };
 }
+
+/** 401 para chamadas de máquina (agente) — sem detalhes sobre o motivo. */
+export class UnauthorizedLikeError extends AppError {
+  constructor() {
+    super("Não autorizado.", 401, "UNAUTHORIZED");
+  }
+}

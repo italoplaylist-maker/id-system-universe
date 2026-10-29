@@ -656,3 +656,57 @@ model WhatsAppMessage {
   @@index([chargeId])
   @@index([clientId])
 }
+
+// ---------------------------------------------------------------------------
+// Monitoramento de VPS: um agente leve no servidor ENVIA métricas (push) com um
+// token por servidor. Só o hash do token fica guardado.
+// ---------------------------------------------------------------------------
+
+model MonitoredServer {
+  id               String    @id @default(cuid())
+  name             String
+  tokenHash        String    @unique
+  hostname         String?
+  os               String?
+  kernel           String?
+  cpuModel         String?
+  cpuCores         Int?
+  agentVersion     String?
+  ipAddress        String?
+  lastSeenAt       DateTime?
+  /// Snapshot dos containers do último envio (nome, cpu, memória, status).
+  latestContainers Json?
+  /// Estado dos alertas já emitidos — só notifica na transição (ok → alerta → ok).
+  alertState       Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  metrics ServerMetric[]
+}
+
+model ServerMetric {
+  id                String          @id @default(cuid())
+  serverId          String
+  server            MonitoredServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  ts                DateTime        @default(now())
+  cpuPercent        Float
+  load1             Float
+  load5             Float
+  load15            Float
+  memUsedMb         Int
+  memTotalMb        Int
+  swapUsedMb        Int             @default(0)
+  swapTotalMb       Int             @default(0)
+  diskUsedMb        Int
+  diskTotalMb       Int
+  netRxBps          Float           @default(0)
+  netTxBps          Float           @default(0)
+  diskReadBps       Float           @default(0)
+  diskWriteBps      Float           @default(0)
+  procs             Int             @default(0)
+  containersRunning Int             @default(0)
+  containersTotal   Int             @default(0)
+  uptimeSec         Int             @default(0)
+
+  @@index([serverId, ts])
+}

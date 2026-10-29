@@ -27,7 +27,12 @@ export type UniverseEventType =
   | "BILLING_OVERDUE"
   | "BILLING_CLIENT_WITHOUT_WHATSAPP"
   | "BILLING_RECURRENCE_ERROR"
-  | "WHATSAPP_FAILED";
+  | "WHATSAPP_FAILED"
+  | "SERVER_OFFLINE"
+  | "SERVER_RECOVERED"
+  | "SERVER_CPU_HIGH"
+  | "SERVER_MEM_HIGH"
+  | "SERVER_DISK_HIGH";
 
 export interface RecordUniverseEventInput {
   type: UniverseEventType;

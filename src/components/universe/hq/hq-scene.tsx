@@ -7,6 +7,8 @@ import * as THREE from "three";
 import { computeOfficeLayout } from "./office/office-layout";
 import { OfficeShell } from "./office/office-shell";
 import { OfficeProps } from "./office/office-props";
+import { NocWall } from "./office/noc-wall";
+import { useServers } from "@/hooks/use-servers";
 import { CommandScreen, type CommandCenterStats } from "./office/command-screen";
 import { ProjectDesk, deskStateFor } from "./office/project-desk";
 import { ProviderRack } from "./provider-rack";
@@ -29,6 +31,7 @@ interface HqSceneProps {
   selectedApplicationId: string | null;
   onSelectApplication: (id: string) => void;
   onOpenProvider: (providerId: string) => void;
+  onOpenServers: () => void;
   reducedGraphics: boolean;
   env: EnvironmentState;
 }
@@ -56,6 +59,7 @@ export function HqScene({
   selectedApplicationId,
   onSelectApplication,
   onOpenProvider,
+  onOpenServers,
   reducedGraphics,
   env,
 }: HqSceneProps) {
@@ -104,6 +108,9 @@ export function HqScene({
   const { data: sessionUser } = useSession();
   const canSeeBilling = sessionUser ? canUser(sessionUser, "billing:view") : false;
   const { data: billingCounts } = useBillingCounts(canSeeBilling);
+  // A parede do NOC só existe para quem pode ler servidores (a API exige escopo global).
+  const { data: monitoredServers } = useServers(sessionUser ? canUser(sessionUser, "provider:read") : false);
+  const nocEnabled = monitoredServers !== undefined;
 
   const stats: CommandCenterStats = useMemo(
     () => ({
@@ -177,7 +184,8 @@ export function HqScene({
       {!reducedGraphics && <ContactShadows position={[centerX, 0.003, centerZ]} opacity={0.4} scale={layout.radius * 2.4} blur={2.2} far={4} color="#000000" />}
 
       <Suspense fallback={null}>
-        <OfficeShell layout={layout} />
+        <OfficeShell layout={layout} nocEnabled={nocEnabled} />
+        {nocEnabled && <NocWall layout={layout} servers={monitoredServers} onOpen={onOpenServers} />}
         <CommandScreen layout={layout} stats={stats} />
         <OfficeProps layout={layout} />
 
