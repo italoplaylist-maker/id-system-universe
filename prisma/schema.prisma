@@ -710,3 +710,51 @@ model ServerMetric {
 
   @@index([serverId, ts])
 }
+
+/// Uma "fonte" de eventos de agentes Claude (ex.: um ambiente de nuvem). O token só existe em hash.
+model AgentFeed {
+  id        String         @id @default(cuid())
+  name      String
+  tokenHash String         @unique
+  createdAt DateTime       @default(now())
+  sessions  AgentSession[]
+}
+
+model AgentSession {
+  id             String       @id @default(cuid())
+  feedId         String
+  feed           AgentFeed    @relation(fields: [feedId], references: [id], onDelete: Cascade)
+  /// session_id enviado pelo hook do Claude Code.
+  externalId     String
+  repo           String?
+  branch         String?
+  model          String?
+  /// Último estado reportado: WORKING | WAITING | ENDED. ERROR e "ocioso" são derivados na leitura.
+  phase          String       @default("WORKING")
+  lastTool       String?
+  lastTarget     String?
+  lastToolFailed Boolean      @default(false)
+  toolCount      Int          @default(0)
+  failedCount    Int          @default(0)
+  startedAt      DateTime     @default(now())
+  lastEventAt    DateTime     @default(now())
+  endedAt        DateTime?
+  events         AgentEvent[]
+
+  @@unique([feedId, externalId])
+  @@index([lastEventAt])
+}
+
+model AgentEvent {
+  id        String       @id @default(cuid())
+  sessionId String
+  session   AgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  ts        DateTime     @default(now())
+  kind      String
+  tool      String?
+  target    String?
+  ok        Boolean      @default(true)
+
+  @@index([sessionId, ts])
+  @@index([ts])
+}

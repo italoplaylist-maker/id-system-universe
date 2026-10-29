@@ -45,4 +45,7 @@ export async function register() {
   const { runMonitoringTick, pruneOldMetrics } = await import("@/server/monitoring/alerts");
   setInterval(safely("monitoring_tick", () => runMonitoringTick()), 30_000);
   setInterval(safely("metrics_prune", () => pruneOldMetrics()), 60 * 60_000);
+
+  const { pruneAgentData } = await import("@/server/claude/agent-service");
+  setInterval(safely("agent_prune", () => pruneAgentData()), 60 * 60_000);
 }

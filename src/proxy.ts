@@ -12,7 +12,7 @@ import { getAppOrigin } from "@/server/http/public-url";
  * an unauthenticated visitor doesn't see a flash of protected UI.
  */
 const PUBLIC_PATHS = ["/login", "/onboarding"];
-const PUBLIC_API_PREFIXES = ["/api/health", "/api/auth", "/api/webhooks", "/api/agent"];
+const PUBLIC_API_PREFIXES = ["/api/health", "/api/auth", "/api/webhooks", "/api/agent", "/api/claude/events", "/api/claude/hook"];
 
 /** No proxy a requisição traz o Host público; APP_URL, quando definido, tem precedência. */
 function redirectTo(request: NextRequest, path: string) {
