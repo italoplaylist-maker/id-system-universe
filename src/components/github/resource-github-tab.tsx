@@ -186,7 +186,7 @@ export function ResourceGitHubTab({ applicationId }: { applicationId: string }) 
   const canEdit = user ? canUser(user, "project:write") : false;
 
   return (
-    <div className="space-y-4 overflow-y-auto p-4">
+    <div className="h-full space-y-4 overflow-y-auto p-4 pb-8">
       <ProductionVersion applicationId={applicationId} />
       {!isLoading && <RepositoryForm key={`${current?.githubRepositoryId}-${current?.branch}-${current?.autoDeploy}-${current?.onPush}-${current?.onMerge}`} applicationId={applicationId} current={current ?? null} canEdit={canEdit} />}
       <section>

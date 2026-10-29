@@ -119,9 +119,9 @@ export function ApplicationPanel() {
         ))}
       </div>
 
-      <div className="flex-1 overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-hidden">
         {activeTab === "overview" && app && (
-          <div className="space-y-4 overflow-y-auto p-4">
+          <div className="h-full space-y-4 overflow-y-auto p-4">
             <dl className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <dt className="text-xs text-muted">Provider</dt>
