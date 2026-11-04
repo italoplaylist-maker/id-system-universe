@@ -13,7 +13,10 @@ export const WORKING_STALE_MS = 3 * 60_000;
 export const SESSION_VISIBLE_MS = 30 * 60_000;
 export const RETENTION_DAYS = 3;
 
-export type AgentState = "WORKING" | "IDLE" | "ERROR";
+export type AgentState = "WORKING" | "IDLE" | "ERROR" | "APPROVAL";
+
+/** O hook espera a decisão por até ~270 s; depois cai para o diálogo normal do Claude. */
+export const APPROVAL_TTL_MS = 290_000;
 
 // ---------------------------------------------------------------------------
 // Privacidade: o hook já envia só o essencial; aqui removemos o que parece segredo.
@@ -81,9 +84,11 @@ async function feedByToken(token: string) {
 
 export const hookEventSchema = z.object({
   sessionId: z.string().min(1).max(120),
-  event: z.enum(["session_start", "prompt", "tool_start", "tool_end", "stop", "notify", "session_end"]),
+  event: z.enum(["session_start", "prompt", "tool_start", "tool_end", "stop", "notify", "session_end", "permission_request"]),
   tool: z.string().max(60).optional(),
   target: z.string().max(200).optional(),
+  /** Só em permission_request: o que o Claude quer executar (comando/arquivo), para você decidir com informação. */
+  detail: z.string().max(500).optional(),
   ok: z.boolean().optional(),
   repo: z.string().max(160).optional(),
   branch: z.string().max(120).optional(),
@@ -94,7 +99,7 @@ export const hookEventSchema = z.object({
   deliver: z.boolean().optional(),
 });
 
-export async function ingestHookEvent(token: string, body: unknown): Promise<{ ok: true; pending: boolean; command?: string }> {
+export async function ingestHookEvent(token: string, body: unknown): Promise<{ ok: true; pending: boolean; command?: string; approvalId?: string }> {
   const feed = await feedByToken(token);
   // Folga grande: uma sessão ativa dispara dezenas de eventos por minuto.
   consumeRateLimit(`claude:${feed.id}`, 900, 60_000);
@@ -141,6 +146,12 @@ export async function ingestHookEvent(token: string, body: unknown): Promise<{ o
     await prisma.agentEvent.create({ data: { sessionId: session.id, ts: at, kind: e.event, tool: e.tool, target, ok: e.ok ?? true } });
   }
   if (e.event === "session_end") return { ok: true, pending: false };
+  if (e.event === "permission_request") {
+    // Um pedido novo substitui os anteriores ainda abertos desta sessão (o Claude só pergunta uma coisa por vez).
+    await prisma.agentApproval.updateMany({ where: { sessionId: session.id, status: "PENDING" }, data: { status: "EXPIRED", decidedAt: now } });
+    const approval = await prisma.agentApproval.create({ data: { sessionId: session.id, tool: e.tool ?? "Ferramenta", detail: redactSecrets(e.detail ?? e.target ?? "").slice(0, 500) } });
+    return { ok: true, pending: false, approvalId: approval.id };
+  }
   // Pedidos do painel: entregues só a quem está esperando a resposta (e sabe repassar ao Claude).
   if (e.deliver) {
     const command = await claimPendingCommands(session.id);
@@ -166,13 +177,45 @@ export interface AgentSessionView {
   failedCount: number;
   startedAt: string;
   lastEventAt: string;
+  /** Pedido de permissão aguardando você decidir (o mais antigo ainda válido). */
+  approval: { id: string; tool: string; detail: string; createdAt: string } | null;
 }
 
-export function deriveAgentState(s: { phase: string; lastToolFailed: boolean; lastEventAt: Date }, now: Date): AgentState | "ENDED" {
+export function deriveAgentState(s: { phase: string; lastToolFailed: boolean; lastEventAt: Date }, now: Date, hasPendingApproval = false): AgentState | "ENDED" {
   if (s.phase === "ENDED" || now.getTime() - s.lastEventAt.getTime() > SESSION_VISIBLE_MS) return "ENDED";
+  if (hasPendingApproval) return "APPROVAL";
   if (s.phase === "WAITING") return "IDLE";
   if (now.getTime() - s.lastEventAt.getTime() > WORKING_STALE_MS) return "IDLE";
   return s.lastToolFailed ? "ERROR" : "WORKING";
+}
+
+async function pendingApprovalsBySession(sessionIds: string[], now: Date) {
+  const rows = await prisma.agentApproval.findMany({
+    where: { sessionId: { in: sessionIds }, status: "PENDING", createdAt: { gte: new Date(now.getTime() - APPROVAL_TTL_MS) } },
+    orderBy: { createdAt: "asc" },
+  });
+  const map = new Map<string, AgentSessionView["approval"]>();
+  for (const r of rows) if (!map.has(r.sessionId)) map.set(r.sessionId, { id: r.id, tool: r.tool, detail: r.detail, createdAt: r.createdAt.toISOString() });
+  return map;
+}
+
+type SessionRow = Awaited<ReturnType<typeof prisma.agentSession.findMany<{ include: { feed: { select: { name: true } } } }>>>[number];
+
+function toSessionView(r: SessionRow, state: AgentState, approval: AgentSessionView["approval"]): AgentSessionView {
+  return {
+    id: r.id,
+    feedName: r.feed.name,
+    repo: r.repo,
+    branch: r.branch,
+    model: r.model,
+    state,
+    activity: r.lastTool ? (r.lastTarget ? `${r.lastTool} · ${r.lastTarget}` : r.lastTool) : null,
+    toolCount: r.toolCount,
+    failedCount: r.failedCount,
+    startedAt: r.startedAt.toISOString(),
+    lastEventAt: r.lastEventAt.toISOString(),
+    approval,
+  };
 }
 
 export async function listActiveSessions(now: Date = new Date()): Promise<AgentSessionView[]> {
@@ -181,23 +224,13 @@ export async function listActiveSessions(now: Date = new Date()): Promise<AgentS
     include: { feed: { select: { name: true } } },
     orderBy: [{ startedAt: "asc" }, { id: "asc" }],
   });
+  const approvals = await pendingApprovalsBySession(rows.map((r) => r.id), now);
   const result: AgentSessionView[] = [];
   for (const r of rows) {
-    const state = deriveAgentState(r, now);
+    const approval = approvals.get(r.id) ?? null;
+    const state = deriveAgentState(r, now, approval !== null);
     if (state === "ENDED") continue;
-    result.push({
-      id: r.id,
-      feedName: r.feed.name,
-      repo: r.repo,
-      branch: r.branch,
-      model: r.model,
-      state,
-      activity: r.lastTool ? (r.lastTarget ? `${r.lastTool} · ${r.lastTarget}` : r.lastTool) : null,
-      toolCount: r.toolCount,
-      failedCount: r.failedCount,
-      startedAt: r.startedAt.toISOString(),
-      lastEventAt: r.lastEventAt.toISOString(),
-    });
+    result.push(toSessionView(r, state, approval));
   }
   return result;
 }
@@ -216,14 +249,10 @@ export async function getSessionTimeline(id: string, limit = 80): Promise<{ sess
   const row = await prisma.agentSession.findUnique({ where: { id }, include: { feed: { select: { name: true } } } });
   if (!row) throw new NotFoundError("Sessão não encontrada.");
   const events = await prisma.agentEvent.findMany({ where: { sessionId: id }, orderBy: { ts: "desc" }, take: Math.min(limit, 200) });
-  const state = deriveAgentState(row, now);
+  const approval = (await pendingApprovalsBySession([id], now)).get(id) ?? null;
+  const state = deriveAgentState(row, now, approval !== null);
   return {
-    session: {
-      id: row.id, feedName: row.feed.name, repo: row.repo, branch: row.branch, model: row.model,
-      state: state === "ENDED" ? "IDLE" : state,
-      activity: row.lastTool ? (row.lastTarget ? `${row.lastTool} · ${row.lastTarget}` : row.lastTool) : null,
-      toolCount: row.toolCount, failedCount: row.failedCount, startedAt: row.startedAt.toISOString(), lastEventAt: row.lastEventAt.toISOString(),
-    },
+    session: toSessionView(row, state === "ENDED" ? "IDLE" : state, approval),
     events: events.map((e) => ({ id: e.id, ts: e.ts.toISOString(), kind: e.kind, tool: e.tool, target: e.target, ok: e.ok })),
   };
 }
@@ -296,4 +325,34 @@ export async function claimPendingCommands(sessionId: string): Promise<string | 
   if (claimed.length === 0) return null;
   const body = claimed.length === 1 ? claimed[0] : claimed.map((t, i) => `${i + 1}. ${t}`).join("\n");
   return `[Pedido enviado pelo painel ID System Universe]\n${body}`;
+}
+
+// ---------------------------------------------------------------------------
+// Aprovações: o hook PermissionRequest espera a sua decisão aqui
+// ---------------------------------------------------------------------------
+
+/** Consulta do hook (autenticada pelo token da fonte): só enxerga aprovações das próprias sessões. */
+export async function getApprovalForHook(token: string, approvalId: string): Promise<{ status: "PENDING" | "APPROVED" | "DENIED" | "EXPIRED" }> {
+  const feed = await feedByToken(token);
+  const a = await prisma.agentApproval.findFirst({ where: { id: approvalId, session: { feedId: feed.id } } });
+  if (!a) throw new NotFoundError("Aprovação não encontrada.");
+  if (a.status === "PENDING" && Date.now() - a.createdAt.getTime() > APPROVAL_TTL_MS) return { status: "EXPIRED" };
+  return { status: a.status as "PENDING" | "APPROVED" | "DENIED" | "EXPIRED" };
+}
+
+export async function decideApproval(approvalId: string, input: unknown, actor: Actor): Promise<{ status: "APPROVED" | "DENIED" }> {
+  const parsed = z.object({ decision: z.enum(["allow", "deny"]) }).safeParse(input);
+  if (!parsed.success) throw new ValidationError("Decisão inválida.");
+  consumeRateLimit(`agent-approval:${actor.userId}`, 60, 60_000);
+  const a = await prisma.agentApproval.findUnique({ where: { id: approvalId } });
+  if (!a) throw new NotFoundError("Aprovação não encontrada.");
+  const status = parsed.data.decision === "allow" ? "APPROVED" : "DENIED";
+  // Só decide uma vez, e só enquanto o hook ainda está esperando.
+  const won = await prisma.agentApproval.updateMany({
+    where: { id: approvalId, status: "PENDING", createdAt: { gte: new Date(Date.now() - APPROVAL_TTL_MS) } },
+    data: { status, decidedById: actor.userId, decidedAt: new Date() },
+  });
+  if (won.count === 0) throw new ValidationError("Este pedido já foi decidido ou expirou — o Claude voltou a perguntar na própria sessão.");
+  await recordAuditEvent({ userId: actor.userId, action: "AGENT_APPROVAL_DECIDED", status: "SUCCESS", entityType: "AgentSession", entityId: a.sessionId, metadata: { tool: a.tool, decision: status }, ipAddress: actor.ip, userAgent: actor.userAgent });
+  return { status };
 }

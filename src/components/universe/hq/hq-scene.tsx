@@ -139,6 +139,7 @@ export function HqScene({
       working: list.filter((s) => s.state === "WORKING").length,
       idle: list.filter((s) => s.state === "IDLE").length,
       errors: list.filter((s) => s.state === "ERROR").length,
+      approvals: list.filter((s) => s.state === "APPROVAL").length,
       tools: list.reduce((n, s) => n + s.toolCount, 0),
     };
   }, [agentSessions]);
@@ -322,8 +323,8 @@ export function HqScene({
               style={{
                 padding: "3px 10px",
                 borderRadius: 999,
-                background: "rgba(10,13,20,0.85)",
-                border: "1px solid rgba(255,255,255,0.18)",
+                background: agentStats.approvals > 0 ? "rgba(120,80,0,0.92)" : "rgba(10,13,20,0.85)",
+                border: agentStats.approvals > 0 ? "1px solid #fbbf24" : "1px solid rgba(255,255,255,0.18)",
                 color: "#f1f4fa",
                 fontFamily: "ui-sans-serif, system-ui",
                 fontSize: 11,
@@ -332,7 +333,7 @@ export function HqScene({
                 cursor: "pointer",
               }}
             >
-              Sala dos Agentes · {agentStats.working > 0 ? `${agentStats.working} trabalhando` : `${agentStats.active} ativo${agentStats.active === 1 ? "" : "s"}`}
+              Sala dos Agentes · {agentStats.approvals > 0 ? `${agentStats.approvals} aguardando aprovação` : agentStats.working > 0 ? `${agentStats.working} trabalhando` : `${agentStats.active} ativo${agentStats.active === 1 ? "" : "s"}`}
             </button>
           </Html>
         )}

@@ -71,3 +71,12 @@ export function useAgentCommandMutations(sessionId: string) {
     }),
   };
 }
+
+export function useDecideApproval() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, decision }: { id: string; decision: "allow" | "deny" }) =>
+      apiFetch<{ status: "APPROVED" | "DENIED" }>(`/api/claude/approvals/${id}/decision`, { method: "POST", body: JSON.stringify({ decision }) }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["agents"] }),
+  });
+}

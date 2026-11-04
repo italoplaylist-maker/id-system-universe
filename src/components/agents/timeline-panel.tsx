@@ -6,10 +6,10 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { formatAgo } from "@/lib/format-metrics";
-import { useAgentCommandMutations, useAgentCommands, useAgentTimeline, type AgentTimelineItem } from "@/hooks/use-agents";
+import { useAgentCommandMutations, useAgentCommands, useAgentTimeline, useDecideApproval, type AgentSessionView, type AgentTimelineItem } from "@/hooks/use-agents";
 import { agentTitle } from "@/components/universe/hq/office/agent-desk";
 
-const STATE = { WORKING: { label: "Trabalhando", cls: "text-status-deploying" }, IDLE: { label: "Aguardando", cls: "text-muted" }, ERROR: { label: "Erro na ferramenta", cls: "text-status-error" } } as const;
+const STATE = { WORKING: { label: "Trabalhando", cls: "text-status-deploying" }, IDLE: { label: "Aguardando", cls: "text-muted" }, APPROVAL: { label: "Aguarda sua aprovação", cls: "text-status-warning" }, ERROR: { label: "Erro na ferramenta", cls: "text-status-error" } } as const;
 
 function describe(e: AgentTimelineItem): { icon: React.ReactNode; text: string } {
   switch (e.kind) {
@@ -24,6 +24,32 @@ function describe(e: AgentTimelineItem): { icon: React.ReactNode; text: string }
         text: `${e.tool ?? "Ferramenta"}${e.target ? ` · ${e.target}` : ""}${e.ok ? "" : " — falhou"}`,
       };
   }
+}
+
+function ApprovalCard({ approval }: { approval: NonNullable<AgentSessionView["approval"]> }) {
+  const decide = useDecideApproval();
+  const act = async (decision: "allow" | "deny") => {
+    try {
+      await decide.mutateAsync({ id: approval.id, decision });
+      toast.success(decision === "allow" ? "Aprovado — o agente segue em frente." : "Negado.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao decidir.");
+    }
+  };
+  return (
+    <div className="space-y-2 border-b border-status-warning/40 bg-status-warning/10 p-4" role="alert">
+      <p className="flex items-center gap-1.5 text-xs font-semibold text-status-warning">
+        <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+        O agente pede permissão para usar {approval.tool}
+      </p>
+      <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border bg-background p-2 text-xs text-foreground">{approval.detail || "(sem detalhes)"}</pre>
+      <div className="flex gap-2">
+        <Button size="sm" variant="primary" disabled={decide.isPending} onClick={() => void act("allow")}>Aprovar</Button>
+        <Button size="sm" variant="danger" disabled={decide.isPending} onClick={() => void act("deny")}>Negar</Button>
+      </div>
+      <p className="text-[11px] text-muted">Se você não responder em ~4 min, o Claude volta a perguntar na própria sessão.</p>
+    </div>
+  );
 }
 
 function CommandBox({ sessionId, idle }: { sessionId: string; idle: boolean }) {
@@ -108,6 +134,7 @@ export function TimelinePanel({ sessionId, onClose, canSend = false }: { session
           <div className="p-3"><p className="text-lg font-semibold">{formatAgo(s.lastEventAt).replace("há ", "")}</p><p className="text-muted">último sinal</p></div>
         </div>
       )}
+      {canSend && s?.approval && <ApprovalCard approval={s.approval} />}
       {canSend && s && <CommandBox sessionId={sessionId} idle={s.state === "IDLE"} />}
       <ul className="min-h-0 flex-1 divide-y divide-border overflow-y-auto text-sm">
         {data?.events.map((e) => {

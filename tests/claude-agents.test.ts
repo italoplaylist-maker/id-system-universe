@@ -2,7 +2,7 @@ import { prisma, resetDb, makeUser } from "./helpers";
 import assert from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
 import { UnauthorizedLikeError, ValidationError } from "@/lib/errors";
-import { cancelCommand, createFeed, deriveAgentState, listCommands, queueCommand, getSessionTimeline, ingestHookEvent, listActiveSessions, pruneAgentData, redactSecrets, rotateFeedToken } from "@/server/claude/agent-service";
+import { cancelCommand, createFeed, decideApproval, getApprovalForHook, deriveAgentState, listCommands, queueCommand, getSessionTimeline, ingestHookEvent, listActiveSessions, pruneAgentData, redactSecrets, rotateFeedToken } from "@/server/claude/agent-service";
 
 let actor: { userId: string };
 let token: string;
@@ -161,6 +161,56 @@ describe("Agentes Claude em tempo real", () => {
       await assert.rejects(queueCommand(s.id, { text: "sexto" }, actor), ValidationError);
       await ingestHookEvent(token, ev({ event: "session_end" }));
       await assert.rejects(queueCommand(s.id, { text: "tarde demais" }, actor), ValidationError);
+    });
+  });
+
+  describe("aprovações pelo painel", () => {
+    async function ask(detail = "npm test") {
+      await ingestHookEvent(token, ev({ event: "session_start" }));
+      const r = await ingestHookEvent(token, ev({ event: "permission_request", tool: "Bash", detail }));
+      assert.ok(r.approvalId);
+      return r.approvalId;
+    }
+
+    it("sessão fica aguardando aprovação até você decidir; o hook recebe a decisão", async () => {
+      const id = await ask("API_KEY=segredo123 npm test");
+      const [s] = await listActiveSessions();
+      assert.equal(s.state, "APPROVAL");
+      assert.equal(s.approval?.tool, "Bash");
+      assert.ok(!s.approval?.detail.includes("segredo123"));
+      assert.equal((await getApprovalForHook(token, id)).status, "PENDING");
+      assert.deepEqual(await decideApproval(id, { decision: "allow" }, actor), { status: "APPROVED" });
+      assert.equal((await getApprovalForHook(token, id)).status, "APPROVED");
+      assert.notEqual((await listActiveSessions())[0].state, "APPROVAL");
+    });
+
+    it("decide uma única vez", async () => {
+      const id = await ask();
+      await decideApproval(id, { decision: "deny" }, actor);
+      await assert.rejects(decideApproval(id, { decision: "allow" }, actor), ValidationError);
+      assert.equal((await getApprovalForHook(token, id)).status, "DENIED");
+    });
+
+    it("expira depois do prazo e o pedido novo substitui o antigo", async () => {
+      const first = await ask();
+      await prisma.agentApproval.update({ where: { id: first }, data: { createdAt: new Date(Date.now() - 400_000) } });
+      assert.equal((await getApprovalForHook(token, first)).status, "EXPIRED");
+      await assert.rejects(decideApproval(first, { decision: "allow" }, actor), ValidationError);
+      const second = await ask("outro");
+      const third = (await ingestHookEvent(token, ev({ event: "permission_request", tool: "Edit", detail: "a.ts" }))).approvalId!;
+      assert.equal((await getApprovalForHook(token, second)).status, "EXPIRED");
+      assert.equal((await getApprovalForHook(token, third)).status, "PENDING");
+    });
+
+    it("o hook só enxerga aprovações da própria fonte", async () => {
+      const id = await ask();
+      const other = await createFeed({ name: "Outra" }, actor);
+      await assert.rejects(getApprovalForHook(other.token, id));
+    });
+
+    it("rejeita decisão inválida", async () => {
+      const id = await ask();
+      await assert.rejects(decideApproval(id, { decision: "talvez" }, actor), ValidationError);
     });
   });
 });

@@ -16,10 +16,11 @@ const ERROR_RED = "#ff5a5f";
 const OAK = new THREE.Color("#c8a47a");
 const BLUE = new THREE.Color(WORK_BLUE);
 const RED = new THREE.Color(ERROR_RED);
+const AMBER = new THREE.Color("#fbbf24");
 const CHAIR: ChairStyle = { fabric: "#2b303b", headrest: true };
 
-const STATE_LABEL = { WORKING: "TRABALHANDO", IDLE: "AGUARDANDO", ERROR: "ERRO NA FERRAMENTA" } as const;
-const STATE_COLOR = { WORKING: "#38bdf8", IDLE: "#8890a3", ERROR: "#f87171" } as const;
+const STATE_LABEL = { WORKING: "TRABALHANDO", IDLE: "AGUARDANDO", ERROR: "ERRO NA FERRAMENTA", APPROVAL: "AGUARDA SUA APROVAÇÃO" } as const;
+const STATE_COLOR = { WORKING: "#38bdf8", IDLE: "#8890a3", ERROR: "#f87171", APPROVAL: "#fbbf24" } as const;
 
 export function agentTitle(s: Pick<AgentSessionView, "repo" | "id">): string {
   if (s.repo) return s.repo.split("/").filter(Boolean).pop() ?? s.repo;
@@ -62,10 +63,11 @@ function paintAgent(ctx: CanvasRenderingContext2D, w: number, h: number, s: Agen
   ctx.fill();
   ctx.font = "800 22px ui-sans-serif, system-ui";
   ctx.fillText(STATE_LABEL[s.state], 54, 122);
+  ctx.font = "800 15px ui-sans-serif, system-ui";
 
   ctx.fillStyle = "#e6ebf5";
   ctx.font = "600 17px ui-sans-serif, system-ui";
-  ctx.fillText(fit(ctx, s.activity ?? "Sem atividade ainda", w - 48), 24, 156);
+  ctx.fillText(fit(ctx, s.approval ? `${s.approval.tool} · ${s.approval.detail}` : (s.activity ?? "Sem atividade ainda"), w - 48), 24, 156);
   ctx.fillStyle = "#7d889d";
   ctx.font = "500 14px ui-sans-serif, system-ui";
   ctx.fillText(`${s.toolCount} ferramentas · ${s.failedCount} falhas · ${hhmm(s.lastEventAt)}`, 24, 190);
@@ -94,7 +96,7 @@ export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimm
   const topMaterial = useRef<THREE.MeshStandardMaterial>(null);
   const haloMaterial = useRef<THREE.MeshBasicMaterial>(null);
   const ringMaterial = useRef<THREE.MeshBasicMaterial>(null);
-  const blend = useRef({ work: state === "WORKING" ? 1 : 0, error: state === "ERROR" ? 1 : 0, ring: 0 });
+  const blend = useRef({ work: state === "WORKING" ? 1 : 0, error: state === "ERROR" ? 1 : 0, ask: state === "APPROVAL" ? 1 : 0, ring: 0 });
   const tmp = useRef(new THREE.Color());
 
   useFrame(({ clock }, delta) => {
@@ -102,13 +104,16 @@ export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimm
     const b = blend.current;
     b.work = damp(b.work, state === "WORKING" ? 1 : 0, 6, dt);
     b.error = damp(b.error, state === "ERROR" ? 1 : 0, 6, dt);
+    b.ask = damp(b.ask, state === "APPROVAL" ? 1 : 0, 6, dt);
     b.ring = damp(b.ring, selected ? 1 : hovered ? 0.55 : 0, 10, dt);
     const pulse = reduced ? 0.5 : 0.5 + 0.5 * Math.sin(clock.elapsedTime * 2.4);
-    const glow = Math.max(b.work, b.error);
+    const glow = Math.max(b.work, b.error, b.ask);
+    // Âmbar (aguardando aprovação) tem prioridade visual: é o único estado que depende de você.
+    const tint = b.ask > Math.max(b.work, b.error) ? AMBER : b.error > b.work ? RED : BLUE;
     if (topMaterial.current) {
-      tmp.current.copy(OAK).lerp(b.error > b.work ? RED : BLUE, glow * 0.85);
+      tmp.current.copy(OAK).lerp(tint, glow * 0.85);
       topMaterial.current.color.copy(tmp.current);
-      topMaterial.current.emissive.copy(b.error > b.work ? RED : BLUE);
+      topMaterial.current.emissive.copy(tint);
       topMaterial.current.emissiveIntensity = glow * (0.55 + 0.3 * pulse);
     }
     if (haloMaterial.current) haloMaterial.current.opacity = glow * (0.28 + 0.14 * pulse);
@@ -116,7 +121,7 @@ export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimm
   });
 
   const paint = useCallback((ctx: CanvasRenderingContext2D, w: number, h: number) => paintAgent(ctx, w, h, session, slot.accent), [session, slot.accent]);
-  const paintKey = `${session.state}|${session.activity}|${session.toolCount}|${session.failedCount}|${session.lastEventAt}|${session.repo}|${session.branch}`;
+  const paintKey = `${session.approval?.id ?? ""}|${session.state}|${session.activity}|${session.toolCount}|${session.failedCount}|${session.lastEventAt}|${session.repo}|${session.branch}`;
   const pivotZ = POD.DESK_CENTER_Z + 0.24;
 
   return (

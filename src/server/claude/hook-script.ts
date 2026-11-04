@@ -3,7 +3,7 @@
  * Envia apenas: tipo do evento, nome da ferramenta e um alvo curto (arquivo/comando truncado).
  * NUNCA envia o texto do prompt, o conteúdo de arquivos nem a saída dos comandos.
  */
-export const HOOK_VERSION = "1.1.0";
+export const HOOK_VERSION = "1.2.0";
 
 export const HOOK_SCRIPT = `#!/usr/bin/env python3
 # ID System Universe — hook do Claude Code v${HOOK_VERSION}
@@ -12,7 +12,7 @@ import json, os, subprocess, sys, tempfile, time, urllib.request
 
 EVENTS = {
     "SessionStart": "session_start", "UserPromptSubmit": "prompt", "PreToolUse": "tool_start",
-    "PostToolUse": "tool_end", "Stop": "stop", "Notification": "notify", "SessionEnd": "session_end",
+    "PostToolUse": "tool_end", "PermissionRequest": "permission_request", "Stop": "stop", "Notification": "notify", "SessionEnd": "session_end",
 }
 
 def short_path(p, cwd):
@@ -35,6 +35,23 @@ def target_of(tool, inp, cwd):
         if isinstance(inp.get(key), str):
             return inp[key][:80]
     return None
+
+def detail_of(inp, cwd):
+    """O que o Claude quer executar, para você decidir com informação (comando completo; arquivo só o caminho)."""
+    if isinstance(inp, dict):
+        if isinstance(inp.get("command"), str):
+            return " ".join(inp["command"].split())[:500]
+        for key in ("file_path", "notebook_path", "path"):
+            if isinstance(inp.get(key), str):
+                return short_path(inp[key], cwd)
+        for key in ("url", "pattern", "query", "description"):
+            if isinstance(inp.get(key), str):
+                return inp[key][:500]
+    return ""
+
+def fetch_status(url, token, approval_id):
+    req = urllib.request.Request(url + "/api/claude/hook-approvals/" + approval_id, headers={"Authorization": "Bearer " + token})
+    return json.loads(urllib.request.urlopen(req, timeout=5).read() or b"{}").get("status")
 
 def failed(resp):
     if isinstance(resp, dict):
@@ -71,6 +88,30 @@ def main():
         return
     cwd = data.get("cwd") or os.getcwd()
     body = {"sessionId": sid, "event": event, "at": int(time.time() * 1000)}
+    if event == "permission_request":
+        body["tool"] = str(data.get("tool_name", ""))[:60]
+        body["detail"] = detail_of(data.get("tool_input"), cwd)
+        try:
+            approval_id = send(url, token, body, 3).get("approvalId")
+        except Exception:
+            return
+        # Espera a sua decisão no painel (até ~4,5 min). Sem resposta, não decide nada e o Claude pergunta normalmente.
+        deadline = time.time() + 270
+        while approval_id and time.time() < deadline:
+            try:
+                status = fetch_status(url, token, approval_id)
+            except Exception:
+                status = "PENDING"
+            if status == "APPROVED":
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}))
+                return
+            if status == "DENIED":
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "deny", "message": "Negado por você no painel ID System Universe."}}}))
+                return
+            if status == "EXPIRED":
+                return
+            time.sleep(1.5)
+        return
     if event in ("tool_start", "tool_end"):
         body["tool"] = str(data.get("tool_name", ""))[:60]
         tgt = target_of(data.get("tool_name"), data.get("tool_input"), cwd)

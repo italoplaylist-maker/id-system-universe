@@ -23,12 +23,15 @@ except (FileNotFoundError, ValueError):
     data = {}
 cmd = 'python3 "$HOME/.claude/hooks/isu-hook.py"'
 hooks = data.setdefault("hooks", {})
-for event in ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "Notification", "SessionEnd"]:
+for event in ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "Notification", "SessionEnd"]:
     entries = hooks.setdefault(event, [])
     if any("isu-hook.py" in h.get("command", "") for e in entries for h in e.get("hooks", [])):
         continue
     entry = {"hooks": [{"type": "command", "command": cmd}]}
-    if event.endswith("ToolUse"):
+    if event == "PermissionRequest":
+        # Fica esperando a sua decisão no painel — precisa de mais tempo que o padrão.
+        entry["hooks"][0]["timeout"] = 300
+    if event.endswith("ToolUse") or event == "PermissionRequest":
         entry = {"matcher": "*", **entry}
     entries.append(entry)
 with open(path, "w") as f:

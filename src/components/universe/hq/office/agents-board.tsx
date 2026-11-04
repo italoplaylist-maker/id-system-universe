@@ -11,6 +11,7 @@ export interface AgentsBoardStats {
   working: number;
   idle: number;
   errors: number;
+  approvals: number;
   tools: number;
 }
 
@@ -31,8 +32,8 @@ function paint(ctx: CanvasRenderingContext2D, stats: AgentsBoardStats) {
   ctx.fillRect(64, 84, 96, 5);
 
   const bad = stats.errors > 0;
-  const text = stats.active === 0 ? "NENHUM AGENTE ATIVO" : bad ? "FALHA DE FERRAMENTA" : stats.working > 0 ? "AGENTES TRABALHANDO" : "AGENTES AGUARDANDO";
-  const color = stats.active === 0 ? "#8b96ad" : bad ? "#f87171" : stats.working > 0 ? "#38bdf8" : "#34d399";
+  const text = stats.active === 0 ? "NENHUM AGENTE ATIVO" : stats.approvals > 0 ? `${stats.approvals} AGUARDANDO APROVAÇÃO` : bad ? "FALHA DE FERRAMENTA" : stats.working > 0 ? "AGENTES TRABALHANDO" : "AGENTES AGUARDANDO";
+  const color = stats.active === 0 ? "#8b96ad" : stats.approvals > 0 ? "#fbbf24" : bad ? "#f87171" : stats.working > 0 ? "#38bdf8" : "#34d399";
   ctx.textAlign = "right";
   ctx.fillStyle = color;
   ctx.font = "700 30px ui-sans-serif, system-ui";
@@ -42,6 +43,7 @@ function paint(ctx: CanvasRenderingContext2D, stats: AgentsBoardStats) {
     { label: "ATIVOS", value: stats.active, color: "#e6e9f0" },
     { label: "TRABALHANDO", value: stats.working, color: "#38bdf8" },
     { label: "AGUARDANDO", value: stats.idle, color: "#e6e9f0" },
+    { label: "APROVAÇÕES", value: stats.approvals, color: stats.approvals > 0 ? "#fbbf24" : "#e6e9f0" },
     { label: "COM ERRO", value: stats.errors, color: stats.errors > 0 ? "#f87171" : "#e6e9f0" },
     { label: "FERRAMENTAS", value: stats.tools, color: "#e6e9f0" },
   ];
@@ -82,7 +84,7 @@ export function AgentsBoard({ layout, stats }: { layout: OfficeLayout; stats: Ag
     return () => texture.dispose();
   }, []);
 
-  const key = `${stats.active}|${stats.working}|${stats.idle}|${stats.errors}|${stats.tools}`;
+  const key = `${stats.active}|${stats.working}|${stats.idle}|${stats.errors}|${stats.approvals}|${stats.tools}`;
   useEffect(() => {
     const texture = textureRef.current;
     if (!texture) return;
