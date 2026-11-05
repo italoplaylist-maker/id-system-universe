@@ -5,6 +5,7 @@ import { recordAuditEvent } from "@/server/audit/audit-log";
 import { redactSecrets } from "@/server/claude/agent-service";
 import { orchestratorBus } from "./bus";
 import { ExecutorStartError, getExecutor } from "./executor";
+import { buildUniverseMcp, UNIVERSE_AUTO_ALLOWED, UNIVERSE_MERGE_TOOL } from "./git/tools";
 import { notifyApprovalRequested, notifyTaskFinished } from "./notify";
 import { loadMcpServersForRun } from "./tools-config";
 import { getWorkspacePreparer, syncProjectAgents } from "./workspace";
@@ -132,7 +133,11 @@ async function runTask(taskId: string): Promise<void> {
   };
 
   const requestApproval = async (tool: string, input: Record<string, unknown>) => {
-    const detail = redactSecrets(describeInput(input)).slice(0, 500);
+    let detail = redactSecrets(describeInput(input)).slice(0, 500);
+    if (tool === UNIVERSE_MERGE_TOOL) {
+      const pr = await prisma.agentPullRequest.findFirst({ where: { agentId: agent.id, status: "OPEN", ...(typeof input.number === "number" ? { number: input.number } : {}) }, orderBy: { createdAt: "desc" } });
+      detail = pr ? `Merge (squash) do PR #${pr.number} "${pr.title}" em ${pr.repo} → vai para produção` : "Merge do PR aberto mais recente";
+    }
     const approval = await prisma.agentTaskApproval.create({ data: { taskId, tool, detail } });
     await prisma.agentTask.updateMany({ where: { id: taskId, status: { in: ["RUNNING", "STARTING"] } }, data: { status: "WAITING_APPROVAL" } });
     await appendEvent(taskId, "approval_requested", detail, tool);
@@ -154,7 +159,10 @@ async function runTask(taskId: string): Promise<void> {
     return status === "APPROVED" ? { allow: true } : { allow: false, message: status === "DENIED" ? "Negado por você no ID System Universe." : "Sem decisão no ID System Universe a tempo." };
   };
 
-  const mcpServers = await loadMcpServersForRun().catch(() => ({}));
+  const configured = await loadMcpServersForRun().catch(() => ({}));
+  // Ferramentas do Universe (PR/merge/limpeza): o agente não tem credencial de Git, só estas ferramentas.
+  const universe = await buildUniverseMcp(agent.id, taskId).catch(() => null);
+  const mcpServers: Record<string, unknown> = { ...configured, ...(universe ? { universe } : {}) };
   const input = (resume: string | null | undefined) => ({
     taskId,
     prompt: task.prompt,
@@ -164,7 +172,7 @@ async function runTask(taskId: string): Promise<void> {
     agentName: agent.name,
     specialty: agent.specialty,
     effort: agent.effort,
-    allowedTools: agent.allowedTools,
+    allowedTools: [...new Set([...agent.allowedTools, ...(universe ? UNIVERSE_AUTO_ALLOWED : [])])],
     disallowedTools: agent.disallowedTools,
     mcpServers,
     resumeSessionId: resume,

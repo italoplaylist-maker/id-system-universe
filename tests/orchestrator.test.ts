@@ -103,7 +103,7 @@ describe("Orquestrador de agentes Claude", () => {
   });
 
   it("não executa nada enquanto o executor não confirmou o início (STARTING)", async () => {
-    let confirm!: () => void;
+    let confirm: (() => void) | undefined;
     const slow: TaskExecutor = {
       async run(input) {
         await new Promise<void>((r) => (confirm = r));
@@ -116,7 +116,9 @@ describe("Orquestrador de agentes Claude", () => {
     await dispatch();
     await waitFor(async () => (await statusOf(task.id)) === "STARTING");
     assert.equal(await statusOf(task.id), "STARTING");
-    confirm();
+    // o executor só é chamado depois de montar as ferramentas do Universe: espera ele existir antes de confirmar
+    await waitFor(async () => confirm !== undefined);
+    confirm!();
     await idle();
     assert.equal(await statusOf(task.id), "COMPLETED");
   });
@@ -264,6 +266,8 @@ describe("Orquestrador de agentes Claude", () => {
   });
 
   it("recuperação: worker que caiu deixa tarefa INTERRUPTED (sem repetir sozinha); a fila segue; sem duplicar", async () => {
+    // pausado: o "acorda já" do envio não pode reivindicar a tarefa antes de a simularmos como órfã
+    await updateAgent(agentId, { paused: true }, actor);
     const t = (await submitTask(agentId, { prompt: "longa", idempotencyKey: key() }, actor)).task;
     // simula execução que pertencia a um processo anterior: status ativo, batida velha, nada vivo aqui
     await prisma.agentTask.update({ where: { id: t.id }, data: { status: "RUNNING", startedAt: new Date(Date.now() - 120_000), heartbeatAt: new Date(Date.now() - 120_000) } });
@@ -274,6 +278,7 @@ describe("Orquestrador de agentes Claude", () => {
     assert.equal(row.status, "INTERRUPTED");
     assert.ok((await getTaskDetail(t.id)).events.some((e) => e.kind === "interrupted"));
     assert.equal(exec.calls, 0, "não reexecuta sozinha");
+    await updateAgent(agentId, { paused: false }, actor);
     await dispatch();
     await waitFor(async () => (await statusOf(queued.id)) === "RUNNING");
     exec.releaseAll();

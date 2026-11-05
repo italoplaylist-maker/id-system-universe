@@ -828,6 +828,7 @@ model AgentProfile {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   tasks           AgentTask[]
+  pullRequests    AgentPullRequest[]
 
   @@index([archivedAt, position])
 }
@@ -939,4 +940,26 @@ model NotificationPreference {
   servers   Boolean  @default(true)
   billing   Boolean  @default(true)
   updatedAt DateTime @updatedAt
+}
+
+/// PR aberto por um agente (ou pelo botão do painel): o Universe lembra dele para mergear e limpar a cópia depois.
+model AgentPullRequest {
+  id         String       @id @default(cuid())
+  agentId    String
+  agent      AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  taskId     String?
+  repo       String
+  number     Int
+  url        String
+  branch     String
+  baseBranch String
+  title      String
+  /// OPEN | MERGED | CLOSED
+  status     String       @default("OPEN")
+  mergedAt   DateTime?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@unique([repo, number])
+  @@index([agentId, status])
 }

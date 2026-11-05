@@ -8,6 +8,7 @@ import { logger } from "@/lib/logger";
 import { getInstallationToken } from "@/server/github/github-api";
 import { redactSecrets } from "@/server/claude/agent-service";
 import { orchestratorBus } from "./bus";
+import { gitEnv, remoteUrl } from "./git/git";
 
 /** Onde ficam as cópias de trabalho dos agentes no servidor do Universe. */
 export function workspaceRoot(): string {
@@ -71,10 +72,9 @@ const defaultPreparer: WorkspacePreparer = async (agent, log) => {
   const token = await getInstallationToken(gh.installation.installationId);
   await mkdir(join(agent.cwd, ".."), { recursive: true });
   // O token vai por variável de ambiente do git (não aparece em argumentos nem fica gravado no .git/config).
-  const header = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: header };
+  const env = gitEnv(token);
   const branch = repo?.branch ? ["--branch", repo.branch] : [];
-  const r = await git(["clone", "--depth", "50", ...branch, `https://github.com/${gh.fullName}.git`, agent.cwd], env);
+  const r = await git(["clone", "--depth", "50", ...branch, remoteUrl(gh.fullName), agent.cwd], env);
   if (r.code !== 0) {
     logger.warn("workspace_clone_failed", { agentId: agent.id });
     throw new Error(`Não consegui clonar ${gh.fullName}: ${redactSecrets(r.out).slice(-300)}`);

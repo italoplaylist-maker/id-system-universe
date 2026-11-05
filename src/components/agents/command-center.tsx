@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ToolsPanel } from "./tools-panel";
 import { cn } from "@/lib/cn";
 import {
+  useAgentGit,
   useAvailableModels,
   useOrchestratorMutations,
   useOrchestratorSettings,
@@ -141,11 +142,78 @@ function ClaudeLogin({ canWrite }: { canWrite: boolean }) {
   );
 }
 
+const MERGE_RULE = "mcp__universe__merge_pull_request";
+
+/** GitHub do agente: estado da cópia, PRs abertos e os botões (enviar, merge, limpar). Mesma lógica das ferramentas que o agente usa sozinho. */
+function GitPanel({ agentId, canWrite }: { agentId: string; canWrite: boolean }) {
+  const { data: git } = useAgentGit(agentId);
+  const { publish, mergePr, cleanup } = useOrchestratorMutations();
+  if (!git) return null;
+  if (!git.hasRepo) {
+    return <p className="border-t border-border px-4 py-2 text-[11px] text-muted">GitHub: este agente não tem repositório vinculado (ligue um recurso do projeto a um repositório para ele abrir PR).</p>;
+  }
+  const open = git.pullRequests.filter((p) => p.status === "OPEN");
+  const hasWork = git.changedFiles > 0 || git.unpushedCommits > 0;
+  return (
+    <div className="space-y-2 border-t border-border px-4 py-2.5 text-xs">
+      <p className="font-semibold text-foreground">GitHub · {git.repo}</p>
+      {git.missingPermissions.length > 0 && (
+        <p className="rounded border border-status-warning/40 bg-status-warning/10 p-2 text-[11px] text-status-warning" role="status">
+          O GitHub App do Universe precisa de <b>{git.missingPermissions.join(" e ")}</b>. No GitHub: Settings → Developer settings → GitHub Apps → seu App → Permissions. Depois aceite a atualização na instalação.
+        </p>
+      )}
+      <p className="text-muted">
+        {git.workspaceExists
+          ? `Cópia: ${git.branch ?? "?"} · ${git.changedFiles} arquivo(s) alterado(s) · ${git.unpushedCommits} commit(s) não enviado(s)`
+          : "Cópia: não existe agora (é baixada de novo na próxima tarefa)."}
+      </p>
+      {open.map((p) => (
+        <div key={p.id} className="flex items-center justify-between gap-2 rounded border border-border bg-surface px-2 py-1.5">
+          <a href={p.url} target="_blank" rel="noopener noreferrer" className="min-w-0 truncate text-foreground underline">#{p.number} {p.title}</a>
+          {canWrite && (
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={mergePr.isPending}
+              onClick={() => {
+                if (!window.confirm(`Fazer merge (squash) do PR #${p.number} na branch principal? Isso dispara o deploy em produção.`)) return;
+                mergePr.mutate(p.id, {
+                  onSuccess: (r) => toast.success(`PR #${r.number} mergeado.${r.cleanup.removed ? " Cópia apagada." : r.cleanup.reason ? ` ${r.cleanup.reason}` : ""}`),
+                  onError: (e) => toast.error(e.message),
+                });
+              }}
+            >
+              {mergePr.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Fazer merge"}
+            </Button>
+          )}
+        </div>
+      ))}
+      {canWrite && (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!hasWork || publish.isPending || git.missingPermissions.length > 0}
+            onClick={() => publish.mutate({ agentId }, { onSuccess: (r) => toast.success(`PR #${r.pullRequest.number} aberto.`), onError: (e) => toast.error(e.message) })}
+          >
+            {publish.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Enviar para o GitHub"}
+          </Button>
+          {git.workspaceExists && (
+            <Button size="sm" variant="secondary" disabled={cleanup.isPending} onClick={() => cleanup.mutate(agentId, { onSuccess: (r) => (r.removed ? toast.success("Cópia apagada.") : toast.message(r.reason ?? "Cópia mantida.")), onError: (e) => toast.error(e.message) })}>
+              Limpar cópia
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AgentForm({ initial, onDone }: { initial?: RoomAgentView; onDone: () => void }) {
   const { createAgent, updateAgent } = useOrchestratorMutations();
   const [f, setF] = useState({
     name: initial?.name ?? "", specialty: initial?.specialty ?? "", cwd: initial?.cwd ?? "", model: initial?.model ?? "", permissionMode: initial?.permissionMode ?? "default",
-    effort: initial?.effort ?? "", allowed: (initial?.allowedTools ?? []).join("\n"), disallowed: (initial?.disallowedTools ?? []).join("\n"),
+    autoMerge: (initial?.allowedTools ?? []).includes(MERGE_RULE), effort: initial?.effort ?? "", allowed: (initial?.allowedTools ?? []).filter((t) => t !== MERGE_RULE).join("\n"), disallowed: (initial?.disallowedTools ?? []).join("\n"),
   });
   const field = "w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs focus:border-accent focus:outline-none";
   const { data: models } = useAvailableModels(true);
@@ -159,7 +227,7 @@ function AgentForm({ initial, onDone }: { initial?: RoomAgentView; onDone: () =>
       className="space-y-2 border-b border-border p-4"
       onSubmit={(e) => {
         e.preventDefault();
-        const body = { name: f.name, specialty: f.specialty || undefined, cwd: f.cwd, model: f.model || undefined, permissionMode: f.permissionMode, effort: f.effort || null, allowedTools: lines(f.allowed), disallowedTools: lines(f.disallowed) };
+        const body = { name: f.name, specialty: f.specialty || undefined, cwd: f.cwd, model: f.model || undefined, permissionMode: f.permissionMode, effort: f.effort || null, allowedTools: [...lines(f.allowed), ...(f.autoMerge ? [MERGE_RULE] : [])], disallowedTools: lines(f.disallowed) };
         if (initial) updateAgent.mutate({ id: initial.id, ...body, specialty: f.specialty, model: f.model }, { onSuccess: onDone, onError: (err) => toast.error(err.message) });
         else createAgent.mutate({ ...body, effort: f.effort || undefined }, { onSuccess: onDone, onError: (err) => toast.error(err.message) });
       }}
@@ -189,6 +257,10 @@ function AgentForm({ initial, onDone }: { initial?: RoomAgentView; onDone: () =>
         <option value="plan">Somente planejar (sem executar)</option>
       </select>
       <textarea className={`${field} h-14 font-mono`} placeholder={"Liberadas sem aprovação, uma por linha:\nRead\nBash(git status:*)"} value={f.allowed} onChange={(e) => setF({ ...f, allowed: e.target.value })} spellCheck={false} />
+      <label className="flex items-start gap-2 text-[11px] text-foreground">
+        <input type="checkbox" checked={f.autoMerge} onChange={(e) => setF({ ...f, autoMerge: e.target.checked })} className="mt-0.5 h-3.5 w-3.5" />
+        <span>Pode fazer <b>merge sozinho</b> (squash, só com verificações verdes). Desligado: cada merge pede a sua aprovação. Atenção: o merge dispara o deploy em produção.</span>
+      </label>
       <textarea className={`${field} h-14 font-mono`} placeholder={"Bloqueadas, uma por linha:\nBash(rm:*)"} value={f.disallowed} onChange={(e) => setF({ ...f, disallowed: e.target.value })} spellCheck={false} />
       <div className="flex gap-2">
         <Button size="sm" type="submit" variant="primary" disabled={createAgent.isPending || updateAgent.isPending}>{initial ? "Salvar" : "Criar"}</Button>
@@ -329,6 +401,7 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
               ))}
               {tasks && tasks.length === 0 && <li className="px-4 py-4 text-muted">{tab === "active" ? "Nada em andamento nem na fila." : "Sem histórico ainda."}</li>}
             </ul>
+            <GitPanel agentId={selected.id} canWrite={canWrite} />
             {canWrite && (
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs">
                 <label className="flex items-center gap-1.5 text-muted">

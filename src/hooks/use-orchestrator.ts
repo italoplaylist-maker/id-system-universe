@@ -127,6 +127,28 @@ export function useAgentToolsMutations() {
   };
 }
 
+export interface GitStatusView {
+  hasRepo: boolean;
+  repo: string | null;
+  baseBranch: string | null;
+  workspaceExists: boolean;
+  branch: string | null;
+  changedFiles: number;
+  unpushedCommits: number;
+  missingPermissions: string[];
+  permissionsChecked: boolean;
+  pullRequests: Array<{ id: string; number: number; url: string; title: string; status: string; branch: string }>;
+}
+
+export function useAgentGit(agentId: string | null) {
+  return useQuery({
+    queryKey: [...KEY, "git", agentId],
+    queryFn: () => apiFetch<GitStatusView>(`/api/orchestrator/agents/${agentId}/git?permissions=1`),
+    enabled: !!agentId,
+    refetchInterval: 15_000,
+  });
+}
+
 export function useOrchestratorMutations() {
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: KEY });
@@ -156,6 +178,18 @@ export function useOrchestratorMutations() {
     startLogin: useMutation({ mutationFn: () => apiFetch<{ url: string }>("/api/orchestrator/auth/login", { method: "POST" }) }),
     submitLoginCode: useMutation({ mutationFn: (code: string) => apiFetch("/api/orchestrator/auth/code", { method: "POST", body: JSON.stringify({ code }) }), onSettled: refresh }),
     logout: useMutation({ mutationFn: () => apiFetch("/api/orchestrator/auth/logout", { method: "POST" }), onSettled: refresh }),
+    publish: useMutation({
+      mutationFn: (v: { agentId: string; title?: string }) => apiFetch<{ branch: string; pullRequest: { number: number; url: string }; committed: boolean }>(`/api/orchestrator/agents/${v.agentId}/git/publish`, { method: "POST", body: JSON.stringify({ title: v.title }) }),
+      onSettled: refresh,
+    }),
+    mergePr: useMutation({
+      mutationFn: (prId: string) => apiFetch<{ merged: boolean; number: number; cleanup: { removed: boolean; reason?: string } }>(`/api/orchestrator/pull-requests/${prId}/merge`, { method: "POST" }),
+      onSettled: refresh,
+    }),
+    cleanup: useMutation({
+      mutationFn: (agentId: string) => apiFetch<{ removed: boolean; reason?: string }>(`/api/orchestrator/agents/${agentId}/git/cleanup`, { method: "POST" }),
+      onSettled: refresh,
+    }),
     setConcurrency: useMutation({
       mutationFn: (maxConcurrent: number) => apiFetch("/api/orchestrator/settings", { method: "PATCH", body: JSON.stringify({ maxConcurrent }) }),
       onSettled: refresh,
