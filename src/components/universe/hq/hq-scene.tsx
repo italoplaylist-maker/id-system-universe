@@ -225,7 +225,7 @@ export function HqScene({
         return [{ id: slot.projectId, accent: slot.accent, mustWork: state === "WORKING" || state === "ERROR", working: state === "WORKING" }];
       }),
       // Agentes do Claude: pelo estado real da sessão.
-      ...agentEntries.map((e) => ({ id: e.session.id, accent: e.accent, mustWork: e.session.profile ? true : agentNeedsDesk(e.session.state), working: e.session.profile ? e.session.profile.roomState === "RUNNING" : agentIsTyping(e.session.state) })),
+      ...agentEntries.map((e) => ({ id: e.session.id, accent: e.accent, mustWork: agentNeedsDesk(e.session.state), working: e.session.profile ? e.session.profile.roomState === "RUNNING" : agentIsTyping(e.session.state) })),
     ],
     [layout.desks, deskStates, agentEntries],
   );
