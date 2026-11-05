@@ -9,6 +9,7 @@ import { prepareForRun } from "./attachments";
 import { buildUniverseMcp, UNIVERSE_AUTO_ALLOWED, UNIVERSE_MERGE_TOOL } from "./git/tools";
 import { notifyApprovalRequested, notifyTaskFinished } from "./notify";
 import { loadMcpServersForRun } from "./tools-config";
+import { seedDefaultPacks } from "./skill-packs";
 import { getWorkspacePreparer, syncProjectAgents } from "./workspace";
 import { ACTIVE, appendEvent, getSettings, purgeOldTasks, setTaskRegisteredHook } from "./service";
 
@@ -321,6 +322,8 @@ export function startOrchestratorWorker(): void {
   // Um funcionário por Projeto, criado sozinho (e conferido de vez em quando para projetos novos).
   const syncAgents = () => void syncProjectAgents().catch((error) => logger.error("orchestrator_sync_agents_failed", { message: error instanceof Error ? error.message : String(error) }));
   setTimeout(syncAgents, 4_000);
+  // Kits de skills embutidos (ex.: Motion) entram no ~/.claude do servidor na primeira subida: valem para todos os agentes.
+  setTimeout(() => void seedDefaultPacks(), 5_000);
   setInterval(syncAgents, 60_000);
   setInterval(() => void purgeOldTasks().catch(() => undefined), 6 * 3_600_000);
 }

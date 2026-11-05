@@ -105,6 +105,7 @@ export interface AgentToolsView {
   skills: { name: string; description: string | null; content: string }[];
   claudeMd: string;
   mcp: { id: string; name: string; type: string; command: string | null; args: string[]; url: string | null; secretKeys: string[]; enabled: boolean }[];
+  packs: Array<{ id: string; name: string; description: string; version: string; license: string; skillsInstalled: boolean; mcpInstalled: boolean; mcpAvailable: boolean }>;
   plugins: { installed: { id?: string; name?: string; version?: string; enabled?: boolean }[]; marketplaces: { name?: string }[] };
 }
 
@@ -123,6 +124,7 @@ export function useAgentToolsMutations() {
     createMcp: useMutation({ mutationFn: (v: unknown) => post("mcp", "POST", v), onSettled: refresh }),
     toggleMcp: useMutation({ mutationFn: (v: { id: string; enabled: boolean }) => post(`mcp/${v.id}`, "PATCH", { enabled: v.enabled }), onSettled: refresh }),
     deleteMcp: useMutation({ mutationFn: (id: string) => post(`mcp/${id}`, "DELETE"), onSettled: refresh }),
+    installPack: useMutation({ mutationFn: (v: { id: string; withMcp: boolean }) => post("packs", "POST", v), onSettled: refresh }),
     plugin: useMutation({ mutationFn: (v: { action: string; value: string }) => post("plugins", "POST", v), onSettled: refresh }),
   };
 }

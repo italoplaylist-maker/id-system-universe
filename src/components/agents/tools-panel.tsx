@@ -21,6 +21,39 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
   );
 }
 
+function Packs({ canWrite }: { canWrite: boolean }) {
+  const { data } = useAgentTools(true);
+  const { installPack } = useAgentToolsMutations();
+  if (!data || data.packs.length === 0) return null;
+  return (
+    <Section title="Kits prontos" hint="Já vêm dentro do Universe e valem para TODOS os agentes (ficam no ~/.claude do servidor). Nada de terceiros é executado: só arquivos copiados.">
+      <ul className="space-y-2">
+        {data.packs.map((p) => (
+          <li key={p.id} className="space-y-1 rounded border border-border bg-surface p-2 text-xs">
+            <p className="font-medium text-foreground">{p.name} <span className="font-normal text-muted">· v{p.version} · {p.license}</span></p>
+            <p className="text-muted">{p.description}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={p.skillsInstalled ? "text-status-running" : "text-muted"}>{p.skillsInstalled ? "● Skills instaladas" : "○ Skills não instaladas"}</span>
+              {p.mcpAvailable && <span className={p.mcpInstalled ? "text-status-running" : "text-muted"}>{p.mcpInstalled ? "● MCP ligado" : "○ MCP desligado"}</span>}
+              {canWrite && (
+                <Button size="sm" variant="secondary" disabled={installPack.isPending} onClick={() => installPack.mutate({ id: p.id, withMcp: false }, { onSuccess: () => toast.success("Skills instaladas para todos os agentes."), onError: onErr })}>
+                  {p.skillsInstalled ? "Reinstalar skills" : "Instalar skills"}
+                </Button>
+              )}
+              {canWrite && p.mcpAvailable && !p.mcpInstalled && (
+                <Button size="sm" variant="secondary" disabled={installPack.isPending} onClick={() => installPack.mutate({ id: p.id, withMcp: true }, { onSuccess: () => toast.success("Skills e MCP ligados."), onError: onErr })}>
+                  Instalar + ligar MCP do Motion
+                </Button>
+              )}
+            </div>
+            {p.mcpAvailable && <p className="text-[11px] text-muted">O MCP é um serviço externo (mcp.motion.dev) usado para buscar documentação; só liga se você pedir.</p>}
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
 function Skills({ canWrite }: { canWrite: boolean }) {
   const { data } = useAgentTools(true);
   const { saveSkill, deleteSkill } = useAgentToolsMutations();
@@ -163,6 +196,7 @@ export function ToolsPanel({ canWrite, onBack }: { canWrite: boolean; onBack: ()
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-b border-border px-4 py-2"><button className="text-xs text-muted hover:text-foreground" onClick={onBack}>← Voltar</button></div>
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <Packs canWrite={canWrite} />
         <ClaudeMd canWrite={canWrite} />
         <Skills canWrite={canWrite} />
         <Mcp canWrite={canWrite} />

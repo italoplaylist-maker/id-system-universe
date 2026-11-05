@@ -17,10 +17,22 @@ export const claudeHome = () => join(process.env.HOME || homedir(), ".claude");
 const SKILL_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const MAX_FILE = 100_000;
 
+/** Lê name/description do cabeçalho do SKILL.md, inclusive blocos YAML dobrados (`description: >` + linhas recuadas). */
 function parseFrontmatter(content: string): { name?: string; description?: string } {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
   if (!m) return {};
-  const get = (k: string) => new RegExp(`^${k}:\\s*(.+)$`, "m").exec(m[1])?.[1]?.trim().replace(/^["']|["']$/g, "");
+  const lines = m[1].split(/\r?\n/);
+  const get = (key: string): string | undefined => {
+    const i = lines.findIndex((l) => new RegExp(`^${key}:`).test(l));
+    if (i < 0) return undefined;
+    const first = lines[i].replace(new RegExp(`^${key}:\\s*`), "").trim();
+    if (/^[>|][+-]?$/.test(first)) {
+      const body: string[] = [];
+      for (let j = i + 1; j < lines.length && (lines[j] === "" || /^\s+/.test(lines[j])); j += 1) body.push(lines[j].trim());
+      return body.join(" ").replace(/\s+/g, " ").trim() || undefined;
+    }
+    return first.replace(/^["']|["']$/g, "") || undefined;
+  };
   return { name: get("name"), description: get("description") };
 }
 

@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@anthropic-ai/claude-agent-sdk"],
   // Anexos (imagens/arquivos): o proxy guarda o corpo da requisição em memória; o padrão (10 MB) cortaria arquivos maiores.
   experimental: { proxyClientMaxBodySize: "30mb" },
-  outputFileTracingIncludes: { "/*": ["./node_modules/@anthropic-ai/claude-agent-sdk*/**/*"] },
+  outputFileTracingIncludes: { "/*": ["./node_modules/@anthropic-ai/claude-agent-sdk*/**/*", "./skill-packs/**/*"] },
 };
 
 export default nextConfig;
