@@ -5,10 +5,9 @@ import { logger } from "@/lib/logger";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { redactSecrets } from "@/server/claude/agent-service";
 import { recordAuditEvent } from "@/server/audit/audit-log";
-import { getInstallationToken } from "@/server/github/github-api";
 import { notify } from "@/server/notifications/notify";
 import { orchestratorBus } from "../bus";
-import { ghFetch, getInstallationPermissions, missingWritePermissions } from "./github-client";
+import { freshInstallationToken, getInstallationInfo, ghFetch, missingMergePermissions, missingWritePermissions } from "./github-client";
 import { cleanOut, gitEnv, isInsideWorkspaceRoot, runGit } from "./git";
 
 /**
@@ -35,6 +34,8 @@ export interface AgentRepo {
   fullName: string;
   baseBranch: string;
   installationId: string;
+  accountLogin: string;
+  accountType: string;
 }
 
 export async function resolveAgentRepo(agentId: string): Promise<AgentRepo> {
@@ -49,7 +50,7 @@ export async function resolveAgentRepo(agentId: string): Promise<AgentRepo> {
     : null;
   const gh = link?.githubRepository;
   if (!gh || gh.archived) throw new ValidationError("Este agente não tem um repositório GitHub vinculado (o projeto precisa ter um recurso ligado a um repositório).");
-  return { agent: { id: agent.id, name: agent.name, cwd: agent.cwd, projectId: agent.projectId }, fullName: gh.fullName, baseBranch: link?.branch || gh.defaultBranch || "main", installationId: gh.installation.installationId };
+  return { agent: { id: agent.id, name: agent.name, cwd: agent.cwd, projectId: agent.projectId }, fullName: gh.fullName, baseBranch: link?.branch || gh.defaultBranch || "main", installationId: gh.installation.installationId, accountLogin: gh.installation.accountLogin, accountType: gh.installation.accountType };
 }
 
 const slug = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "agente";
@@ -65,7 +66,11 @@ export interface WorkspaceGitStatus {
   unpushedCommits: number;
   /** Permissões que faltam no GitHub App para o agente publicar (vazio = tudo certo). */
   missingPermissions: string[];
+  /** Para o merge ler a CI: Checks e Commit statuses (somente leitura). */
+  missingForMerge: string[];
   permissionsChecked: boolean;
+  /** O que o GitHub informa AGORA para a instalação usada por este repositório (para achar o motivo de "ainda pede permissão"). */
+  permissionsSeen: { installationId: string; account: string; contents: string; pullRequests: string; checks: string; statuses: string; settingsUrl: string } | null;
   pullRequests: Array<{ id: string; number: number; url: string; title: string; status: string; branch: string }>;
 }
 
@@ -75,7 +80,7 @@ export async function getGitStatus(agentId: string, opts: { checkPermissions?: b
   const prs = await prisma.agentPullRequest.findMany({ where: { agentId }, orderBy: { createdAt: "desc" }, take: 8 });
   const base: WorkspaceGitStatus = {
     hasRepo: false, repo: null, baseBranch: null, workspaceExists: existsSync(agent.cwd), branch: null, changedFiles: 0, unpushedCommits: 0,
-    missingPermissions: [], permissionsChecked: false,
+    missingPermissions: [], missingForMerge: [], permissionsChecked: false, permissionsSeen: null,
     pullRequests: prs.map((p) => ({ id: p.id, number: p.number, url: p.url, title: p.title, status: p.status, branch: p.branch })),
   };
   let repo: AgentRepo;
@@ -89,8 +94,21 @@ export async function getGitStatus(agentId: string, opts: { checkPermissions?: b
   base.baseBranch = repo.baseBranch;
   if (opts.checkPermissions) {
     try {
-      base.missingPermissions = missingWritePermissions(await getInstallationPermissions(repo.installationId));
+      const info = await getInstallationInfo(repo.installationId);
+      base.missingPermissions = missingWritePermissions(info.permissions);
+      base.missingForMerge = missingMergePermissions(info.permissions);
       base.permissionsChecked = true;
+      const account = info.accountLogin ?? repo.accountLogin;
+      base.permissionsSeen = {
+        installationId: repo.installationId,
+        account,
+        contents: info.permissions.contents ?? "sem acesso",
+        pullRequests: info.permissions.pull_requests ?? "sem acesso",
+        checks: info.permissions.checks ?? "sem acesso",
+        statuses: info.permissions.statuses ?? "sem acesso",
+        // página onde o dono da instalação ACEITA as permissões novas do App
+        settingsUrl: repo.accountType === "Organization" ? `https://github.com/organizations/${account}/settings/installations/${repo.installationId}` : `https://github.com/settings/installations/${repo.installationId}`,
+      };
     } catch {
       base.permissionsChecked = false;
     }
@@ -132,13 +150,13 @@ export interface PublishResult {
 
 export async function publishChanges(agentId: string, input: PublishInput = {}): Promise<PublishResult> {
   const repo = await resolveAgentRepo(agentId);
-  const missing = missingWritePermissions(await getInstallationPermissions(repo.installationId));
+  const token = await freshInstallationToken(repo.installationId);
+  const missing = missingWritePermissions((await getInstallationInfo(repo.installationId)).permissions);
   if (missing.length > 0) {
     throw new ValidationError(`O GitHub App do Universe ainda não pode escrever neste repositório. Em GitHub → Settings → Developer settings → GitHub Apps → seu App → Permissions, defina: ${missing.join(" e ")}. Depois aceite a atualização na instalação.`);
   }
   const cwd = repo.agent.cwd;
   if (!existsSync(cwd) || !(await isInsideWorkspaceRoot(cwd))) throw new ValidationError("A cópia de trabalho deste agente não existe (ou está fora da pasta dos agentes). Rode uma tarefa para ela ser preparada.");
-  const token = await getInstallationToken(repo.installationId);
   const identity = { name: `${repo.agent.name} (ID System Universe)`, email: "universe-agent@users.noreply.github.com" };
   const env = gitEnv(token, identity);
 
@@ -215,11 +233,14 @@ interface PullInfo {
 /** As verificações do commit estão todas verdes? (check-runs + status clássico). Sem nenhuma verificação configurada = nada a esperar. */
 async function checksVerdict(installationId: string, repo: string, sha: string): Promise<{ ok: boolean; reason?: string }> {
   const runs = await ghFetch<{ check_runs?: Array<{ name: string; status: string; conclusion: string | null }> }>(installationId, "GET", `/repos/${repo}/commits/${sha}/check-runs?per_page=100`);
+  // 403/404 aqui = o App não consegue LER a CI; mergear às cegas seria assumir que está verde.
+  if (runs.status !== 200) return { ok: false, reason: `o App não consegue ler as verificações do GitHub (HTTP ${runs.status}) — falta a permissão Checks: Read-only` };
   for (const r of runs.data?.check_runs ?? []) {
     if (r.status !== "completed") return { ok: false, reason: `a verificação "${r.name}" ainda está rodando` };
     if (!["success", "neutral", "skipped"].includes(r.conclusion ?? "")) return { ok: false, reason: `a verificação "${r.name}" falhou (${r.conclusion})` };
   }
   const st = await ghFetch<{ state?: string; total_count?: number }>(installationId, "GET", `/repos/${repo}/commits/${sha}/status`);
+  if (st.status !== 200) return { ok: false, reason: `o App não consegue ler o status do commit (HTTP ${st.status}) — falta a permissão Commit statuses: Read-only` };
   if ((st.data?.total_count ?? 0) > 0 && st.data?.state !== "success") return { ok: false, reason: `o status do commit está "${st.data?.state}"` };
   return { ok: true };
 }
@@ -234,8 +255,10 @@ export async function mergePullRequest(prId: string, opts: { actorUserId?: strin
   const row = await prisma.agentPullRequest.findUnique({ where: { id: prId }, include: { agent: true } });
   if (!row) throw new NotFoundError("PR não encontrado.");
   const repo = await resolveAgentRepo(row.agentId);
-  const missing = missingWritePermissions(await getInstallationPermissions(repo.installationId));
-  if (missing.length > 0) throw new ValidationError(`O GitHub App precisa das permissões: ${missing.join(" e ")}.`);
+  await freshInstallationToken(repo.installationId);
+  const perms = (await getInstallationInfo(repo.installationId)).permissions;
+  const missing = [...missingWritePermissions(perms), ...missingMergePermissions(perms)];
+  if (missing.length > 0) throw new ValidationError(`O GitHub App precisa das permissões: ${missing.join(", ")}. Se já mudou no App, aceite a atualização na instalação.`);
 
   let pull: PullInfo | null = null;
   for (let i = 0; i < 4; i += 1) {

@@ -136,7 +136,9 @@ export interface GitStatusView {
   changedFiles: number;
   unpushedCommits: number;
   missingPermissions: string[];
+  missingForMerge: string[];
   permissionsChecked: boolean;
+  permissionsSeen: { installationId: string; account: string; contents: string; pullRequests: string; checks: string; statuses: string; settingsUrl: string } | null;
   pullRequests: Array<{ id: string; number: number; url: string; title: string; status: string; branch: string }>;
 }
 

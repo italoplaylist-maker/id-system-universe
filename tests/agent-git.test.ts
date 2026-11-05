@@ -14,7 +14,7 @@ import { cleanupWorkspace, diffHasSecret, getGitStatus, mergePullRequest, publis
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const PEM = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 
-const gh = { perms: { contents: "write", pull_requests: "write" } as Record<string, string>, prs: [] as Array<{ number: number; html_url: string; title: string; head: string; state: string; merged: boolean }>, checks: [] as Array<{ name: string; status: string; conclusion: string | null }>, mergeable: true as boolean | null, mergeCalls: 0 };
+const gh = { tokenCalls: 0, checksStatus: 200, perms: { contents: "write", pull_requests: "write", checks: "read", statuses: "read" } as Record<string, string>, prs: [] as Array<{ number: number; html_url: string; title: string; head: string; state: string; merged: boolean }>, checks: [] as Array<{ name: string; status: string; conclusion: string | null }>, mergeable: true as boolean | null, mergeCalls: 0 };
 let server: MockServer;
 let tmp: string;
 let originDir: string;
@@ -52,7 +52,10 @@ describe("agente → GitHub (commit, PR, merge, limpeza)", () => {
       res.setHeader("content-type", "application/json");
       const url = req.url ?? "";
       const m = req.method ?? "GET";
-      if (url.includes("/access_tokens")) return void res.end(JSON.stringify({ token: "inst-token", expires_at: new Date(Date.now() + 3600_000).toISOString() }));
+      if (url.includes("/access_tokens")) {
+        gh.tokenCalls += 1;
+        return void res.end(JSON.stringify({ token: "inst-token", expires_at: new Date(Date.now() + 3600_000).toISOString() }));
+      }
       if (/^\/app\/installations\/\d+$/.test(url)) return void res.end(JSON.stringify({ id: 4242, account: { login: "acme", type: "Organization", id: 1 }, repository_selection: "selected", permissions: gh.perms }));
       if (url.startsWith("/installation/repositories")) return void res.end(JSON.stringify({ repositories: [{ id: 1, full_name: "acme/italoc", name: "italoc", owner: { login: "acme" }, default_branch: "main", private: true }] }));
       if (url.includes("/branches")) return void res.end(JSON.stringify([{ name: "main" }]));
@@ -73,7 +76,10 @@ describe("agente → GitHub (commit, PR, merge, limpeza)", () => {
         const pr = gh.prs.find((p) => p.number === Number(mm![1]));
         return void res.end(JSON.stringify({ state: pr?.state ?? "open", merged: pr?.merged ?? false, mergeable: gh.mergeable, mergeable_state: gh.mergeable === false ? "dirty" : "clean", head: { sha: "f".repeat(40), ref: pr?.head } }));
       }
-      if (/check-runs/.test(url)) return void res.end(JSON.stringify({ check_runs: gh.checks }));
+      if (/check-runs/.test(url)) {
+        res.statusCode = gh.checksStatus;
+        return void res.end(JSON.stringify(gh.checksStatus === 200 ? { check_runs: gh.checks } : { message: "Resource not accessible by integration" }));
+      }
       if (/\/status$/.test(url)) return void res.end(JSON.stringify({ state: "success", total_count: 0 }));
       mm = /^\/repos\/acme\/italoc\/pulls\/(\d+)\/merge$/.exec(url);
       if (m === "PUT" && mm) {
@@ -101,7 +107,9 @@ describe("agente → GitHub (commit, PR, merge, limpeza)", () => {
 
   beforeEach(async () => {
     await resetDb();
-    gh.perms = { contents: "write", pull_requests: "write" };
+    gh.perms = { contents: "write", pull_requests: "write", checks: "read", statuses: "read" };
+    gh.tokenCalls = 0;
+    gh.checksStatus = 200;
     gh.prs = [];
     gh.checks = [];
     gh.mergeable = true;
@@ -219,5 +227,41 @@ describe("agente → GitHub (commit, PR, merge, limpeza)", () => {
     const r = await publishChanges(agentId, { title: "x" });
     assert.notEqual(r.branch, "main");
     assert.equal(bare("rev-parse", "main"), before);
+  });
+
+  it("mostra o que o GitHub informa e o link para ACEITAR a atualização da instalação", async () => {
+    gh.perms = { contents: "read", pull_requests: "read" };
+    const st = await getGitStatus(agentId, { checkPermissions: true });
+    assert.deepEqual(st.missingPermissions, ["Contents: Read & write", "Pull requests: Read & write"]);
+    assert.deepEqual(st.missingForMerge, ["Checks: Read-only", "Commit statuses: Read-only"]);
+    assert.equal(st.permissionsSeen?.contents, "read");
+    assert.equal(st.permissionsSeen?.checks, "sem acesso");
+    assert.equal(st.permissionsSeen?.settingsUrl, "https://github.com/organizations/acme/settings/installations/4242");
+    gh.perms = { contents: "write", pull_requests: "write", checks: "read", statuses: "read" };
+    const ok = await getGitStatus(agentId, { checkPermissions: true });
+    assert.deepEqual([...ok.missingPermissions, ...ok.missingForMerge], []);
+  });
+
+  it("depois de aceitar as permissões, a operação usa um token NOVO (o antigo ainda teria as permissões velhas)", async () => {
+    writeFileSync(join(cwd, "t.ts"), "1");
+    const before = gh.tokenCalls;
+    await publishChanges(agentId, { title: "t" });
+    assert.ok(gh.tokenCalls > before, "pediu token novo ao GitHub");
+    const mid = gh.tokenCalls;
+    const pr = await prisma.agentPullRequest.findFirstOrThrow();
+    await mergePullRequest(pr.id);
+    assert.ok(gh.tokenCalls > mid, "o merge também pede token novo");
+  });
+
+  it("merge às cegas é recusado: sem permissão de ler a CI (Checks / Statuses)", async () => {
+    writeFileSync(join(cwd, "t.ts"), "1");
+    await publishChanges(agentId, { title: "t" });
+    const pr = await prisma.agentPullRequest.findFirstOrThrow();
+    gh.perms = { contents: "write", pull_requests: "write" };
+    await assert.rejects(() => mergePullRequest(pr.id), /Checks: Read-only, Commit statuses: Read-only/);
+    gh.perms = { contents: "write", pull_requests: "write", checks: "read", statuses: "read" };
+    gh.checksStatus = 403; // o GitHub nega a leitura mesmo com a permissão declarada
+    await assert.rejects(() => mergePullRequest(pr.id), /não consegue ler as verificações/);
+    assert.equal(gh.mergeCalls, 0);
   });
 });

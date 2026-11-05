@@ -1,4 +1,4 @@
-import { githubApiBase, getInstallationToken, appRequest } from "@/server/github/github-api";
+import { githubApiBase, getInstallationToken, appRequest, forgetInstallationToken } from "@/server/github/github-api";
 import { ProviderError } from "@/lib/errors";
 
 export interface GhResponse<T = unknown> {
@@ -46,6 +46,34 @@ export interface InstallationPermissions {
 export async function getInstallationPermissions(installationId: string): Promise<InstallationPermissions> {
   const info = await appRequest<{ permissions?: InstallationPermissions }>(`/app/installations/${encodeURIComponent(installationId)}`);
   return info.permissions ?? {};
+}
+
+export interface InstallationInfo {
+  permissions: InstallationPermissions;
+  accountLogin: string | null;
+}
+
+/** O que o GitHub diz AGORA sobre esta instalação (permissões já aceitas, não as pedidas). */
+export async function getInstallationInfo(installationId: string): Promise<InstallationInfo> {
+  const info = await appRequest<{ permissions?: InstallationPermissions; account?: { login?: string } }>(`/app/installations/${encodeURIComponent(installationId)}`);
+  return { permissions: info.permissions ?? {}, accountLogin: info.account?.login ?? null };
+}
+
+/**
+ * Token novo (descarta o guardado). Um token já emitido NÃO ganha as permissões que você acabou de aceitar no GitHub:
+ * ele só as herda quando vence (até 1 h). Para operações de escrita sempre pedimos um token novo.
+ */
+export async function freshInstallationToken(installationId: string): Promise<string> {
+  forgetInstallationToken(installationId);
+  return getInstallationToken(installationId);
+}
+
+/** Permissões extras para o merge poder LER a CI (sem elas o merge seria às cegas, então é recusado). */
+export function missingMergePermissions(p: InstallationPermissions): string[] {
+  const missing: string[] = [];
+  if (!p.checks) missing.push("Checks: Read-only");
+  if (!p.statuses) missing.push("Commit statuses: Read-only");
+  return missing;
 }
 
 export function missingWritePermissions(p: InstallationPermissions): string[] {

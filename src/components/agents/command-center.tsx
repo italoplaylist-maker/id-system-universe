@@ -164,7 +164,7 @@ const MERGE_RULE = "mcp__universe__merge_pull_request";
 
 /** GitHub do agente: estado da cópia, PRs abertos e os botões (enviar, merge, limpar). Mesma lógica das ferramentas que o agente usa sozinho. */
 function GitPanel({ agentId, canWrite }: { agentId: string; canWrite: boolean }) {
-  const { data: git } = useAgentGit(agentId);
+  const { data: git, refetch, isFetching } = useAgentGit(agentId);
   const { publish, mergePr, cleanup } = useOrchestratorMutations();
   if (!git) return null;
   if (!git.hasRepo) {
@@ -175,10 +175,21 @@ function GitPanel({ agentId, canWrite }: { agentId: string; canWrite: boolean })
   return (
     <div className="space-y-2 border-t border-border px-4 py-2.5 text-xs">
       <p className="font-semibold text-foreground">GitHub · {git.repo}</p>
-      {git.missingPermissions.length > 0 && (
-        <p className="rounded border border-status-warning/40 bg-status-warning/10 p-2 text-[11px] text-status-warning" role="status">
-          O GitHub App do Universe precisa de <b>{git.missingPermissions.join(" e ")}</b>. No GitHub: Settings → Developer settings → GitHub Apps → seu App → Permissions. Depois aceite a atualização na instalação.
-        </p>
+      {(git.missingPermissions.length > 0 || git.missingForMerge.length > 0) && git.permissionsSeen && (
+        <div className="space-y-1.5 rounded border border-status-warning/40 bg-status-warning/10 p-2 text-[11px] text-status-warning" role="status">
+          <p>
+            Faltam permissões do GitHub App: <b>{[...git.missingPermissions, ...git.missingForMerge].join(", ")}</b>
+            {git.missingPermissions.length === 0 ? " (só necessárias para o merge)" : ""}.
+          </p>
+          <p className="text-muted">
+            O GitHub informa agora para a instalação em <b>{git.permissionsSeen.account}</b>: Contents <b>{git.permissionsSeen.contents}</b> · Pull requests <b>{git.permissionsSeen.pullRequests}</b> · Checks <b>{git.permissionsSeen.checks}</b> · Statuses <b>{git.permissionsSeen.statuses}</b>.
+          </p>
+          <p>
+            Já liberou no App e ainda aparece? Mudar as permissões no App <b>não basta</b>: o dono precisa <b>aceitar a atualização nesta instalação</b> —{" "}
+            <a href={git.permissionsSeen.settingsUrl} target="_blank" rel="noopener noreferrer" className="underline">abrir a instalação no GitHub</a> e clicar em “Review request” → “Accept new permissions”. Depois volte e clique em Verificar de novo.
+          </p>
+          <Button size="sm" variant="secondary" disabled={isFetching} onClick={() => void refetch()}>{isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Verificar de novo"}</Button>
+        </div>
       )}
       <p className="text-muted">
         {git.workspaceExists
