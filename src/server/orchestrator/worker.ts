@@ -5,6 +5,7 @@ import { recordAuditEvent } from "@/server/audit/audit-log";
 import { redactSecrets } from "@/server/claude/agent-service";
 import { orchestratorBus } from "./bus";
 import { ExecutorStartError, getExecutor } from "./executor";
+import { getWorkspacePreparer, syncProjectAgents } from "./workspace";
 import { ACTIVE, appendEvent, getSettings, purgeOldTasks, setTaskRegisteredHook } from "./service";
 
 /**
@@ -168,6 +169,8 @@ async function runTask(taskId: string): Promise<void> {
   });
 
   try {
+    // Antes do Claude iniciar (ainda "INICIANDO"): garante o diretório do agente (clone do GitHub vinculado, se faltar).
+    await getWorkspacePreparer()(agent, (text) => appendEvent(taskId, "info", text));
     let outcome;
     try {
       outcome = await getExecutor().run(input(agent.claudeSessionId));
@@ -293,5 +296,9 @@ export function startOrchestratorWorker(): void {
   // Primeira passada logo após o boot: tarefas da execução anterior são marcadas e as da fila seguem.
   setTimeout(tick, 3_000);
   timer = setInterval(tick, 3_000);
+  // Um funcionário por Projeto, criado sozinho (e conferido de vez em quando para projetos novos).
+  const syncAgents = () => void syncProjectAgents().catch((error) => logger.error("orchestrator_sync_agents_failed", { message: error instanceof Error ? error.message : String(error) }));
+  setTimeout(syncAgents, 4_000);
+  setInterval(syncAgents, 60_000);
   setInterval(() => void purgeOldTasks().catch(() => undefined), 6 * 3_600_000);
 }

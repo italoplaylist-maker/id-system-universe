@@ -4,6 +4,8 @@ import { after, afterEach, beforeEach, describe, it } from "node:test";
 import { ValidationError } from "@/lib/errors";
 import { setExecutor, type ExecutorRunInput, type TaskExecutor } from "@/server/orchestrator/executor";
 import { createAgent, decideTaskApproval, getTaskDetail, listRoomAgents, listTasks, submitTask, updateAgent, updateSettings } from "@/server/orchestrator/service";
+import { setWorkspacePreparer, syncProjectAgents } from "@/server/orchestrator/workspace";
+import { archiveAgent } from "@/server/orchestrator/service";
 import { cancelTask, dispatch, idle, recoverStale } from "@/server/orchestrator/worker";
 
 let actor: { userId: string };
@@ -72,6 +74,7 @@ describe("Orquestrador de agentes Claude", () => {
     actor = { userId: (await makeUser("ADMIN", "owner@x.com")).id };
     exec = new FakeExecutor();
     setExecutor(exec);
+    setWorkspacePreparer(async () => undefined);
     agentId = (await createAgent({ name: "Ana", cwd: "/srv/app", specialty: "Backend" }, actor)).id;
   });
   afterEach(async () => {
@@ -330,5 +333,16 @@ describe("Orquestrador de agentes Claude", () => {
     assert.ok(!d.approval!.detail.includes("supersecret123"));
     await decideTaskApproval(d.approval!.id, { decision: "deny" }, actor);
     await idle();
+  });
+
+  it("um funcionário por Projeto, criado sozinho, sem duplicar e sem ressuscitar quem foi removido", async () => {
+    const p = await prisma.project.create({ data: { name: "Construsil", slug: "construsil" } });
+    assert.equal(await syncProjectAgents(), 1);
+    assert.equal(await syncProjectAgents(), 0);
+    const agent = await prisma.agentProfile.findFirstOrThrow({ where: { projectId: p.id } });
+    assert.equal(agent.name, "Construsil");
+    assert.ok(agent.cwd.endsWith("/construsil"));
+    await archiveAgent(agent.id, actor);
+    assert.equal(await syncProjectAgents(), 0);
   });
 });

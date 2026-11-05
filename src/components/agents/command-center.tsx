@@ -91,6 +91,54 @@ function TaskDetail({ taskId, canWrite, onBack }: { taskId: string; canWrite: bo
   );
 }
 
+/** Login do Claude (conta que paga o Claude Code) feito pelo Universe: abre a página oficial, o usuário cola o código aqui. */
+function ClaudeLogin({ canWrite }: { canWrite: boolean }) {
+  const { data: status } = useOrchestratorStatus(true);
+  const { startLogin, submitLoginCode, logout } = useOrchestratorMutations();
+  const [url, setUrl] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  if (!status) return null;
+  if (status.authenticated) {
+    return (
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-1.5 text-[11px] text-muted">
+        <span className="text-status-running">● Claude conectado{status.method === "assinatura" ? " (sua assinatura)" : status.method === "api" ? " (chave de API)" : ""}</span>
+        {canWrite && status.method === "assinatura" && (
+          <button className="hover:text-foreground" onClick={() => logout.mutate(undefined, { onError: (e) => toast.error(e.message) })}>Sair</button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2 border-b border-status-warning/40 bg-status-warning/10 p-4 text-xs" role="status">
+      <p className="font-semibold text-status-warning">O Claude ainda não está conectado neste servidor.</p>
+      {!canWrite ? (
+        <p className="text-muted">Peça a um administrador para entrar com a conta Claude.</p>
+      ) : !url ? (
+        <>
+          <p className="text-muted">Entre com a mesma conta que paga o Claude Code. Não precisa de chave de API.</p>
+          <Button size="sm" variant="primary" disabled={startLogin.isPending} onClick={() => startLogin.mutate(undefined, { onSuccess: (r) => { setUrl(r.url); window.open(r.url, "_blank", "noopener,noreferrer"); }, onError: (e) => toast.error(e.message) })}>
+            Entrar com minha conta Claude
+          </Button>
+        </>
+      ) : (
+        <>
+          <p className="text-muted">
+            1) Uma aba do Claude foi aberta. Se não abriu,{" "}
+            <a className="underline" href={url} target="_blank" rel="noopener noreferrer">clique aqui</a>. Entre e autorize.
+            <br />2) Copie o código que a página mostrar e cole abaixo.
+          </p>
+          <div className="flex gap-2">
+            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Cole o código aqui" autoComplete="off" spellCheck={false} className="min-w-0 flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 focus:border-accent focus:outline-none" />
+            <Button size="sm" variant="primary" disabled={!code.trim() || submitLoginCode.isPending} onClick={() => submitLoginCode.mutate(code.trim(), { onSuccess: () => { setUrl(null); setCode(""); toast.success("Claude conectado."); }, onError: (e) => toast.error(e.message) })}>
+              {submitLoginCode.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Confirmar"}
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function AgentForm({ onDone }: { onDone: () => void }) {
   const { createAgent } = useOrchestratorMutations();
   const [f, setF] = useState({ name: "", specialty: "", cwd: "", model: "", permissionMode: "default" });
@@ -125,7 +173,6 @@ function AgentForm({ onDone }: { onDone: () => void }) {
 export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAgentId: string | null; onClose: () => void; canWrite: boolean }) {
   useOrchestratorStream(true);
   const { data: agents } = useRoomAgents(true);
-  const { data: status } = useOrchestratorStatus(true);
   const { data: settings } = useOrchestratorSettings(true);
   const { submit, updateAgent, archiveAgent, setConcurrency } = useOrchestratorMutations();
   const [agentId, setAgentId] = useState<string | null>(initialAgentId);
@@ -173,9 +220,7 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
         <button onClick={onClose} className="rounded p-1 text-muted hover:bg-surface hover:text-foreground" aria-label="Fechar"><X className="h-4 w-4" /></button>
       </div>
 
-      {status && !status.authenticated && selected?.state === "ERROR" && (
-        <p className="border-b border-status-warning/40 bg-status-warning/10 px-4 py-2 text-xs text-status-warning" role="status">{status.hint}</p>
-      )}
+      <ClaudeLogin canWrite={canWrite} />
 
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-4 py-2">
         {agents?.map((a) => (

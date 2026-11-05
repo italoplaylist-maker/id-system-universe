@@ -68,9 +68,9 @@ export function useTaskDetail(taskId: string | null) {
 export function useOrchestratorStatus(enabled = true) {
   return useQuery({
     queryKey: [...KEY, "status"],
-    queryFn: () => apiFetch<{ authenticated: boolean; method: string | null; hint: string | null }>("/api/orchestrator/status"),
+    queryFn: () => apiFetch<{ authenticated: boolean; method: "assinatura" | "api" | "provedor" | null; loginInProgress: boolean }>("/api/orchestrator/status"),
     enabled,
-    staleTime: 60_000,
+    staleTime: 10_000,
   });
 }
 
@@ -109,6 +109,9 @@ export function useOrchestratorMutations() {
       onSettled: refresh,
     }),
     archiveAgent: useMutation({ mutationFn: (id: string) => apiFetch(`/api/orchestrator/agents/${id}`, { method: "DELETE" }), onSettled: refresh }),
+    startLogin: useMutation({ mutationFn: () => apiFetch<{ url: string }>("/api/orchestrator/auth/login", { method: "POST" }) }),
+    submitLoginCode: useMutation({ mutationFn: (code: string) => apiFetch("/api/orchestrator/auth/code", { method: "POST", body: JSON.stringify({ code }) }), onSettled: refresh }),
+    logout: useMutation({ mutationFn: () => apiFetch("/api/orchestrator/auth/logout", { method: "POST" }), onSettled: refresh }),
     setConcurrency: useMutation({
       mutationFn: (maxConcurrent: number) => apiFetch("/api/orchestrator/settings", { method: "PATCH", body: JSON.stringify({ maxConcurrent }) }),
       onSettled: refresh,

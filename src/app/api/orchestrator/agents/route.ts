@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { actorFor, apiError, readJson } from "@/server/http/api-helpers";
 import { guard } from "@/server/orchestrator/guard";
 import { createAgent, listRoomAgents } from "@/server/orchestrator/service";
+import { syncProjectAgents } from "@/server/orchestrator/workspace";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
     await guard(false);
+    await syncProjectAgents(); // um funcionário por Projeto, sem ninguém precisar cadastrar
     return NextResponse.json({ agents: await listRoomAgents() });
   } catch (error) {
     return apiError(error);
