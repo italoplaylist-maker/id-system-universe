@@ -353,6 +353,35 @@ describe("Vida dos agentes — cenários", () => {
     assert.ok(inLounge >= 5, `pelo menos 5 fora das mesas (${inLounge})`);
   });
 
+  it("ao abrir o sistema: quem não está trabalhando já nasce no lounge; quem trabalha, na mesa (sem caminhar)", () => {
+    const world = makeWorld(4, 8);
+    const sim = new LifeSim(5);
+    sim.setWorld(world);
+    const working = new Set(["p1", "p4", "a2"]);
+    const ids = [...Array.from({ length: 8 }, (_, i) => `p${i}`), ...Array.from({ length: 4 }, (_, i) => `a${i}`)];
+    sim.sync(ids.map((id, i) => ({ id, seed: i * 13 + 1, mustWork: working.has(id), working: working.has(id) })), { instant: true });
+    // sem avançar o relógio: já está tudo no lugar certo
+    for (const a of all(sim)) {
+      if (working.has(a.id)) {
+        assert.equal(a.phase, "desk", `${a.id} trabalhando fica na mesa`);
+        assert.ok(dist(a, a.desk.seat) < 0.01);
+      } else {
+        assert.notEqual(a.phase, "desk", `${a.id} ocioso não pode estar na mesa`);
+        assert.notEqual(a.phase, "walking");
+        assert.ok(a.x > world.lounge.x0, `${a.id} ocioso está no lounge`);
+        assert.ok(!world.grid.isSolid(a.x, a.z) || a.phase === "seated", "não nasce dentro de móvel");
+      }
+    }
+    const taken = new Set<string>();
+    for (const a of all(sim)) if (a.phase === "seated" && a.seat) {
+      assert.ok(!taken.has(a.seat.id), "lugar duplicado");
+      taken.add(a.seat.id);
+    }
+    // depois de nascer, continuam vivos normalmente e quem trabalha segue na mesa
+    run(sim, 60);
+    for (const id of working) assert.equal(get(sim, id).phase, "desk");
+  });
+
   it("agente com erro/aprovação não aparece trabalhando: fica na mesa sem animação de digitar", () => {
     const { sim } = setup(1, false, 4);
     const a = get(sim, "a0");

@@ -128,6 +128,8 @@ export class LifeSim {
   private chats = new Map<string, ChatState>();
   private visuals = new Map<string, ActorVisual>();
   time = 0;
+  /** Já recebeu o primeiro retrato do estado real? Só nele os ociosos nascem direto no lounge. */
+  initialized = false;
 
   constructor(seed = 1) {
     this.rng = makeRng(seed);
@@ -183,7 +185,7 @@ export class LifeSim {
   }
 
   /** Sincroniza com o estado real: cria quem apareceu, remove quem sumiu (offline), atualiza prioridades. */
-  sync(inputs: SyncInput[]) {
+  sync(inputs: SyncInput[], options: { instant?: boolean } = {}) {
     if (!this.world) return;
     const seen = new Set<string>();
     for (const input of inputs) {
@@ -194,6 +196,8 @@ export class LifeSim {
       if (!a) {
         a = this.spawn(input, desk);
         this.actors.set(a.id, a);
+        // Primeiro retrato do estado real: quem não está trabalhando já está no lounge (ninguém "finge" trabalhar na mesa).
+        if (options.instant && !input.mustWork) this.placeInstant(a);
       }
       const wasMustWork = a.mustWork;
       a.working = input.working;
@@ -204,6 +208,42 @@ export class LifeSim {
     for (const id of [...this.actors.keys()]) {
       if (!seen.has(id)) this.remove(id);
     }
+    this.initialized = true;
+  }
+
+  /** Coloca o personagem direto na atividade escolhida (sem caminhar): só para o estado inicial da tela. */
+  private placeInstant(a: Actor) {
+    const intent = this.decide(a);
+    if (!intent) return; // lounge lotado: fica na mesa
+    a.intent = intent;
+    a.activity = this.activityFor(intent);
+    a.arrived = true;
+    a.path = [];
+    a.idleFor = 0;
+    if (intent.kind === "seat") {
+      const s = intent.seat;
+      a.phase = "seated";
+      a.seat = s;
+      a.x = s.pos.x;
+      a.z = s.pos.z;
+      a.yaw = s.yaw;
+      a.vis.seatKind = s.kind;
+      a.vis.hipSeat = s.hipSeat;
+      a.vis.backLean = s.backLean;
+      a.vis.sit = 1;
+      a.dwell = this.dwellFor(a) * (0.3 + this.rng() * 0.7);
+      a.drinkT = 2 + this.rng() * 8;
+      return;
+    }
+    const pos = this.spotFor(a)!;
+    a.phase = "standing";
+    a.x = pos.x;
+    a.z = pos.z;
+    a.vis.sit = 0;
+    a.toYaw = intent.kind === "pool" ? intent.spot.yaw : intent.kind === "chat" ? intent.pair[intent.side].yaw : a.yaw;
+    a.yaw = a.toYaw;
+    a.dwell = this.dwellFor(a) * (0.3 + this.rng() * 0.7);
+    a.waitT = 0;
   }
 
   private spawn(input: SyncInput, desk: DeskInfo): Actor {

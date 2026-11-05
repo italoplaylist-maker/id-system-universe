@@ -42,6 +42,8 @@ interface HqSceneProps {
   onOpenServers: () => void;
   selectedAgentId: string | null;
   onSelectAgent: (id: string) => void;
+  /** Projetos e recursos já chegaram do servidor (ou é demo). Antes disso ninguém é desenhado. */
+  dataReady: boolean;
   reducedGraphics: boolean;
   env: EnvironmentState;
 }
@@ -74,6 +76,7 @@ export function HqScene({
   onOpenServers,
   selectedAgentId,
   onSelectAgent,
+  dataReady,
   reducedGraphics,
   env,
 }: HqSceneProps) {
@@ -241,7 +244,7 @@ export function HqScene({
   // Com agentes + lounge, os personagens são movidos pela simulação; sem isso, as mesas funcionam como antes.
   const withLife = (children: React.ReactNode) =>
     lifeWorld ? (
-      <LifeLayer world={lifeWorld} agents={lifeAgents} reduced={reducedGraphics}>
+      <LifeLayer world={lifeWorld} agents={lifeAgents} reduced={reducedGraphics} ready={dataReady}>
         {children}
       </LifeLayer>
     ) : (

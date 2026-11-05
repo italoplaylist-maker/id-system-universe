@@ -21,19 +21,21 @@ export interface LifeAgent {
 }
 
 /** Uma só instância da simulação por cena; a UI só enxerga o objeto estável. */
-export function useLifeSim(world: LifeWorldInput | null, agents: LifeAgent[]): LifeSim {
+export function useLifeSim(world: LifeWorldInput | null, agents: LifeAgent[], ready = true): LifeSim {
   const [sim] = useState(() => new LifeSim(Date.now() % 100000));
 
   const built = useMemo(() => (world ? buildLifeWorld(world) : null), [world]);
   const syncKey = agents.map((a) => `${a.id}:${a.mustWork ? 1 : 0}${a.working ? 1 : 0}`).join("|");
 
   useEffect(() => {
-    if (!built) return;
+    // Enquanto o estado real não chegou (carregando) ninguém é desenhado: nada de "trabalhando" provisório.
+    if (!built || !ready) return;
     sim.setWorld(built);
     const inputs: SyncInput[] = agents.map((a) => ({ id: a.id, seed: hashSeed(a.id), mustWork: a.mustWork, working: a.working }));
-    sim.sync(inputs);
+    // O primeiro retrato já posiciona cada um onde o estado real manda: ociosos no lounge, trabalhando na mesa.
+    sim.sync(inputs, { instant: !sim.initialized });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `syncKey` resume `agents`
-  }, [sim, built, syncKey]);
+  }, [sim, built, syncKey, ready]);
 
   useFrame((_, delta) => {
     // Quadro longo (GPU lenta/aba em segundo plano) vira vários passos curtos, mas nunca um salto de minutos.

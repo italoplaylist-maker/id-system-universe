@@ -150,6 +150,7 @@ export function HqView() {
               router.push("/settings/infrastructure");
             }}
             onOpenServers={() => router.push("/servers")}
+            dataReady={demoMode || (realApplications !== undefined && realProjects !== undefined)}
             selectedAgentId={selectedAgentId}
             onSelectAgent={(id) => {
               selectApplication(null);
