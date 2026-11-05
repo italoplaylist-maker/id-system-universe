@@ -74,6 +74,8 @@ model User {
   auditEvents   AuditEvent[]
   preference    UserPreference?
   projectAccess ProjectAccess[]
+  pushSubscriptions      PushSubscription[]
+  notificationPreference NotificationPreference?
 }
 
 /// Quais Projects um usuário OPERATOR/VIEWER enxerga. SUPERADMIN e ADMIN têm
@@ -908,5 +910,33 @@ model AgentMcpServer {
   secretsEnc String?
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Aparelho/navegador que aceitou receber notificações push (Web Push, VAPID). Um usuário pode ter vários (celular, computador).
+model PushSubscription {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint      String    @unique
+  p256dh        String
+  auth          String
+  userAgent     String?
+  failures      Int       @default(0)
+  lastSuccessAt DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId])
+}
+
+/// Quais tipos de aviso o usuário quer receber (pop-up e push).
+model NotificationPreference {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deploys   Boolean  @default(true)
+  agents    Boolean  @default(true)
+  approvals Boolean  @default(true)
+  servers   Boolean  @default(true)
+  billing   Boolean  @default(true)
   updatedAt DateTime @updatedAt
 }

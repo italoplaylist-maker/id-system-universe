@@ -11,7 +11,9 @@ import { getAppOrigin } from "@/server/http/public-url";
  * (see requireSessionUser / can() in src/server/auth). Proxy only exists so
  * an unauthenticated visitor doesn't see a flash of protected UI.
  */
-const PUBLIC_PATHS = ["/login", "/onboarding"];
+const PUBLIC_PATHS = ["/login", "/onboarding", "/sw.js", "/manifest.webmanifest"];
+/** Ícones do app instalável e do push: o navegador os busca sem cookie. */
+const PUBLIC_STATIC_PREFIXES = ["/icons/"];
 const PUBLIC_API_PREFIXES = ["/api/health", "/api/auth", "/api/webhooks", "/api/agent", "/api/claude/events", "/api/claude/hook", "/api/claude/install", "/api/claude/hook-approvals"];
 
 /** No proxy a requisição traz o Host público; APP_URL, quando definido, tem precedência. */
@@ -22,7 +24,7 @@ function redirectTo(request: NextRequest, path: string) {
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+  if (PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix)) || PUBLIC_STATIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     return NextResponse.next();
   }
 

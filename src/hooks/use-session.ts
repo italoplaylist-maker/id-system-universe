@@ -17,6 +17,6 @@ async function fetchSession(): Promise<CurrentUser | null> {
   return data.user;
 }
 
-export function useSession() {
-  return useQuery({ queryKey: ["session"], queryFn: fetchSession, staleTime: 60_000 });
+export function useSession(enabled = true) {
+  return useQuery({ queryKey: ["session"], queryFn: fetchSession, staleTime: 60_000, enabled });
 }

@@ -4,6 +4,7 @@ import { after, afterEach, beforeEach, describe, it } from "node:test";
 import { ValidationError } from "@/lib/errors";
 import { setExecutor, type ExecutorRunInput, type TaskExecutor } from "@/server/orchestrator/executor";
 import { createAgent, decideTaskApproval, getTaskDetail, listRoomAgents, listTasks, submitTask, updateAgent, updateSettings } from "@/server/orchestrator/service";
+import { notificationBus, type BusMessage } from "@/server/notifications/bus";
 import { setWorkspacePreparer, syncProjectAgents } from "@/server/orchestrator/workspace";
 import { archiveAgent } from "@/server/orchestrator/service";
 import { cancelTask, dispatch, idle, recoverStale } from "@/server/orchestrator/worker";
@@ -344,5 +345,26 @@ describe("Orquestrador de agentes Claude", () => {
     assert.ok(agent.cwd.endsWith("/construsil"));
     await archiveAgent(agent.id, actor);
     assert.equal(await syncProjectAgents(), 0);
+  });
+
+  it("avisa (pop-up/push) quando o agente termina e quando falha; cancelar não avisa", async () => {
+    const got: BusMessage[] = [];
+    const off = notificationBus.subscribe((m) => got.push(m));
+    const a = await submitTask(agentId, { prompt: "fazer X", idempotencyKey: key() }, actor);
+    await dispatch();
+    await waitFor(async () => (await statusOf(a.task.id)) === "RUNNING");
+    exec.release(a.task.id);
+    await idle();
+    exec.mode = "fail";
+    const b = await submitTask(agentId, { prompt: "fazer Y", idempotencyKey: key() }, actor);
+    await dispatch();
+    await idle();
+    assert.equal(await statusOf(b.task.id), "FAILED");
+    await new Promise((r) => setTimeout(r, 80));
+    off();
+    const titles = got.map((m) => m.payload.title);
+    assert.ok(titles.includes("Ana terminou"), `avisos: ${titles.join(" | ")}`);
+    assert.ok(titles.includes("Ana falhou"));
+    assert.ok(got.every((m) => m.audience.requireGlobal && m.audience.permission === "provider:read"));
   });
 });

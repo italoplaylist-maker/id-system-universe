@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import { QueryProvider } from "@/components/query-provider";
+import { NotificationBridge } from "@/components/notifications/notification-bridge";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -17,6 +18,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ID System Universe",
   description: "Infrastructure control plane for the ID System SaaS ecosystem.",
+  applicationName: "ID System Universe",
+  appleWebApp: { capable: true, title: "Universe", statusBarStyle: "black-translucent" },
+  icons: { icon: "/icons/icon-192.png", apple: "/icons/apple-touch-icon.png" },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -25,6 +29,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <QueryProvider>
           {children}
+          <NotificationBridge />
           <Toaster
             theme="dark"
             position="bottom-right"

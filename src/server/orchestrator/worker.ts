@@ -5,6 +5,7 @@ import { recordAuditEvent } from "@/server/audit/audit-log";
 import { redactSecrets } from "@/server/claude/agent-service";
 import { orchestratorBus } from "./bus";
 import { ExecutorStartError, getExecutor } from "./executor";
+import { notifyApprovalRequested, notifyTaskFinished } from "./notify";
 import { loadMcpServersForRun } from "./tools-config";
 import { getWorkspacePreparer, syncProjectAgents } from "./workspace";
 import { ACTIVE, appendEvent, getSettings, purgeOldTasks, setTaskRegisteredHook } from "./service";
@@ -135,6 +136,7 @@ async function runTask(taskId: string): Promise<void> {
     const approval = await prisma.agentTaskApproval.create({ data: { taskId, tool, detail } });
     await prisma.agentTask.updateMany({ where: { id: taskId, status: { in: ["RUNNING", "STARTING"] } }, data: { status: "WAITING_APPROVAL" } });
     await appendEvent(taskId, "approval_requested", detail, tool);
+    void notifyApprovalRequested(taskId, tool, detail).catch(() => undefined);
     orchestratorBus.emit({ type: "approval", taskId, agentId: agent.id });
     const deadline = Date.now() + APPROVAL_TIMEOUT_MS;
     let status = "PENDING";
@@ -217,10 +219,11 @@ async function runTask(taskId: string): Promise<void> {
 }
 
 async function finish(taskId: string, agentId: string, status: "COMPLETED" | "FAILED" | "CANCELLED", data: { result?: string | null; error?: string | null; costUsd?: number | null; turns?: number | null; claudeSessionId?: string }) {
-  await prisma.agentTask.updateMany({
+  const won = await prisma.agentTask.updateMany({
     where: { id: taskId, status: { in: [...ACTIVE] } },
     data: { status, finishedAt: new Date(), result: data.result ?? undefined, error: data.error ?? undefined, costUsd: data.costUsd ?? undefined, turns: data.turns ?? undefined, claudeSessionId: data.claudeSessionId ?? undefined },
   });
+  if (won.count === 1 && status !== "CANCELLED") void notifyTaskFinished(taskId, status).catch(() => undefined);
   await prisma.agentProfile.update({ where: { id: agentId }, data: { lastActiveAt: new Date(), ...(status === "COMPLETED" ? { lastError: null } : {}), ...(data.claudeSessionId ? { claudeSessionId: data.claudeSessionId } : {}) } }).catch(() => undefined);
   orchestratorBus.emit({ type: "task", taskId, agentId });
 }
@@ -280,6 +283,7 @@ export async function recoverStale(now: Date = new Date(), staleMs = STALE_AFTER
       await prisma.agentTaskApproval.updateMany({ where: { taskId: t.id, status: "PENDING" }, data: { status: "EXPIRED", decidedAt: new Date() } });
       await appendEvent(t.id, "interrupted", "Execução interrompida: o worker deixou de responder.");
       orchestratorBus.emit({ type: "task", taskId: t.id, agentId: t.agentId });
+      void notifyTaskFinished(t.id, "INTERRUPTED").catch(() => undefined);
       n += 1;
     }
   }

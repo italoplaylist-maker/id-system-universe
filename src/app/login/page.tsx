@@ -2,12 +2,14 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export default function LoginPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -25,6 +27,8 @@ export default function LoginPage() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? "Login failed.");
       }
+      // a sessão em cache (de antes do login) não vale mais: o app inteiro precisa reler quem você é
+      await queryClient.invalidateQueries({ queryKey: ["session"] });
       router.replace("/");
       router.refresh();
     } catch (error) {

@@ -1,5 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { notify } from "@/server/notifications/notify";
+import { universeEventToNotification } from "@/server/notifications/from-events";
 import { canUser, type PermissionSubject } from "@/server/auth/rbac";
 import type { ProjectScope } from "@/server/auth/project-access";
 
@@ -59,6 +61,9 @@ export async function recordUniverseEvent(input: RecordUniverseEventInput): Prom
       permission: input.permission,
     },
   });
+  // Pop-up e push (deploy concluído/falhou, servidor caiu…): fire-and-forget, nunca atrapalha quem registrou o evento.
+  const n = universeEventToNotification(input);
+  if (n) void notify(n);
 }
 
 export async function listRecentUniverseEvents(

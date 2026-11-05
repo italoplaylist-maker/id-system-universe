@@ -9,6 +9,7 @@ import { useApplications } from "@/hooks/use-applications";
 import { useSyncAll } from "@/hooks/use-applications";
 import { useUiStore } from "@/store/ui-store";
 import { Button } from "@/components/ui/button";
+import { NotificationsDialog } from "@/components/notifications/notifications-dialog";
 import { ProjectManagerDrawer } from "@/components/projects/project-manager-drawer";
 import { canUser } from "@/server/auth/rbac";
 
@@ -124,6 +125,7 @@ export function TopBar() {
           </button>
         </div>
 
+        <NotificationsDialog />
         <Link href="/settings/integrations" className="rounded-md p-2 text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Configurações">
           <Settings className="h-4 w-4" />
         </Link>
