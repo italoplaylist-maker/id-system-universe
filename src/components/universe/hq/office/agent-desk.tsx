@@ -127,11 +127,14 @@ interface AgentDeskProps {
   reduced: boolean;
   /** Deslocamento X da sala dos agentes no mundo (para medir a distância da câmera). */
   offsetX?: number;
+  /** Giro extra da mesa (rad) e altura do piso — mesas em agrupamentos e alas em níveis diferentes. */
+  yaw?: number;
+  level?: number;
   onFocus: () => void;
 }
 
 /** Uma sessão de agente Claude = uma mesa: azul e digitando quando trabalha, vermelha se a última ferramenta falhou, calma quando aguarda. */
-export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimmedByFocus, reduced, offsetX = 0, onFocus }: AgentDeskProps) {
+export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimmedByFocus, reduced, offsetX = 0, yaw = 0, level = 0, onFocus }: AgentDeskProps) {
   const life = useLife();
   const [hovered, setHovered] = useState(false);
   const seed = useMemo(() => hashSeed(session.id), [session.id]);
@@ -187,7 +190,7 @@ export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimm
   const pivotZ = POD.DESK_CENTER_Z + 0.24;
 
   return (
-    <group position={[slot.x, 0, slot.z]} rotation={[0, Math.PI, 0]}>
+    <group position={[slot.x, level, slot.z]} rotation={[0, Math.PI + yaw, 0]}>
       <RoundedBox args={[2.3, 0.012, 2.2]} radius={0.04} smoothness={2} position={[0, 0.006, 0.5]} receiveShadow>
         <meshStandardMaterial color="#2a303c" roughness={1} />
       </RoundedBox>

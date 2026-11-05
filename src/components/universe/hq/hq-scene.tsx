@@ -1,19 +1,24 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { ContactShadows, PerformanceMonitor } from "@react-three/drei";
 import { QUALITY_PROFILES, type GraphicsQuality } from "./render/quality";
 import { StudioEnvironment } from "./render/studio-environment";
 import * as THREE from "three";
-import { computeOfficeLayout, OFFICE } from "./office/office-layout";
-import { OfficeShell, PARTITION_DOOR_WIDTH, partitionDoorZ } from "./office/office-shell";
+import { computeAgentPods, computeOfficeLayout } from "./office/office-layout";
+import { computeHqPlan, HQ } from "./plan/hq-plan";
+import { Atrium, Ramp } from "./office/atrium";
+import { atriumObstacles } from "./plan/atrium-layout";
+import { toWorld } from "./life/geometry";
+import { useHqViews } from "@/store/hq-views-store";
+import { OfficeShell, partitionDoorZ } from "./office/office-shell";
 import { agentTitle } from "./office/agent-desk";
 import { AgentsWing } from "./office/agents-wing";
 import { LifeLayer } from "./office/life-layer";
 import { agentIsTyping, agentNeedsDesk } from "./life/policy";
 import type { LifeAgent } from "./life/agent-life";
-import type { LifeWorldInput } from "./life/world";
+import type { PlanWorldInput } from "./life/world";
 import { computeLoungeLayout, LOUNGE_MIN_DEPTH, LOUNGE_WIDTH } from "./life/lounge-layout";
 import { useAgentSessions } from "@/hooks/use-agents";
 import { agentAccent, orderAgentSessions } from "@/lib/agent-order";
@@ -148,33 +153,28 @@ export function HqScene({
     [agentSessions],
   );
   const agentLayoutKey = agentEntries.map((e) => `${e.session.id}:${e.name}:${e.accent}`).join("|");
-  // Três salas lado a lado (operações · agentes · lounge) com a mesma profundidade: fundos alinhados.
-  const { layout, agentsLayout, loungeLayout, loungeShellLayout } = useMemo(() => {
+  // Planta em Y: três alas (tecnológica, operacional, social) ligadas por um átrio central. Cada ala é uma sala com o
+  // seu próprio sistema de coordenadas; `plan` as posiciona, gira e põe em níveis diferentes.
+  const { layout, agentsLayout, loungeLayout, loungeShellLayout, plan } = useMemo(() => {
     const agentInputs = agentEntries.map((e) => ({ id: e.session.id, name: e.name, accent: e.accent }));
-    const mainNatural = computeOfficeLayout(activeProjects, enabledProviders).depth;
-    const agentsNatural = agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 9, keepOrder: true }).depth : 0;
-    const minDepth = Math.max(mainNatural, agentsNatural, agentsEnabled ? LOUNGE_MIN_DEPTH : 0);
-    const main = computeOfficeLayout(activeProjects, enabledProviders, { minDepth });
-    const agents = agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 9, minDepth, keepOrder: true }) : null;
-    const lounge = agents ? computeLoungeLayout(main.width / 2 + agents.width, main.depth, partitionDoorZ(main.depth)) : null;
-    const loungeShell = lounge ? computeOfficeLayout([], [], { minWidth: LOUNGE_WIDTH, minDepth: main.depth }) : null;
-    return { layout: main, agentsLayout: agents, loungeLayout: lounge, loungeShellLayout: loungeShell };
-    // As salas só dependem de QUEM são os agentes (ids/nomes), não do que eles estão fazendo agora:
+    const main = computeOfficeLayout(activeProjects, enabledProviders);
+    const agents = computeAgentPods(agentInputs);
+    const lounge = computeLoungeLayout(HQ.DOOR_DIST, LOUNGE_MIN_DEPTH, 0);
+    const loungeShell = computeOfficeLayout([], [], { minWidth: LOUNGE_WIDTH, minDepth: LOUNGE_MIN_DEPTH });
+    const hq = computeHqPlan({
+      tech: { width: main.width, depth: main.depth, doorZ: partitionDoorZ(main.depth) },
+      agents: { width: agents.width, depth: agents.depth, doorZ: agents.aisleZ },
+      lounge: { width: LOUNGE_WIDTH, depth: LOUNGE_MIN_DEPTH },
+    });
+    return { layout: main, agentsLayout: agents, loungeLayout: lounge, loungeShellLayout: loungeShell, plan: hq };
+    // As alas só dependem de QUEM são os agentes (ids/nomes), não do que eles estão fazendo agora:
     // o estado muda a cada poucos segundos e não pode reconstruir layout nem malha de navegação.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjects, enabledProviders, agentLayoutKey, agentsEnabled]);
-  const agentsOffsetX = agentsLayout ? layout.width / 2 + agentsLayout.width / 2 : 0;
+  }, [activeProjects, enabledProviders, agentLayoutKey]);
 
-  // O "mundo" que a câmera, o céu, a sombra e a luz enxergam: as três salas juntas.
-  const world = useMemo(() => {
-    if (!agentsLayout || !loungeLayout) return { width: layout.width, depth: layout.depth, center: layout.center, radius: layout.radius, bounds: layout.bounds };
-    const extra = agentsLayout.width + loungeLayout.width;
-    const bounds = { ...layout.bounds, maxX: layout.bounds.maxX + extra };
-    const width = layout.width + extra;
-    const center: [number, number, number] = [extra / 2, layout.center[1], layout.center[2]];
-    const radius = Math.sqrt((width / 2) ** 2 + (layout.depth / 2) ** 2 + (OFFICE.WALL_HEIGHT / 2) ** 2) + 2;
-    return { width, depth: layout.depth, center, radius, bounds };
-  }, [layout, agentsLayout, loungeLayout]);
+  // O "mundo" que a câmera, o céu, a sombra e a luz enxergam: a planta inteira.
+  const world = useMemo(() => ({ width: plan.bounds.maxX - plan.bounds.minX, depth: plan.bounds.maxZ - plan.bounds.minZ, center: plan.center, radius: plan.radius, bounds: plan.bounds }), [plan]);
+  const tech = plan.wings.tech;
   const agentStats = useMemo(() => {
     const list = agentSessions ?? [];
     return {
@@ -204,32 +204,22 @@ export function HqScene({
 
   // ---- vida dos personagens (só visual; lê o estado real, nunca escreve) -------------------------------
   // Geometria: salas lado a lado, mesas (largura do tampo varia com os monitores) e móveis que bloqueiam o caminho.
-  const lifeWorld: LifeWorldInput | null = useMemo(() => {
-    if (!agentsLayout || !loungeLayout) return null;
+  const lifeWorld: PlanWorldInput | null = useMemo(() => {
+    if (!agentsEnabled) return null;
     const deskHalfW = (id: string) => {
       const monitors = Math.min(3, Math.max(1, (resourcesByProject.get(id) ?? []).length));
       return (monitors === 1 ? 1.5 : monitors === 2 ? 1.75 : 2.1) / 2 + 0.05;
     };
     return {
-      rooms: [
-        { minX: -layout.width / 2, maxX: layout.width / 2 },
-        { minX: layout.width / 2, maxX: layout.width / 2 + agentsLayout.width },
-        { minX: loungeLayout.x0, maxX: loungeLayout.x0 + loungeLayout.width },
-      ],
-      doorZ: partitionDoorZ(layout.depth),
-      depth: layout.depth,
+      plan,
+      techDesks: layout.desks.map((d) => ({ id: d.projectId, x: d.x, z: d.z, halfW: deskHalfW(d.projectId) })),
+      techObstacles: officePropObstacles(layout),
+      agentDesks: agentsLayout.desks.map((d) => ({ id: d.projectId, x: d.x, z: d.z, yaw: d.yaw ?? 0 })),
+      agentObstacles: [-1, 1].map((sd) => ({ kind: "circle" as const, cx: sd * (agentsLayout.width / 2 - 0.9), cz: -agentsLayout.depth / 2 + 0.9, r: 0.38, label: "plant" })),
       lounge: loungeLayout,
-      doorWidth: PARTITION_DOOR_WIDTH,
-      desks: [
-        ...layout.desks.map((d) => ({ id: d.projectId, x: d.x, z: d.z, halfW: deskHalfW(d.projectId) })),
-        ...agentsLayout.desks.map((d) => ({ id: d.projectId, x: d.x + agentsOffsetX, z: d.z })),
-      ],
-      extraObstacles: [
-        ...officePropObstacles(layout),
-        ...[-1, 1].map((sd) => ({ kind: "circle" as const, cx: agentsOffsetX + sd * (agentsLayout.width / 2 - 1.0), cz: -layout.depth / 2 + 0.9, r: 0.38, label: "plant" })),
-      ],
+      atriumObstacles: atriumObstacles(),
     };
-  }, [layout, agentsLayout, loungeLayout, agentsOffsetX, resourcesByProject]);
+  }, [plan, layout, agentsLayout, loungeLayout, resourcesByProject, agentsEnabled]);
   const lifeAgents: LifeAgent[] = useMemo(
     () => [
       // Funcionários dos projetos: trabalhando (deploy/operação) ou com erro ficam na mesa; sem trabalho circulam; tudo parado = ausente.
@@ -275,6 +265,19 @@ export function HqScene({
       children
     );
 
+  const setViews = useHqViews((st) => st.setViews);
+  useEffect(() => {
+    const ag = plan.wings.agents;
+    const lw = plan.wings.lounge;
+    const t = plan.wings.tech;
+    setViews([
+      { id: "core", label: "Núcleo", center: [0, plan.atrium.level + 1.2, 0], radius: 5.5 },
+      { id: "ops", label: "Operacional", center: [ag.x, ag.level + 1.0, ag.z], radius: Math.max(ag.width, ag.depth) * 0.5 },
+      { id: "social", label: "Social", center: [HQ.DOOR_DIST + lw.width / 2, lw.level + 1.0, 0], radius: Math.max(lw.width, lw.depth) * 0.5 },
+      { id: "tech", label: "Tecnológica", center: [t.x, t.level + 1.0, t.z], radius: Math.max(t.width, t.depth) * 0.5 },
+    ]);
+  }, [plan, setViews]);
+
   const [centerX, , centerZ] = world.center;
 
   return (
@@ -312,18 +315,20 @@ export function HqScene({
         shadow-mapSize={[profile.shadowMapSize, profile.shadowMapSize]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.03}
-        shadow-camera-left={-world.width / 1.6}
-        shadow-camera-right={world.width / 1.6}
-        shadow-camera-top={world.depth}
-        shadow-camera-bottom={-world.depth}
+        shadow-camera-left={-world.radius * 1.05}
+        shadow-camera-right={world.radius * 1.05}
+        shadow-camera-top={world.radius * 1.05}
+        shadow-camera-bottom={-world.radius * 1.05}
         shadow-camera-far={world.radius * 6}
       />
       <directionalLight position={[centerX - 8, Math.max(9, world.bounds.maxY + 4), centerZ + 6]} intensity={0.9} color="#ffd9a8" />
-      {/* a few warm interior fills — a handful of lights, never one per desk */}
-      <pointLight position={[-layout.width * 0.25, 3.4, 0]} intensity={1.6} color="#ffe2b8" distance={layout.width * 0.7} decay={1.6} />
-      <pointLight position={[layout.width * 0.25, 3.4, 0]} intensity={1.6} color="#ffe2b8" distance={layout.width * 0.7} decay={1.6} />
-      <pointLight position={[0, 3.2, layout.depth * 0.3]} intensity={1.2} color="#fff0d6" distance={layout.width * 0.7} decay={1.6} />
-      {agentsLayout && <pointLight position={[agentsOffsetX, 3.4, 0]} intensity={1.6} color="#dfe9ff" distance={agentsLayout.width * 1.2} decay={1.6} />}
+      {/* poucas luzes quentes de preenchimento — uma por ala, nunca uma por mesa */}
+      {Object.values(plan.wings).map((w) => {
+        const cx = w.id === "lounge" ? HQ.DOOR_DIST + w.width / 2 : w.x;
+        const cz = w.id === "lounge" ? 0 : w.z;
+        const reach = Math.max(w.width, w.depth) * 0.75;
+        return <pointLight key={w.id} position={[cx, w.level + 3.4, cz]} intensity={w.id === "lounge" ? 2.0 : 1.7} color={w.id === "tech" ? "#dfe9ff" : "#ffe2b8"} distance={reach} decay={1.6} />;
+      })}
 
       {/* Double-click empty floor = "look here" (Focus modes only; Overview is a locked maquette). */}
       <mesh
@@ -344,68 +349,82 @@ export function HqScene({
       <Suspense fallback={null}>
         {withLife(
           <>
-        <OfficeShell layout={layout} nocEnabled={nocEnabled} eastDoor={agentsLayout !== null} />
-        {nocEnabled && <NocWall layout={layout} servers={monitoredServers} onOpen={onOpenServers} />}
-        <CommandScreen layout={layout} stats={stats} onOpen={onOpenActivity} />
-        <OfficeProps layout={layout} />
+            {/* Átrio central + núcleo de comando; rampas ligam cada ala ao átrio */}
+            <Atrium plan={plan} stats={stats} onOpenActivity={onOpenActivity} reduced={reducedGraphics} />
+            {plan.ramps
+              .filter((r) => r.wing === "tech" || agentsEnabled)
+              .map((r) => (
+                <Ramp key={r.wing} ramp={r} />
+              ))}
 
-        {layout.racks.map((rack) => {
-          const provider = enabledProviders.find((p) => p.id === rack.providerId);
-          if (!provider) return null;
-          return (
-            <ProviderRack
-              key={rack.providerId}
-              provider={provider}
-              position={[rack.x, rack.z]}
-              selected={rack.providerId === focusId}
-              onSelect={onOpenProvider}
-              onFocus={() => focusProvider(rack.providerId, [rack.x, 1, rack.z], 2.5, provider.name)}
-            />
-          );
-        })}
+            {/* Ala Tecnológica — projetos, aplicações, racks e NOC; girada e em +0,20 m */}
+            <group position={[tech.x, tech.level, tech.z]} rotation={[0, tech.rot, 0]}>
+              <OfficeShell layout={layout} nocEnabled={nocEnabled} doorSide="east" doorZ={partitionDoorZ(layout.depth)} wallHeight={tech.wallHeight} tint="#3b414d" tower={{ side: -1, extra: 1.6 }} />
+              {nocEnabled && <NocWall layout={layout} servers={monitoredServers} onOpen={onOpenServers} />}
+              <CommandScreen layout={layout} stats={stats} onOpen={onOpenActivity} />
+              <OfficeProps layout={layout} />
+              {layout.racks.map((rack) => {
+                const provider = enabledProviders.find((p) => p.id === rack.providerId);
+                if (!provider) return null;
+                const wp = toWorld(tech, { x: rack.x, z: rack.z });
+                return (
+                  <ProviderRack
+                    key={rack.providerId}
+                    provider={provider}
+                    position={[rack.x, rack.z]}
+                    selected={rack.providerId === focusId}
+                    onSelect={onOpenProvider}
+                    onFocus={() => focusProvider(rack.providerId, [wp.x, 1 + tech.level, wp.z], 2.5, provider.name)}
+                  />
+                );
+              })}
+            </group>
 
-        {layout.desks.map((slot) => {
-          const project = projectById.get(slot.projectId);
-          const resources = resourcesByProject.get(slot.projectId) ?? [];
-          const state = deskStates.get(slot.projectId) ?? "IDLE";
-          return (
-            <ProjectDesk
-              key={slot.projectId}
-              slot={slot}
-              resources={resources}
-              state={state}
-              statusLabel={project ? HEALTH_LABEL[project.health] : "Desconhecido"}
-              statusColor={project ? HEALTH_COLOR[project.health] : HEALTH_COLOR.UNKNOWN}
-              selected={focusId === slot.projectId || selectedProjectId === slot.projectId || resources.some((r) => r.id === selectedApplicationId)}
-              dimmedByFocus={focusId !== null && cameraMode !== "overview" && cameraMode !== "free" && focusId !== slot.projectId && !resources.some((r) => r.id === focusId)}
-              reduced={reducedGraphics}
-              onFocusProject={() => {
-                setSelectedProjectId(slot.projectId);
-                focusProject(slot.projectId, [slot.x, 1.0, slot.z], 2.6, slot.name);
-              }}
-              onSelectResource={onSelectApplication}
-              onFocusResource={(resourceId, worldPos, name) =>
-                focusResource(resourceId, worldPos, name, { id: slot.projectId, center: [slot.x, 1.0, slot.z], radius: 2.6, label: slot.name })
-              }
-            />
-          );
-        })}
+            {layout.desks.map((slot) => {
+              const project = projectById.get(slot.projectId);
+              const resources = resourcesByProject.get(slot.projectId) ?? [];
+              const state = deskStates.get(slot.projectId) ?? "IDLE";
+              const wp = toWorld(tech, { x: slot.x, z: slot.z });
+              const worldSlot = { ...slot, x: wp.x, z: wp.z };
+              return (
+                <ProjectDesk
+                  key={slot.projectId}
+                  slot={worldSlot}
+                  yaw={tech.rot}
+                  level={tech.level}
+                  resources={resources}
+                  state={state}
+                  statusLabel={project ? HEALTH_LABEL[project.health] : "Desconhecido"}
+                  statusColor={project ? HEALTH_COLOR[project.health] : HEALTH_COLOR.UNKNOWN}
+                  selected={focusId === slot.projectId || selectedProjectId === slot.projectId || resources.some((r) => r.id === selectedApplicationId)}
+                  dimmedByFocus={focusId !== null && cameraMode !== "overview" && cameraMode !== "free" && focusId !== slot.projectId && !resources.some((r) => r.id === focusId)}
+                  reduced={reducedGraphics}
+                  onFocusProject={() => {
+                    setSelectedProjectId(slot.projectId);
+                    focusProject(slot.projectId, [wp.x, 1.0 + tech.level, wp.z], 2.6, slot.name);
+                  }}
+                  onSelectResource={onSelectApplication}
+                  onFocusResource={(resourceId, worldPos, name) =>
+                    focusResource(resourceId, worldPos, name, { id: slot.projectId, center: [wp.x, 1.0 + tech.level, wp.z], radius: 2.6, label: slot.name })
+                  }
+                />
+              );
+            })}
 
-        {agentsLayout && loungeLayout && loungeShellLayout && (
-          <AgentsWing
-            mainLayout={layout}
-            agentsLayout={agentsLayout}
-            loungeShellLayout={loungeShellLayout}
-            lounge={loungeLayout}
-            agentsOffsetX={agentsOffsetX}
-            entries={agentEntries}
-            stats={agentStats}
-            resting={restingCount}
-            selectedAgentId={selectedAgentId}
-            onSelectAgent={onSelectAgent}
-            reducedGraphics={reducedGraphics}
-          />
-        )}
+            {agentsEnabled && (
+              <AgentsWing
+                plan={plan}
+                agentsLayout={agentsLayout}
+                loungeShellLayout={loungeShellLayout}
+                lounge={loungeLayout}
+                entries={agentEntries}
+                stats={agentStats}
+                resting={restingCount}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={onSelectAgent}
+                reducedGraphics={reducedGraphics}
+              />
+            )}
           </>,
         )}
       </Suspense>

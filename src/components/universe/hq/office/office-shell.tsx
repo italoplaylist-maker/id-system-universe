@@ -9,6 +9,7 @@ import { useCameraStore } from "@/store/camera-store";
 import { useTexture } from "@react-three/drei";
 import { useUiStore } from "@/store/ui-store";
 import { QUALITY_PROFILES } from "../render/quality";
+import { HQ } from "../plan/hq-plan";
 
 const WALL_COLOR = "#d6d9e0";
 const TRIM = "#5b6372";
@@ -205,9 +206,83 @@ export function partitionDoorZ(depth: number): number {
   return depth / 2 - 1.9;
 }
 
-export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", eastDoor = false, screenPanel = true }: { layout: OfficeLayout; nocEnabled?: boolean; westWall?: "windows" | "none"; eastDoor?: boolean; screenPanel?: boolean }) {
+/** Face externa da parede de fundo: ripado de madeira natural em painéis alternados com concreto, friso grafite e letreiro de LED. */
+function Cladding({ width, height, backZ, T, tower }: { width: number; height: number; backZ: number; T: number; tower?: { side: -1 | 1; extra: number } }) {
+  const z = backZ - T / 2 - 0.035;
+  const slats = Math.round((width * 0.46) / 0.11);
+  const panelW = slats * 0.11;
+  return (
+    <group>
+      {/* friso grafite no topo */}
+      <mesh position={[0, height - 0.28, z - 0.02]} castShadow>
+        <boxGeometry args={[width + T + 0.2, 0.56, 0.1]} />
+        <meshStandardMaterial color="#262b33" metalness={0.8} roughness={0.38} envMapIntensity={0.9} />
+      </mesh>
+      <mesh position={[0, height - 0.6, z - 0.01]}>
+        <boxGeometry args={[width + T, 0.03, 0.04]} />
+        <meshStandardMaterial color={PALETTE.brand} emissive={PALETTE.brand} emissiveIntensity={1} toneMapped={false} />
+      </mesh>
+      {/* painel de ripas de madeira, deslocado do centro (composição assimétrica) */}
+      <group position={[-width * 0.16, 0, z]}>
+        {Array.from({ length: slats }).map((_, i) => (
+          <mesh key={i} position={[-panelW / 2 + 0.055 + i * 0.11, (height - 0.7) / 2, 0]} castShadow>
+            <boxGeometry args={[0.07, height - 0.7, 0.05]} />
+            <meshStandardMaterial color={i % 6 === 3 ? "#6d4c34" : i % 4 === 1 ? "#85603f" : "#7a5639"} roughness={0.72} />
+          </mesh>
+        ))}
+      </group>
+      {/* volume saliente atrás da parede de fundo (núcleo de circulação): quebra a silhueta de caixa */}
+      {tower && (
+        <group position={[tower.side * (width / 2 - 1.5), 0, backZ - T / 2 - 1.25]}>
+          <mesh position={[0, (height + tower.extra) / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[2.6, height + tower.extra, 2.4]} />
+            <meshStandardMaterial color="#3b3f47" roughness={0.9} />
+          </mesh>
+          <mesh position={[0, (height + tower.extra) / 2, 1.215]}>
+            <boxGeometry args={[0.3, height + tower.extra - 0.8, 0.03]} />
+            <meshStandardMaterial color="#ffd9a0" emissive="#ffb86b" emissiveIntensity={0.9} toneMapped={false} />
+          </mesh>
+          <mesh position={[1.31, (height + tower.extra) / 2, 0.6]}>
+            <boxGeometry args={[0.03, height + tower.extra, 0.1]} />
+            <meshStandardMaterial color={PALETTE.brand} emissive={PALETTE.brand} emissiveIntensity={1} toneMapped={false} />
+          </mesh>
+          <mesh position={[0, height + tower.extra + 0.05, 0]}>
+            <boxGeometry args={[2.8, 0.1, 2.6]} />
+            <meshStandardMaterial color="#262b33" metalness={0.8} roughness={0.38} />
+          </mesh>
+        </group>
+      )}
+      {/* base de concreto aparente */}
+      <mesh position={[0, 0.32, z + 0.005]}>
+        <boxGeometry args={[width + T, 0.64, 0.05]} />
+        <meshStandardMaterial color="#6f737b" roughness={0.9} />
+      </mesh>
+    </group>
+  );
+}
+
+export interface OfficeShellProps {
+  layout: OfficeLayout;
+  nocEnabled?: boolean;
+  westWall?: "windows" | "none";
+  /** Lado da parede de vidro com a porta para o átrio. */
+  doorSide?: "east" | "west" | "none";
+  /** z LOCAL do centro da porta (padrão: o da sala original). */
+  doorZ?: number;
+  screenPanel?: boolean;
+  wallHeight?: number;
+  /** Cor da face opaca (parede de fundo). */
+  tint?: string;
+  /** Revestimento externo: ripado de madeira e friso de aço grafite na parede de fundo. */
+  cladding?: boolean;
+  /** Volume saliente atrás da parede de fundo: lado (−1 oeste, +1 leste) e quanto passa da altura da ala. */
+  tower?: { side: -1 | 1; extra: number };
+}
+
+export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", doorSide = "none", doorZ, screenPanel = true, wallHeight, tint = WALL_COLOR, cladding = true, tower }: OfficeShellProps) {
   const { width, depth } = layout;
-  const H = OFFICE.WALL_HEIGHT;
+  const H = wallHeight ?? OFFICE.WALL_HEIGHT;
+  const doorAt = doorZ ?? partitionDoorZ(depth);
   const T = OFFICE.WALL_THICKNESS;
   const backZ = -depth / 2;
   const floorTexture = useMemo(() => makeFloorTexture(width, depth), [width, depth]);
@@ -258,7 +333,7 @@ export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", 
       ))}
 
       {/* back wall + slat acoustic panel behind the screen */}
-      <FadingWall outward={[0, 0, -1]} position={[0, H / 2, backZ]} args={[width + T, H, T]} color={WALL_COLOR} />
+      <FadingWall outward={[0, 0, -1]} position={[0, H / 2, backZ]} args={[width + T, H, T]} color={tint} />
       {screenPanel && (
         <>
       <mesh position={[0, layout.screen.y, backZ + T / 2 + 0.03]} receiveShadow>
@@ -279,7 +354,7 @@ export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", 
       </mesh>
 
       {/* west wall: solid base, tall window band with blinds, solid header (absent when it is the shared partition) */}
-      {westWall === "windows" && <group position={[-width / 2, 0, 0]}>
+      {westWall === "windows" && doorSide !== "west" && <group position={[-width / 2, 0, 0]}>
         <FadingWall outward={[-1, 0, 0]} position={[0, 0.5, 0]} args={[T, 1.0, depth + T]} color={WALL_COLOR} />
         <FadingWall outward={[-1, 0, 0]} position={[0, H - 0.25, 0]} args={[T, 0.5, depth + T]} color={WALL_COLOR} />
         <mesh position={[0.02, 2.15, winCenter]}>
@@ -310,23 +385,31 @@ export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", 
         })}
       </group>}
 
-      {/* east wall: full glass (with a door when the agents room is attached) */}
+      {/* east wall: full glass (with the door to the atrium when doorSide = east) */}
       <group position={[width / 2, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
         <GlassWall
           length={depth}
           height={H}
           mullions={Math.max(4, Math.round(depth / 2.4))}
-          gap={eastDoor ? { center: -partitionDoorZ(depth), width: PARTITION_DOOR_WIDTH } : undefined}
+          gap={doorSide === "east" ? { center: -doorAt, width: HQ.DOOR_WIDTH } : undefined}
         />
-        {eastDoor && <PartitionDoor x={-partitionDoorZ(depth)} width={PARTITION_DOOR_WIDTH} />}
+        {doorSide === "east" && <PartitionDoor x={-doorAt} width={HQ.DOOR_WIDTH} />}
       </group>
+      {/* west wall as glass + door (lounge: the atrium is on its west side) */}
+      {doorSide === "west" && (
+        <group position={[-width / 2, 0, 0]} rotation={[0, -Math.PI / 2, 0]}>
+          <GlassWall length={depth} height={H} mullions={Math.max(4, Math.round(depth / 2.4))} gap={{ center: doorAt, width: HQ.DOOR_WIDTH }} />
+          <PartitionDoor x={doorAt} width={HQ.DOOR_WIDTH} />
+        </group>
+      )}
+      {cladding && <Cladding width={width} height={H} backZ={backZ} T={T} tower={tower} />}
 
       {/* baseboards */}
       <mesh position={[0, 0.07, backZ + T / 2 + 0.02]}>
         <boxGeometry args={[width - 0.2, 0.14, 0.03]} />
         <meshStandardMaterial color={TRIM} roughness={0.6} />
       </mesh>
-      {westWall === "windows" && (
+      {westWall === "windows" && doorSide !== "west" && (
         <mesh position={[-width / 2 + T / 2 + 0.02, 0.07, 0]}>
           <boxGeometry args={[0.03, 0.14, depth - 0.2]} />
           <meshStandardMaterial color={TRIM} roughness={0.6} />

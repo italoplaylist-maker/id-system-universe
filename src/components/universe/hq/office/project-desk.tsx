@@ -180,6 +180,9 @@ interface ProjectDeskProps {
   /** Another desk is the camera's focus — this nameplate steps back. */
   dimmedByFocus: boolean;
   reduced: boolean;
+  /** Giro extra da mesa (rad) e altura do piso — a ala é girada e fica em um nível próprio. */
+  yaw?: number;
+  level?: number;
   onFocusProject: () => void;
   onSelectResource: (id: string) => void;
   onFocusResource: (id: string, worldPosition: [number, number, number], name: string) => void;
@@ -192,7 +195,7 @@ interface ProjectDeskProps {
  * every resource stopped → lights out, chair pushed back, nobody at the desk. All transitions
  * are damped (~250–350 ms), never snapped.
  */
-export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, statusLabel, statusColor, selected, dimmedByFocus, reduced, onFocusProject, onSelectResource, onFocusResource }: ProjectDeskProps) {
+export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, statusLabel, statusColor, selected, dimmedByFocus, reduced, yaw = 0, level = 0, onFocusProject, onSelectResource, onFocusResource }: ProjectDeskProps) {
   const life = useLife();
   const [hovered, setHovered] = useState(false);
   const seed = useMemo(() => hashSeed(slot.projectId), [slot.projectId]);
@@ -270,7 +273,7 @@ export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, s
   const monitorsOff = off;
 
   return (
-    <group position={[slot.x, 0, slot.z]} rotation={[0, Math.PI, 0]}>
+    <group position={[slot.x, level, slot.z]} rotation={[0, Math.PI + yaw, 0]}>
       {/* carpet pad defining the pod */}
       <RoundedBox args={[2.3, 0.012, 2.2]} radius={0.04} smoothness={2} position={[0, 0.006, 0.5]} receiveShadow>
         <meshStandardMaterial color="#2a303c" roughness={1} />
@@ -335,7 +338,12 @@ export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, s
               resource
                 ? () => {
                     onSelectResource(resource.id);
-                    onFocusResource(resource.id, [slot.x - mx, 1.05, slot.z - (POD.DESK_CENTER_Z + 0.24)], resource.name);
+                    {
+                      // posição do monitor no mundo: (mx, zl) local girado pelo giro total da mesa
+                      const psi = Math.PI + yaw;
+                      const zl = POD.DESK_CENTER_Z + 0.24;
+                      onFocusResource(resource.id, [slot.x + mx * Math.cos(psi) + zl * Math.sin(psi), 1.05 + level, slot.z - mx * Math.sin(psi) + zl * Math.cos(psi)], resource.name);
+                    }
                   }
                 : undefined
             }

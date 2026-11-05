@@ -6,7 +6,7 @@ import type * as THREE from "three";
 import { EmployeeModel } from "../assets/employee-model";
 import { hashSeed } from "../assets/office-decor";
 import { LifeSim, type SyncInput } from "./sim";
-import { buildLifeWorld, type LifeWorldInput } from "./world";
+import { buildLifeWorld, buildLifeWorldFromPlan, type LifeWorldInput, type PlanWorldInput } from "./world";
 
 /** Só para validação visual em máquinas lentas (build de teste); em produção é sempre 1. */
 const LIFE_SPEED = Number(process.env.NEXT_PUBLIC_LIFE_SPEED ?? 1) || 1;
@@ -21,10 +21,10 @@ export interface LifeAgent {
 }
 
 /** Uma só instância da simulação por cena; a UI só enxerga o objeto estável. */
-export function useLifeSim(world: LifeWorldInput | null, agents: LifeAgent[], ready = true): LifeSim {
+export function useLifeSim(world: LifeWorldInput | PlanWorldInput | null, agents: LifeAgent[], ready = true): LifeSim {
   const [sim] = useState(() => new LifeSim(Date.now() % 100000));
 
-  const built = useMemo(() => (world ? buildLifeWorld(world) : null), [world]);
+  const built = useMemo(() => (world ? ('plan' in world ? buildLifeWorldFromPlan(world) : buildLifeWorld(world)) : null), [world]);
   const syncKey = agents.map((a) => `${a.id}:${a.mustWork ? 1 : 0}${a.working ? 1 : 0}`).join("|");
 
   useEffect(() => {
@@ -49,13 +49,21 @@ const ActorAvatar = memo(function ActorAvatar({ sim, agent, reduced }: { sim: Li
   const group = useRef<THREE.Group>(null);
   const seed = useMemo(() => hashSeed(agent.id), [agent.id]);
   const visual = sim.visualFor(agent.id);
-  useFrame(() => {
+  const shown = useRef(false);
+  useFrame((_, delta) => {
     const g = group.current;
     const actor = sim.actors.get(agent.id);
     if (!g) return;
     g.visible = !!actor;
-    if (!actor) return;
-    g.position.set(actor.x, 0, actor.z);
+    if (!actor) {
+      shown.current = false;
+      return;
+    }
+    // A altura segue o piso (átrio +0,40 · alas em níveis próprios); a transição pelas rampas é suavizada.
+    const level = sim.levelAt(actor.x, actor.z);
+    const y = shown.current ? g.position.y + (level - g.position.y) * Math.min(1, Math.min(delta, 0.1) * 14) : level;
+    shown.current = true;
+    g.position.set(actor.x, y, actor.z);
     g.rotation.y = actor.yaw;
   });
   return (

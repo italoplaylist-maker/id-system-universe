@@ -25,6 +25,8 @@ export interface DeskSlot {
   z: number;
   row: number;
   col: number;
+  /** Rotação extra da mesa em torno do assento (rad, convenção three.js), além da orientação padrão (olhando para −z). Mesas em agrupamentos giram. */
+  yaw?: number;
 }
 
 export interface RackSlot {
@@ -111,4 +113,86 @@ export function computeOfficeLayout(projects: Pick<UniverseProject, "id" | "name
     cols,
     rows,
   };
+}
+
+/** Agrupamento ("pod") de mesas da Ala Operacional. */
+export const POD = {
+  CELL: 5.6,
+  AISLE: 2.8,
+  BACK_ZONE: 2.6,
+  FRONT_ZONE: 1.8,
+  SIDE_MARGIN: 0.7,
+  /** Assentos da mesma dupla ficam a ±SEAT_Z do centro do pod, voltados um para o outro (com vidro no meio). */
+  SEAT_Z: 1.5,
+  SEAT_X: 1.1,
+} as const;
+
+export interface PodInfo {
+  /** Centro do pod no plano local da ala. */
+  x: number;
+  z: number;
+  /** 0 = duplas de frente ao longo de z; π/2 = ao longo de x. */
+  yaw: number;
+  index: number;
+}
+
+export interface AgentPodLayout extends OfficeLayout {
+  pods: PodInfo[];
+  /** z local do corredor central (onde fica a porta voltada para o átrio). */
+  aisleZ: number;
+}
+
+/**
+ * Sala dos agentes em agrupamentos: pods de até 4 mesas (duplas de frente, divisória de vidro no
+ * meio), alternando a orientação, dispostos em duas colunas dos dois lados de um corredor central
+ * que termina na porta do átrio. A ordem dos agentes é preservada (cada um mantém a sua mesa).
+ */
+export function computeAgentPods(agents: Pick<UniverseProject, "id" | "name" | "accent">[]): AgentPodLayout {
+  const n = agents.length;
+  const podCount = Math.max(1, Math.ceil(n / 4));
+  const rowsTotal = Math.ceil(podCount / 2);
+  const south = Math.ceil(rowsTotal / 2);
+  const north = Math.floor(rowsTotal / 2);
+  const cols = podCount >= 2 ? 2 : 1;
+  const width = POD.SIDE_MARGIN * 2 + POD.CELL * cols;
+  const depth = POD.BACK_ZONE + north * POD.CELL + POD.AISLE + south * POD.CELL + POD.FRONT_ZONE;
+  const aisleZ = -depth / 2 + POD.BACK_ZONE + north * POD.CELL + POD.AISLE / 2;
+
+  const pods: PodInfo[] = [];
+  for (let p = 0; p < podCount; p += 1) {
+    const r = Math.floor(p / 2);
+    const col = p % 2;
+    const isSouth = r % 2 === 0;
+    const k = isSouth ? r / 2 : (r - 1) / 2;
+    const z = isSouth ? aisleZ + POD.AISLE / 2 + POD.CELL / 2 + k * POD.CELL : aisleZ - POD.AISLE / 2 - POD.CELL / 2 - k * POD.CELL;
+    const x = cols === 1 ? 0 : (col === 0 ? -1 : 1) * (POD.CELL / 2);
+    pods.push({ x, z, yaw: (p + r) % 2 === 0 ? 0 : Math.PI / 2, index: p });
+  }
+
+  // Posição relativa das 4 mesas do pod (orientação 0): [x, assento z, giro extra].
+  const rel: Array<[number, number, number]> = [
+    [-POD.SEAT_X, POD.SEAT_Z, 0],
+    [POD.SEAT_X, POD.SEAT_Z, 0],
+    [-POD.SEAT_X, -POD.SEAT_Z, Math.PI],
+    [POD.SEAT_X, -POD.SEAT_Z, Math.PI],
+  ];
+  const desks: DeskSlot[] = agents.map((a, i) => {
+    const pod = pods[Math.floor(i / 4)];
+    const [rx, rz, ry] = rel[i % 4];
+    const c = Math.cos(pod.yaw);
+    const sn = Math.sin(pod.yaw);
+    return {
+      projectId: a.id,
+      name: a.name,
+      accent: a.accent,
+      x: pod.x + rx * c + rz * sn,
+      z: pod.z - rx * sn + rz * c,
+      row: Math.floor(i / 4),
+      col: i % 4,
+      yaw: pod.yaw + ry,
+    };
+  });
+
+  const base = computeOfficeLayout([], [], { minWidth: width, minDepth: depth });
+  return { ...base, width, depth, desks, pods, aisleZ };
 }

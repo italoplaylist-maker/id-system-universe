@@ -269,29 +269,140 @@ export function ServerTowerFallback({ color = PALETTE.screen }: { color?: string
   );
 }
 
+/** Unidades do rack, de baixo para cima: altura em U (1U = 4,445 cm) e tipo. Layout fixo e decorativo — só a COR dos LEDs vem do estado real do provedor. */
+const RACK_LAYOUT: Array<{ u: number; kind: "server" | "switch" | "blank" | "storage" }> = [
+  { u: 2, kind: "storage" },
+  { u: 1, kind: "server" },
+  { u: 1, kind: "server" },
+  { u: 1, kind: "blank" },
+  { u: 2, kind: "server" },
+  { u: 1, kind: "switch" },
+  { u: 1, kind: "server" },
+  { u: 1, kind: "blank" },
+  { u: 2, kind: "storage" },
+  { u: 1, kind: "switch" },
+];
+
+/**
+ * Rack de servidor 42U-estilo, modelado em código (criação própria, sem licença externa): estrutura de aço, unidades
+ * 1U/2U com baias e aberturas de ventilação, porta frontal de vidro fumê, rodízios e feixe de cabos no topo.
+ * `color` = saúde real do provedor (LEDs); `active` apaga os LEDs quando está offline.
+ */
 export function ServerRackFallback({ color = PALETTE.screen, active = true }: { color?: string; active?: boolean }) {
-  const unitCount = 8;
+  const H = SCALE.RACK_HEIGHT;
+  const W = 0.62;
+  const D = 0.78;
+  const baseH = 0.1;
+  const totalU = RACK_LAYOUT.reduce((n, r) => n + r.u, 0);
+  const slot = (H - baseH - 0.08) / totalU; // altura por U dentro do rack
+  const rows = RACK_LAYOUT.map((r, i) => {
+    const below = RACK_LAYOUT.slice(0, i).reduce((n, x) => n + x.u, 0);
+    const h = r.u * slot;
+    return { ...r, i, y: baseH + 0.04 + below * slot + h / 2, h };
+  });
+  const steel = { color: "#2a2f38", metalness: 0.8, roughness: 0.38 } as const;
+  const front = D / 2 - 0.03;
   return (
     <group>
-      <mesh position={[0, SCALE.RACK_HEIGHT / 2, 0]} castShadow>
-        <boxGeometry args={[0.7, SCALE.RACK_HEIGHT, 0.75]} />
-        <meshStandardMaterial color={PALETTE.metalDark} metalness={0.55} roughness={0.4} />
+      {/* base com rodízios e topo ventilado */}
+      <mesh position={[0, baseH / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[W + 0.04, baseH, D + 0.02]} />
+        <meshStandardMaterial {...steel} />
       </mesh>
-      {Array.from({ length: unitCount }).map((_, i) => (
-        <mesh key={i} position={[0, 0.15 + i * (SCALE.RACK_HEIGHT / unitCount), 0.376]}>
-          <planeGeometry args={[0.58, SCALE.RACK_HEIGHT / unitCount - 0.03]} />
-          <meshStandardMaterial color="#0c0f13" roughness={0.7} />
+      {[-1, 1].flatMap((sx) => [-1, 1].map((sz) => (
+        <mesh key={`c${sx}${sz}`} position={[sx * (W / 2 - 0.03), 0.02, sz * (D / 2 - 0.06)]}>
+          <cylinderGeometry args={[0.025, 0.025, 0.04, 12]} />
+          <meshStandardMaterial color="#0b0c0f" roughness={0.6} />
+        </mesh>
+      )))}
+      <mesh position={[0, H - 0.02, 0]} castShadow>
+        <boxGeometry args={[W + 0.04, 0.04, D + 0.02]} />
+        <meshStandardMaterial {...steel} />
+      </mesh>
+      {[-3, -1, 1, 3].map((k) => (
+        <mesh key={`v${k}`} position={[k * 0.07, H + 0.001, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.035, D * 0.7]} />
+          <meshStandardMaterial color="#07080a" roughness={0.9} />
         </mesh>
       ))}
-      {Array.from({ length: unitCount }).map((_, i) => (
-        <mesh key={`led-${i}`} position={[0.22, 0.15 + i * (SCALE.RACK_HEIGHT / unitCount), 0.378]}>
-          <circleGeometry args={[0.012, 8]} />
-          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={active ? 0.8 : 0.1} />
+      {/* montantes verticais e painéis laterais */}
+      {[-1, 1].flatMap((sx) => [-1, 1].map((sz) => (
+        <mesh key={`p${sx}${sz}`} position={[sx * (W / 2 - 0.015), H / 2, sz * (D / 2 - 0.015)]} castShadow>
+          <boxGeometry args={[0.03, H - baseH, 0.03]} />
+          <meshStandardMaterial {...steel} />
+        </mesh>
+      )))}
+      {[-1, 1].map((sx) => (
+        <mesh key={`s${sx}`} position={[sx * (W / 2 + 0.002), H / 2, 0]}>
+          <boxGeometry args={[0.012, H - baseH - 0.06, D - 0.06]} />
+          <meshStandardMaterial color="#14171d" metalness={0.5} roughness={0.55} />
         </mesh>
       ))}
-      <mesh position={[0, 0.02, 0]}>
-        <boxGeometry args={[0.76, 0.04, 0.8]} />
-        <meshStandardMaterial color={PALETTE.metal} metalness={0.6} roughness={0.4} />
+      <mesh position={[0, H / 2, -D / 2 + 0.02]}>
+        <boxGeometry args={[W - 0.04, H - baseH - 0.06, 0.012]} />
+        <meshStandardMaterial color="#0e1014" metalness={0.4} roughness={0.7} />
+      </mesh>
+      {/* equipamentos */}
+      {rows.map((r) => (
+        <group key={r.i} position={[0, r.y, 0]}>
+          <mesh position={[0, 0, front - 0.18]} castShadow>
+            <boxGeometry args={[W - 0.08, r.h - 0.006, r.kind === "blank" ? 0.03 : 0.5]} />
+            <meshStandardMaterial color={r.kind === "blank" ? "#0a0b0e" : "#171a20"} metalness={0.6} roughness={0.45} />
+          </mesh>
+          {r.kind !== "blank" && (
+            <>
+              {/* ventilação à esquerda */}
+              {Array.from({ length: 6 }).map((_, k) => (
+                <mesh key={k} position={[-W / 2 + 0.1 + k * 0.022, 0, front + 0.0]}>
+                  <planeGeometry args={[0.009, r.h * 0.6]} />
+                  <meshStandardMaterial color="#050608" roughness={1} />
+                </mesh>
+              ))}
+              {/* baias: switch tem portas, servidor/storage tem discos */}
+              {Array.from({ length: r.kind === "switch" ? 12 : r.kind === "storage" ? 8 : 4 }).map((_, k) => {
+                const per = r.kind === "switch" ? 12 : r.kind === "storage" ? 8 : 4;
+                const x0 = r.kind === "switch" ? -0.03 : 0.0;
+                const span = r.kind === "switch" ? 0.36 : 0.3;
+                const x = x0 + (k - (per - 1) / 2) * (span / Math.max(per - 1, 1)) + 0.05;
+                return (
+                  <mesh key={`b${k}`} position={[x, 0, front + 0.001]}>
+                    <planeGeometry args={r.kind === "switch" ? [0.018, 0.014] : [0.06, r.h * 0.66]} />
+                    <meshStandardMaterial color={r.kind === "switch" ? "#2c313b" : "#232830"} metalness={0.7} roughness={0.4} />
+                  </mesh>
+                );
+              })}
+              {/* LEDs: cor = saúde real do provedor */}
+              <mesh position={[W / 2 - 0.075, r.h * 0.18, front + 0.002]}>
+                <circleGeometry args={[0.007, 10]} />
+                <meshStandardMaterial color={color} emissive={color} emissiveIntensity={active ? 1.6 : 0.05} toneMapped={false} />
+              </mesh>
+              <mesh position={[W / 2 - 0.075, -r.h * 0.18, front + 0.002]}>
+                <circleGeometry args={[0.007, 10]} />
+                <meshStandardMaterial color={active ? "#f5f7fa" : "#222"} emissive={active ? "#f5f7fa" : "#000"} emissiveIntensity={active ? 0.5 : 0} toneMapped={false} />
+              </mesh>
+            </>
+          )}
+        </group>
+      ))}
+      {/* feixe de cabos saindo pelo topo, atrás */}
+      <mesh position={[0, H + 0.05, -D / 2 + 0.1]} rotation={[0.5, 0, 0]}>
+        <cylinderGeometry args={[0.035, 0.035, 0.3, 10]} />
+        <meshStandardMaterial color="#101216" roughness={0.8} />
+      </mesh>
+      {/* porta frontal de vidro fumê com moldura */}
+      <mesh position={[0, H / 2, D / 2 - 0.004]}>
+        <planeGeometry args={[W - 0.05, H - baseH - 0.1]} />
+        <meshPhysicalMaterial color="#0d1218" transparent opacity={0.34} roughness={0.12} metalness={0.2} clearcoat={1} clearcoatRoughness={0.1} envMapIntensity={1.6} depthWrite={false} />
+      </mesh>
+      {[-1, 1].map((sx) => (
+        <mesh key={`f${sx}`} position={[sx * (W / 2 - 0.028), H / 2, D / 2 - 0.002]}>
+          <boxGeometry args={[0.02, H - baseH - 0.08, 0.014]} />
+          <meshStandardMaterial {...steel} />
+        </mesh>
+      ))}
+      <mesh position={[W / 2 - 0.06, H / 2, D / 2 + 0.012]}>
+        <boxGeometry args={[0.012, 0.22, 0.018]} />
+        <meshStandardMaterial color="#9aa3b2" metalness={0.9} roughness={0.25} />
       </mesh>
     </group>
   );

@@ -1,4 +1,4 @@
-import type { Obstacle, Vec2 } from "./geometry";
+import { inOrect, inPolygon, type Obstacle, type Vec2 } from "./geometry";
 
 /** Heap binário mínimo (min-heap por prioridade) para o A*. */
 class MinHeap {
@@ -114,8 +114,48 @@ export class NavGrid {
     }
   }
 
+  /** Marca/limpa as células cujo centro está dentro de um retângulo orientado. */
+  setOrect(o: { cx: number; cz: number; hx: number; hz: number; rot: number }, blocked: boolean) {
+    const r = Math.hypot(o.hx, o.hz);
+    const x0 = Math.max(0, this.ix(o.cx - r));
+    const x1 = Math.min(this.nx - 1, this.ix(o.cx + r));
+    const z0 = Math.max(0, this.iz(o.cz - r));
+    const z1 = Math.min(this.nz - 1, this.iz(o.cz + r));
+    for (let z = z0; z <= z1; z += 1) {
+      for (let x = x0; x <= x1; x += 1) {
+        const c = this.center(x, z);
+        if (inOrect(c.x, c.z, o)) this.raw[z * this.nx + x] = blocked ? 1 : 0;
+      }
+    }
+  }
+
+  /** Marca/limpa as células cujo centro está dentro de um polígono. */
+  setPolygon(poly: Vec2[], blocked: boolean) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (const p of poly) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minZ = Math.min(minZ, p.z);
+      maxZ = Math.max(maxZ, p.z);
+    }
+    const x0 = Math.max(0, this.ix(minX));
+    const x1 = Math.min(this.nx - 1, this.ix(maxX));
+    const z0 = Math.max(0, this.iz(minZ));
+    const z1 = Math.min(this.nz - 1, this.iz(maxZ));
+    for (let z = z0; z <= z1; z += 1) {
+      for (let x = x0; x <= x1; x += 1) {
+        const c = this.center(x, z);
+        if (inPolygon(c.x, c.z, poly)) this.raw[z * this.nx + x] = blocked ? 1 : 0;
+      }
+    }
+  }
+
   setObstacle(o: Obstacle) {
     if (o.kind === "rect") this.setRect(o.minX, o.maxX, o.minZ, o.maxZ, true);
+    else if (o.kind === "orect") this.setOrect(o, true);
     else this.setCircle(o.cx, o.cz, o.r, true);
   }
 

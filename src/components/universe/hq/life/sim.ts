@@ -992,6 +992,11 @@ export class LifeSim {
     return out;
   }
 
+  /** Altura do piso onde o personagem pisa (átrio, rampas e alas ficam em níveis diferentes). */
+  levelAt(x: number, z: number): number {
+    return this.world?.levelAt(x, z) ?? 0;
+  }
+
   /** Mesa de sinuca no mundo (o desenho não gira a mesa: espaço da mesa = mundo − centro). */
   private poolCenter(): Vec2 | null {
     const f = this.world?.lounge.furniture.pool;

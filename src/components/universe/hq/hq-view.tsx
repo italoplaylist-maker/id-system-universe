@@ -27,6 +27,7 @@ import { useAgentSessions } from "@/hooks/use-agents";
 import { useSession } from "@/hooks/use-session";
 import { canUser } from "@/server/auth/rbac";
 import { motion } from "motion/react";
+import { useHqViews } from "@/store/hq-views-store";
 import { MotionPanelSlot } from "@/components/ui/motion-panel";
 import { QUALITY_ORDER, QUALITY_PROFILES } from "./render/quality";
 import { ProjectManagerDrawer } from "@/components/projects/project-manager-drawer";
@@ -49,6 +50,8 @@ export function HqView() {
   const cameraMode = useCameraStore((s) => s.mode);
   const focusLabel = useCameraStore((s) => s.focusLabel);
   const resetCamera = useCameraStore((s) => s.reset);
+  const focusProject = useCameraStore((s) => s.focusProject);
+  const hqViews = useHqViews((s) => s.views);
   const backOneLevel = useCameraStore((s) => s.backOneLevel);
   const env = useEnvironmentState();
   const timeLabel = (() => {
@@ -239,6 +242,18 @@ export function HqView() {
           </button>
         )}
         <NotificationsDialog variant="pill" />
+        {hqViews.length > 0 && (
+          <div role="group" aria-label="Posições de câmera" className="flex items-center rounded-full border border-border bg-surface-raised/80 p-0.5 text-xs backdrop-blur">
+            <button onClick={() => resetCamera()} className={`rounded-full px-2.5 py-1 transition-colors ${cameraMode === "overview" ? "text-foreground" : "text-muted hover:text-foreground"}`}>
+              Sede
+            </button>
+            {hqViews.map((v) => (
+              <button key={v.id} onClick={() => focusProject(`view:${v.id}`, v.center, v.radius, v.label)} className="rounded-full px-2.5 py-1 text-muted transition-colors hover:text-foreground">
+                {v.label}
+              </button>
+            ))}
+          </div>
+        )}
         {canManageAgents && <FeedsDialog />}
         {cameraMode !== "overview" && (
           <button

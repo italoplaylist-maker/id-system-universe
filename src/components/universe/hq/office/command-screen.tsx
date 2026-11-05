@@ -17,9 +17,10 @@ export interface CommandCenterStats {
   billing?: { pending: number; overdue: number; dueToday: number } | null;
 }
 
+export const COMMAND_CANVAS = SCREEN_CANVAS;
 const { width: CW, height: CH } = SCREEN_CANVAS;
 
-function paintScreen(ctx: CanvasRenderingContext2D, stats: CommandCenterStats) {
+export function paintScreen(ctx: CanvasRenderingContext2D, stats: CommandCenterStats) {
   const g = ctx.createLinearGradient(0, 0, 0, CH);
   g.addColorStop(0, "#0b101b");
   g.addColorStop(1, "#070a11");
