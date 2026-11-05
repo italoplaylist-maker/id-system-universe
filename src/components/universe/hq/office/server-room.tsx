@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { PALETTE } from "../palette";
+import { useUiStore } from "@/store/ui-store";
 import type { OfficeLayout } from "./office-layout";
 
 const STEEL = "#8d95a3";
@@ -36,6 +37,7 @@ function sign(): THREE.MeshBasicMaterial {
  */
 export function ServerRoom({ layout }: { layout: OfficeLayout }) {
   const b = serverRoomBounds(layout);
+  const quality = useUiStore((st) => st.quality);
   const signMat = useMemo(() => sign(), []);
   useEffect(
     () => () => {
@@ -103,7 +105,7 @@ export function ServerRoom({ layout }: { layout: OfficeLayout }) {
         <planeGeometry args={[w, d]} />
         <meshStandardMaterial color="#1a1f27" roughness={0.55} metalness={0.2} envMapIntensity={0.8} />
       </mesh>
-      <pointLight position={[(b.x0 + b.x1) / 2, H - 0.3, (b.z0 + b.z1) / 2]} intensity={1.6} color="#9ec5ff" distance={Math.max(w, d) * 1.4} decay={1.8} />
+      {quality === "high" && <pointLight position={[(b.x0 + b.x1) / 2, H - 0.3, (b.z0 + b.z1) / 2]} intensity={1.6} color="#9ec5ff" distance={Math.max(w, d) * 1.4} decay={1.8} />}
     </group>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useUiStore } from "@/store/ui-store";
 import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { RoundedBox } from "@react-three/drei";
@@ -534,6 +535,7 @@ function WallArt({ x, y, z, w, h, hue }: { x: number; y: number; z: number; w: n
 // ---------------------------------------------------------------------------
 
 export function LoungeRoom({ layout, life }: { layout: LoungeLayout; life?: LifeSim }) {
+  const quality = useUiStore((st) => st.quality);
   const f = layout.furniture;
   const backZ = layout.minZ;
   const centerX = layout.x0 + layout.width / 2;
@@ -589,10 +591,10 @@ export function LoungeRoom({ layout, life }: { layout: LoungeLayout; life?: Life
       ))}
 
       {/* iluminação: poucas luzes, bem posicionadas */}
-      <pointLight position={[f.sofas[0].x, 2.7, f.rug.z - 0.5]} intensity={1.5} color="#ffd9a8" distance={7.5} decay={1.6} />
-      <pointLight position={[f.sofas[f.sofas.length - 1].x, 2.7, f.rug.z - 0.5]} intensity={1.5} color="#ffd9a8" distance={7.5} decay={1.6} />
-      <pointLight position={[f.bar.x - 0.8, 2.8, f.bar.z]} intensity={1.6} color="#ffc98a" distance={7.5} decay={1.6} />
-      <pointLight position={[f.pool.x, 2.6, f.pool.z]} intensity={2.4} color="#fff0d6" distance={5.5} decay={1.5} />
+      {quality === "high" && <pointLight position={[f.sofas[0].x, 2.7, f.rug.z - 0.5]} intensity={1.5} color="#ffd9a8" distance={7.5} decay={1.6} />}
+      {quality === "high" && <pointLight position={[f.sofas[f.sofas.length - 1].x, 2.7, f.rug.z - 0.5]} intensity={1.5} color="#ffd9a8" distance={7.5} decay={1.6} />}
+      {quality !== "low" && <pointLight position={[f.bar.x - 0.8, 2.8, f.bar.z]} intensity={1.6} color="#ffc98a" distance={7.5} decay={1.6} />}
+      {quality !== "low" && <pointLight position={[f.pool.x, 2.6, f.pool.z]} intensity={2.4} color="#fff0d6" distance={5.5} decay={1.5} />}
     </group>
   );
 }

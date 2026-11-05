@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import { PALETTE } from "../palette";
+import { useUiStore } from "@/store/ui-store";
 import { TallPlant } from "./office-props";
 import { COMMAND_CANVAS, paintScreen, type CommandCenterStats } from "./command-screen";
 import { HQ, type HqPlan, type Ramp as RampData } from "../plan/hq-plan";
@@ -84,6 +85,7 @@ function Floor({ level }: { level: number }) {
 }
 
 function CommandCore({ level, stats, onOpen, reduced }: { level: number; stats: CommandCenterStats; onOpen?: () => void; reduced: boolean }) {
+  const quality = useUiStore((st) => st.quality);
   const { screenMat, texture } = useMemo(() => {
     const canvas = document.createElement("canvas");
     canvas.width = COMMAND_CANVAS.width;
@@ -218,8 +220,8 @@ function CommandCore({ level, stats, onOpen, reduced }: { level: number; stats: 
           <planeGeometry args={[3.0, 0.5]} />
         </mesh>
       ))}
-      <pointLight position={[0, CORE.ringY - 0.4, 0]} intensity={3.2} color="#ffd9b0" distance={11} decay={1.8} />
-      <pointLight position={[0, 0.5, 0]} intensity={1.2} color={RED} distance={5} decay={2} />
+      {quality !== "low" && <pointLight position={[0, CORE.ringY - 0.4, 0]} intensity={3.2} color="#ffd9b0" distance={11} decay={1.8} />}
+      {quality === "high" && <pointLight position={[0, 0.5, 0]} intensity={1.2} color={RED} distance={5} decay={2} />}
     </group>
   );
 }

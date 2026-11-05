@@ -327,7 +327,7 @@ export function HqScene({
       />
       <directionalLight position={[centerX - 8, Math.max(9, world.bounds.maxY + 4), centerZ + 6]} intensity={0.9} color="#ffd9a8" />
       {/* poucas luzes quentes de preenchimento — uma por ala, nunca uma por mesa */}
-      {Object.values(plan.wings).map((w) => {
+      {quality === "high" && Object.values(plan.wings).map((w) => {
         const cx = w.id === "lounge" ? HQ.DOOR_DIST + w.width / 2 : w.x;
         const cz = w.id === "lounge" ? 0 : w.z;
         const reach = Math.max(w.width, w.depth) * 0.75;

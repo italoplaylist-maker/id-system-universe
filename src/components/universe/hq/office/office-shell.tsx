@@ -207,8 +207,40 @@ export function partitionDoorZ(depth: number): number {
 }
 
 /** Face externa da parede de fundo: ripado de madeira natural em painéis alternados com concreto, friso grafite e letreiro de LED. */
+/** Letreiro vertical "ID SYSTEM" (texto girado 90°) para a face lateral dos volumes salientes. */
+function useBladeSign(): THREE.MeshBasicMaterial {
+  const mat = useMemo(() => {
+    const c = document.createElement("canvas");
+    c.width = 160;
+    c.height = 768;
+    const g = c.getContext("2d")!;
+    g.translate(80, 384);
+    g.rotate(-Math.PI / 2);
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.font = "800 92px ui-sans-serif, system-ui";
+    g.fillStyle = "#f4f6fa";
+    g.fillText("ID", -150, 0);
+    g.fillStyle = "#e8283f";
+    g.fillText("SYSTEM", 130, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    return new THREE.MeshBasicMaterial({ map: t, transparent: true, toneMapped: false, depthWrite: false });
+  }, []);
+  useEffect(
+    () => () => {
+      mat.map?.dispose();
+      mat.dispose();
+    },
+    [mat],
+  );
+  return mat;
+}
+
 function Cladding({ width, height, backZ, T, tower }: { width: number; height: number; backZ: number; T: number; tower?: { side: -1 | 1; extra: number } }) {
   const z = backZ - T / 2 - 0.035;
+  const bladeMat = useBladeSign();
   const slats = Math.round((width * 0.46) / 0.11);
   const panelW = slats * 0.11;
   return (
@@ -246,6 +278,12 @@ function Cladding({ width, height, backZ, T, tower }: { width: number; height: n
             <boxGeometry args={[0.03, height + tower.extra, 0.1]} />
             <meshStandardMaterial color={PALETTE.brand} emissive={PALETTE.brand} emissiveIntensity={1} toneMapped={false} />
           </mesh>
+          {/* letreiro vertical nas duas faces laterais do volume */}
+          {[-1, 1].map((sd) => (
+            <mesh key={sd} position={[sd * 1.325, (height + tower.extra) / 2 + 0.2, -0.25]} rotation={[0, (sd * Math.PI) / 2, 0]} material={bladeMat}>
+              <planeGeometry args={[0.55, 2.64]} />
+            </mesh>
+          ))}
           <mesh position={[0, height + tower.extra + 0.05, 0]}>
             <boxGeometry args={[2.8, 0.1, 2.6]} />
             <meshStandardMaterial color="#262b33" metalness={0.8} roughness={0.38} />
