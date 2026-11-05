@@ -25,6 +25,7 @@ import { agentAccent, orderAgentSessions } from "@/lib/agent-order";
 import { roomAgentToSession, useRoomAgents } from "@/hooks/use-orchestrator";
 import { OfficeProps, officePropObstacles } from "./office/office-props";
 import { NocWall } from "./office/noc-wall";
+import { ServerRoom } from "./office/server-room";
 import { useServers } from "@/hooks/use-servers";
 import { CommandScreen, type CommandCenterStats } from "./office/command-screen";
 import { ProjectDesk, deskStateFor } from "./office/project-desk";
@@ -363,6 +364,7 @@ export function HqScene({
               {nocEnabled && <NocWall layout={layout} servers={monitoredServers} onOpen={onOpenServers} />}
               <CommandScreen layout={layout} stats={stats} onOpen={onOpenActivity} />
               <OfficeProps layout={layout} />
+              <ServerRoom layout={layout} />
               {layout.racks.map((rack) => {
                 const provider = enabledProviders.find((p) => p.id === rack.providerId);
                 if (!provider) return null;
