@@ -84,8 +84,8 @@ describe("anexos do comando (imagem, arquivo)", () => {
     });
     const { task } = await submitTask(agentId, { prompt: "analise", idempotencyKey: key(), attachmentIds: [img.id, pdf.id] }, actor());
     await dispatch();
+    for (let i = 0; i < 200 && seen.length === 0; i += 1) await new Promise((r) => setTimeout(r, 25));
     await idle();
-    await new Promise((r) => setTimeout(r, 50));
     assert.ok(seen[0], "executor foi chamado");
     assert.equal(seen[0].attachments?.length, 2);
     const pdfPath = seen[0].attachments!.find((a) => a.kind === "file")!.path;
