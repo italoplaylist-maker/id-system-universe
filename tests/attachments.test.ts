@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, beforeEach, describe, it } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { makeUser, prisma, resetDb } from "./helpers";
 import { LIMITS, prepareForRun, purgeAttachments, safeName, saveUpload, sniffImage } from "@/server/orchestrator/attachments";
 import { buildPrompt } from "@/server/orchestrator/executor";
-import { createAgent, getTaskDetail, submitTask } from "@/server/orchestrator/service";
+import { createAgent, getTaskDetail, submitTask, updateAgent } from "@/server/orchestrator/service";
 import { setExecutor, type ExecutorRunInput } from "@/server/orchestrator/executor";
 import { setWorkspacePreparer } from "@/server/orchestrator/workspace";
 import { dispatch, idle } from "@/server/orchestrator/worker";
@@ -35,6 +35,16 @@ describe("anexos do comando (imagem, arquivo)", () => {
     userId = (await makeUser("ADMIN", "owner@x.com")).id;
     agentId = (await createAgent({ name: "Ana", cwd: "/srv/app" }, actor())).id;
     setWorkspacePreparer(async () => undefined);
+    // executor falso por padrão: nenhum teste aqui pode chamar o Claude de verdade
+    setExecutor({
+      async run(input) {
+        await input.onStarted({ sessionId: "s" });
+        return { result: "ok" };
+      },
+    });
+  });
+  afterEach(async () => {
+    await idle(); // nenhuma execução em segundo plano vaza para o teste seguinte
   });
 
   it("só confia no conteúdo: PNG vira imagem; SVG com script e tipo mentiroso viram arquivo", async () => {
@@ -104,6 +114,7 @@ describe("anexos do comando (imagem, arquivo)", () => {
   });
 
   it("limpeza: apaga arquivos da tarefa e uploads soltos antigos", async () => {
+    await updateAgent(agentId, { paused: true }, actor()); // sem execução em segundo plano mexendo nos arquivos durante o teste
     const a = await saveUpload(userId, { name: "a.pdf", bytes: PDF });
     const { task } = await submitTask(agentId, { prompt: "x", idempotencyKey: key(), attachmentIds: [a.id] }, actor());
     const { dir } = await prepareForRun(task.id);
