@@ -12,24 +12,41 @@ const depthFor = (count: number) => Math.max(DEPTH, 3.3 + Math.ceil(count / 3) *
 const AGENTS_MIN = 12;
 const AGENTS_MAX = 24.4;
 
-function makeWorld(count: number) {
-  const depth = depthFor(count);
-  const lounge = computeLoungeLayout(AGENTS_MAX, depth, depth / 2 - 1.9);
+function makeWorld(count: number, mainCount = 0) {
+  const mainCols = Math.max(3, Math.round(Math.sqrt(Math.max(mainCount, 1) * 1.8)));
+  const depth = Math.max(depthFor(count), mainCount > 0 ? 3.3 + Math.ceil(mainCount / mainCols) * 3 + 3.6 : 0);
+  const mainW = Math.max(15, mainCols * 3 + 3.4);
+  // Com sala de operações: ela ocupa [-W/2, W/2] e a dos agentes vem logo depois; sem ela, mantém as coordenadas antigas.
+  const agentsMin = mainCount > 0 ? mainW / 2 : AGENTS_MIN;
+  const agentsMax = agentsMin + (AGENTS_MAX - AGENTS_MIN);
+  const doorZ = depth / 2 - 1.9;
+  const lounge = computeLoungeLayout(agentsMax, depth, doorZ);
   const cols = 3;
-  const desks = Array.from({ length: count }, (_, i) => ({
+  const agentDesks = Array.from({ length: count }, (_, i) => ({
     id: `a${i}`,
-    x: AGENTS_MIN + 3.4 + (i % cols) * 3.0,
+    x: agentsMin + 3.4 + (i % cols) * 3.0,
     z: -depth / 2 + 3.3 + 1.5 + Math.floor(i / cols) * 3.0,
   }));
-  return buildLifeWorld({ agentsRoom: { minX: AGENTS_MIN, maxX: AGENTS_MAX }, depth, lounge, desks, doorWidth: 1.15 });
+  const mainDesks = Array.from({ length: mainCount }, (_, i) => {
+    const inRow = Math.floor(i / mainCols) === Math.ceil(mainCount / mainCols) - 1 ? mainCount - Math.floor(i / mainCols) * mainCols : mainCols;
+    return { id: `p${i}`, x: ((i % mainCols) - (inRow - 1) / 2) * 3.0, z: -depth / 2 + 3.3 + 1.5 + Math.floor(i / mainCols) * 3.0, halfW: 0.8 };
+  });
+  const rooms = [
+    ...(mainCount > 0 ? [{ minX: -mainW / 2, maxX: mainW / 2 }] : []),
+    { minX: agentsMin, maxX: agentsMax },
+    { minX: agentsMax, maxX: agentsMax + 13 },
+  ];
+  return buildLifeWorld({ rooms, doorZ, depth, lounge, desks: [...mainDesks, ...agentDesks], doorWidth: 1.15 });
 }
 
-function setup(count: number, mustWork: boolean | ((i: number) => boolean) = false, seed = 7) {
-  const world = makeWorld(count);
+function setup(count: number, mustWork: boolean | ((i: number) => boolean) = false, seed = 7, mainCount = 0) {
+  const world = makeWorld(count, mainCount);
   const sim = new LifeSim(seed);
   sim.setWorld(world);
-  const inputs = (): SyncInput[] =>
-    Array.from({ length: count }, (_, i) => ({ id: `a${i}`, seed: i * 31 + 3, mustWork: typeof mustWork === "function" ? mustWork(i) : mustWork, working: typeof mustWork === "function" ? mustWork(i) : mustWork }));
+  const inputs = (): SyncInput[] => [
+    ...Array.from({ length: mainCount }, (_, i) => ({ id: `p${i}`, seed: i * 17 + 5, mustWork: typeof mustWork === "function" ? mustWork(i) : mustWork, working: typeof mustWork === "function" ? mustWork(i) : mustWork })),
+    ...Array.from({ length: count }, (_, i) => ({ id: `a${i}`, seed: i * 31 + 3, mustWork: typeof mustWork === "function" ? mustWork(i) : mustWork, working: typeof mustWork === "function" ? mustWork(i) : mustWork })),
+  ];
   sim.sync(inputs());
   return { world, sim, inputs };
 }
@@ -303,6 +320,37 @@ describe("Vida dos agentes — cenários", () => {
     assert.equal(agentIsTyping("WORKING"), true);
     assert.equal(agentIsTyping("ERROR"), false);
     assert.equal(agentIsTyping("APPROVAL"), false);
+  });
+
+  it("funcionários dos projetos (sala de operações) também chegam ao lounge e voltam à mesa", () => {
+    const { sim, world } = setup(0, false, 3, 12);
+    const first = get(sim, "p0");
+    // alguém de cada ponta da sala chega a uma atividade no lounge (atravessa duas portas)
+    const far = get(sim, "p5");
+    assert.ok(runUntil(sim, () => (first.phase === "seated" || (first.phase === "standing" && first.arrived)) && first.x > world.lounge.x0, 240) < 240, "p0 chegou ao lounge");
+    assert.ok(runUntil(sim, () => (far.phase === "seated" || (far.phase === "standing" && far.arrived)) && far.x > world.lounge.x0, 240) < 240, "p5 chegou ao lounge");
+    // chega deploy real em quem está no lounge: volta à mesa
+    sim.sync([...sim.actors.values()].map((a) => ({ id: a.id, seed: a.seed, mustWork: a.id === "p0" || a.mustWork, working: a.id === "p0" || a.working })));
+    assert.ok(runUntil(sim, () => first.phase === "desk", 90) < 90, "p0 voltou à mesa");
+    assert.equal(sim.occupancy().get(first.reservation ?? "") ?? first.id, first.id);
+  });
+
+  it("17 projetos + agentes ociosos: lounge lotado não trava ninguém nem duplica lugar", () => {
+    const { sim } = setup(5, false, 9, 17);
+    let minPair = Infinity;
+    run(sim, 360, () => {
+      const seats = new Map<string, string>();
+      for (const a of all(sim)) if (a.phase === "seated" && a.seat) {
+        assert.ok(!seats.has(a.seat.id), `${a.seat.id} duplicado`);
+        seats.set(a.seat.id, a.id);
+      }
+      const l = all(sim);
+      for (let i = 0; i < l.length; i += 1) for (let j = i + 1; j < l.length; j += 1) minPair = Math.min(minPair, dist(l[i], l[j]));
+    });
+    assert.ok(minPair > 0.25, `distância mínima ${minPair.toFixed(2)} m`);
+    assert.equal(all(sim).reduce((n, a) => n + a.recoveries, 0), 0, "sem teleporte de emergência");
+    const inLounge = all(sim).filter((a) => a.phase !== "desk").length;
+    assert.ok(inLounge >= 5, `pelo menos 5 fora das mesas (${inLounge})`);
   });
 
   it("agente com erro/aprovação não aparece trabalhando: fica na mesa sem animação de digitar", () => {

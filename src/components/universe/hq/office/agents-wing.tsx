@@ -2,16 +2,14 @@
 
 import { useMemo } from "react";
 import { Html } from "@react-three/drei";
-import { OfficeShell, PARTITION_DOOR_WIDTH, partitionDoorZ } from "./office-shell";
+import { OfficeShell, partitionDoorZ } from "./office-shell";
 import { AgentDesk } from "./agent-desk";
 import { AgentsBoard, type AgentsBoardStats } from "./agents-board";
 import { LoungeRoom } from "./lounge-furniture";
 import { TallPlant } from "./office-props";
 import type { OfficeLayout } from "./office-layout";
 import type { LoungeLayout } from "../life/lounge-layout";
-import { AgentActors, useLifeSim, type LifeAgent } from "../life/agent-life";
-import { agentIsTyping, agentNeedsDesk } from "../life/policy";
-import type { LifeWorldInput } from "../life/world";
+import { useLife } from "../life/life-context";
 import { useCameraStore } from "@/store/camera-store";
 import type { AgentSessionView } from "@/server/claude/agent-service";
 
@@ -29,6 +27,8 @@ interface AgentsWingProps {
   agentsOffsetX: number;
   entries: AgentEntry[];
   stats: AgentsBoardStats;
+  /** Quantos estão livres para o lounge agora (agentes ociosos + projetos sem trabalho). */
+  resting: number;
   selectedAgentId: string | null;
   onSelectAgent: (id: string) => void;
   reducedGraphics: boolean;
@@ -52,35 +52,14 @@ const pill = (hot: boolean): React.CSSProperties => ({
  * agente): a simulação visual decide se ficam na mesa ou na sala de convivência a partir do
  * estado real — e nunca escreve nada de volta.
  */
-export function AgentsWing({ mainLayout, agentsLayout, loungeShellLayout, lounge, agentsOffsetX, entries, stats, selectedAgentId, onSelectAgent, reducedGraphics }: AgentsWingProps) {
+export function AgentsWing({ mainLayout, agentsLayout, loungeShellLayout, lounge, agentsOffsetX, entries, stats, resting, selectedAgentId, onSelectAgent, reducedGraphics }: AgentsWingProps) {
   const focusProject = useCameraStore((s) => s.focusProject);
   const focusId = useCameraStore((s) => s.focusId);
   const cameraMode = useCameraStore((s) => s.mode);
   const depth = mainLayout.depth;
   const doorZ = partitionDoorZ(depth);
 
-  const worldInput: LifeWorldInput = useMemo(
-    () => ({
-      agentsRoom: { minX: agentsOffsetX - agentsLayout.width / 2, maxX: agentsOffsetX + agentsLayout.width / 2 },
-      depth,
-      lounge,
-      desks: agentsLayout.desks.map((d) => ({ id: d.projectId, x: d.x + agentsOffsetX, z: d.z })),
-      doorWidth: PARTITION_DOOR_WIDTH,
-      extraObstacles: [-1, 1].map((sd) => ({ kind: "circle" as const, cx: agentsOffsetX + sd * (agentsLayout.width / 2 - 1.0), cz: -depth / 2 + 0.9, r: 0.38, label: "plant" })),
-    }),
-    [agentsOffsetX, agentsLayout, depth, lounge],
-  );
-  const agents: LifeAgent[] = useMemo(
-    () =>
-      entries.map((e) => ({
-        id: e.session.id,
-        accent: e.accent,
-        mustWork: agentNeedsDesk(e.session.state),
-        working: agentIsTyping(e.session.state),
-      })),
-    [entries],
-  );
-  const sim = useLifeSim(worldInput, agents);
+  const sim = useLife() ?? undefined;
   const byId = useMemo(() => new Map(entries.map((e) => [e.session.id, e])), [entries]);
   const f = lounge.furniture;
   const loungeCenterX = lounge.x0 + lounge.width / 2;
@@ -108,7 +87,6 @@ export function AgentsWing({ mainLayout, agentsLayout, loungeShellLayout, lounge
               selected={selectedAgentId === slot.projectId}
               dimmedByFocus={focusId !== null && cameraMode !== "overview" && cameraMode !== "free" && focusId !== slot.projectId}
               reduced={reducedGraphics}
-              life={sim}
               onFocus={() => {
                 onSelectAgent(slot.projectId);
                 focusProject(slot.projectId, worldPos, 2.6, `Agente · ${slot.name}`);
@@ -117,9 +95,6 @@ export function AgentsWing({ mainLayout, agentsLayout, loungeShellLayout, lounge
           );
         })}
       </group>
-
-      {/* os agentes (mesmos personagens) — em qualquer sala, em coordenadas do mundo */}
-      <AgentActors sim={sim} agents={agents} reduced={reducedGraphics} />
 
       {/* lounge */}
       <group position={[loungeCenterX, 0, 0]}>
@@ -139,7 +114,7 @@ export function AgentsWing({ mainLayout, agentsLayout, loungeShellLayout, lounge
       </Html>
       <Html position={[lounge.x0, 3.0, doorZ]} center zIndexRange={[20, 0]}>
         <button type="button" onClick={() => focusProject("lounge", [loungeCenterX, 1.0, 0], loungeShellLayout.radius * 0.64, "Lounge")} style={pill(false)}>
-          Lounge · {stats.idle} descansando
+          Lounge · {resting} descansando
         </button>
       </Html>
       {cameraMode !== "overview" &&

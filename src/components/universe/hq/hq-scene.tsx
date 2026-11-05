@@ -5,12 +5,16 @@ import { Canvas } from "@react-three/fiber";
 import { ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
 import { computeOfficeLayout, OFFICE } from "./office/office-layout";
-import { OfficeShell, partitionDoorZ } from "./office/office-shell";
+import { OfficeShell, PARTITION_DOOR_WIDTH, partitionDoorZ } from "./office/office-shell";
 import { agentTitle } from "./office/agent-desk";
 import { AgentsWing } from "./office/agents-wing";
+import { LifeLayer } from "./office/life-layer";
+import { agentIsTyping, agentNeedsDesk } from "./life/policy";
+import type { LifeAgent } from "./life/agent-life";
+import type { LifeWorldInput } from "./life/world";
 import { computeLoungeLayout, LOUNGE_MIN_DEPTH, LOUNGE_WIDTH } from "./life/lounge-layout";
 import { useAgentSessions } from "@/hooks/use-agents";
-import { OfficeProps } from "./office/office-props";
+import { OfficeProps, officePropObstacles } from "./office/office-props";
 import { NocWall } from "./office/noc-wall";
 import { useServers } from "@/hooks/use-servers";
 import { CommandScreen, type CommandCenterStats } from "./office/command-screen";
@@ -171,6 +175,49 @@ export function HqScene({
   const projectById = useMemo(() => new Map(activeProjects.map((p) => [p.id, p])), [activeProjects]);
   const deskStates = useMemo(() => new Map(layout.desks.map((d) => [d.projectId, deskStateFor(resourcesByProject.get(d.projectId) ?? [])])), [layout.desks, resourcesByProject]);
 
+  // ---- vida dos personagens (só visual; lê o estado real, nunca escreve) -------------------------------
+  // Geometria: salas lado a lado, mesas (largura do tampo varia com os monitores) e móveis que bloqueiam o caminho.
+  const lifeWorld: LifeWorldInput | null = useMemo(() => {
+    if (!agentsLayout || !loungeLayout) return null;
+    const deskHalfW = (id: string) => {
+      const monitors = Math.min(3, Math.max(1, (resourcesByProject.get(id) ?? []).length));
+      return (monitors === 1 ? 1.5 : monitors === 2 ? 1.75 : 2.1) / 2 + 0.05;
+    };
+    return {
+      rooms: [
+        { minX: -layout.width / 2, maxX: layout.width / 2 },
+        { minX: layout.width / 2, maxX: layout.width / 2 + agentsLayout.width },
+        { minX: loungeLayout.x0, maxX: loungeLayout.x0 + loungeLayout.width },
+      ],
+      doorZ: partitionDoorZ(layout.depth),
+      depth: layout.depth,
+      lounge: loungeLayout,
+      doorWidth: PARTITION_DOOR_WIDTH,
+      desks: [
+        ...layout.desks.map((d) => ({ id: d.projectId, x: d.x, z: d.z, halfW: deskHalfW(d.projectId) })),
+        ...agentsLayout.desks.map((d) => ({ id: d.projectId, x: d.x + agentsOffsetX, z: d.z })),
+      ],
+      extraObstacles: [
+        ...officePropObstacles(layout),
+        ...[-1, 1].map((sd) => ({ kind: "circle" as const, cx: agentsOffsetX + sd * (agentsLayout.width / 2 - 1.0), cz: -layout.depth / 2 + 0.9, r: 0.38, label: "plant" })),
+      ],
+    };
+  }, [layout, agentsLayout, loungeLayout, agentsOffsetX, resourcesByProject]);
+  const lifeAgents: LifeAgent[] = useMemo(
+    () => [
+      // Funcionários dos projetos: trabalhando (deploy/operação) ou com erro ficam na mesa; sem trabalho circulam; tudo parado = ausente.
+      ...layout.desks.flatMap((slot) => {
+        const state = deskStates.get(slot.projectId) ?? "IDLE";
+        if (state === "OFF") return [];
+        return [{ id: slot.projectId, accent: slot.accent, mustWork: state === "WORKING" || state === "ERROR", working: state === "WORKING" }];
+      }),
+      // Agentes do Claude: pelo estado real da sessão.
+      ...agentEntries.map((e) => ({ id: e.session.id, accent: e.accent, mustWork: agentNeedsDesk(e.session.state), working: agentIsTyping(e.session.state) })),
+    ],
+    [layout.desks, deskStates, agentEntries],
+  );
+  const restingCount = lifeAgents.filter((a) => !a.mustWork).length;
+
   const canSeeBilling = sessionUser ? canUser(sessionUser, "billing:view") : false;
   const { data: billingCounts } = useBillingCounts(canSeeBilling);
   // A parede do NOC só existe para quem pode ler servidores (a API exige escopo global).
@@ -190,6 +237,16 @@ export function HqScene({
     }),
     [applications, activeProjects, layout.desks, deskStates, canSeeBilling, billingCounts],
   );
+
+  // Com agentes + lounge, os personagens são movidos pela simulação; sem isso, as mesas funcionam como antes.
+  const withLife = (children: React.ReactNode) =>
+    lifeWorld ? (
+      <LifeLayer world={lifeWorld} agents={lifeAgents} reduced={reducedGraphics}>
+        {children}
+      </LifeLayer>
+    ) : (
+      children
+    );
 
   const [centerX, , centerZ] = world.center;
 
@@ -254,6 +311,8 @@ export function HqScene({
       {!reducedGraphics && <ContactShadows position={[centerX, 0.003, centerZ]} opacity={0.4} scale={world.radius * 2.4} blur={2.2} far={4} color="#000000" />}
 
       <Suspense fallback={null}>
+        {withLife(
+          <>
         <OfficeShell layout={layout} nocEnabled={nocEnabled} eastDoor={agentsLayout !== null} />
         {nocEnabled && <NocWall layout={layout} servers={monitoredServers} onOpen={onOpenServers} />}
         <CommandScreen layout={layout} stats={stats} />
@@ -310,10 +369,13 @@ export function HqScene({
             agentsOffsetX={agentsOffsetX}
             entries={agentEntries}
             stats={agentStats}
+            resting={restingCount}
             selectedAgentId={selectedAgentId}
             onSelectAgent={onSelectAgent}
             reducedGraphics={reducedGraphics}
           />
+        )}
+          </>,
         )}
       </Suspense>
 

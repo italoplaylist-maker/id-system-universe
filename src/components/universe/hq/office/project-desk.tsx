@@ -5,6 +5,8 @@ import { useFrame } from "@react-three/fiber";
 import { Html, RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
 import { EmployeeModel } from "../assets/employee-model";
+import { useLife } from "../life/life-context";
+import { deskChairAway } from "../life/policy";
 import { ErgoChair, Keyboard, Mouse, DeskLamp, Mug, Notebook, PotPlant, PodMonitor, POD, type ChairStyle } from "./pod-furniture";
 import { hashSeed } from "../assets/office-decor";
 import { PALETTE } from "../palette";
@@ -190,6 +192,7 @@ interface ProjectDeskProps {
  * are damped (~250–350 ms), never snapped.
  */
 export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, statusLabel, statusColor, selected, dimmedByFocus, reduced, onFocusProject, onSelectResource, onFocusResource }: ProjectDeskProps) {
+  const life = useLife();
   const [hovered, setHovered] = useState(false);
   const seed = useMemo(() => hashSeed(slot.projectId), [slot.projectId]);
   const chairStyle = CHAIR_STYLES[seed % CHAIR_STYLES.length];
@@ -233,7 +236,8 @@ export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, s
     b.work = damp(b.work, state === "WORKING" ? 1 : 0, 6, dt);
     b.error = damp(b.error, state === "ERROR" ? 1 : 0, 6, dt);
     b.power = damp(b.power, off ? 0 : 1, 5, dt);
-    b.away = damp(b.away, off ? 1 : 0, 4, dt);
+    // Todo desligado: cadeira para trás. Com a simulação de vida, a cadeira também acompanha o funcionário que saiu para o lounge.
+    b.away = damp(b.away, off ? 1 : deskChairAway(life?.actors.get(slot.projectId)), off ? 4 : 7, dt);
     b.ring = damp(b.ring, selected ? 1 : hovered ? 0.55 : 0, 10, dt);
 
     const pulse = reduced ? 0.5 : 0.5 + 0.5 * Math.sin(clock.elapsedTime * 2.4);
@@ -257,7 +261,8 @@ export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, s
     }
   });
 
-  const showEmployee = !off;
+  // Com a simulação de vida o personagem é desenhado por ela (anda pelo escritório); sem ela, fica sentado na mesa como antes.
+  const showEmployee = !off && !life;
   const mugColor = ["#e8e4dc", "#c8553d", "#3d6fb3", "#2f2f35"][seed % 4];
   const monitorsOff = off;
 

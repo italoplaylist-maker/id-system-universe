@@ -6,6 +6,7 @@ import { ASSET_KEYS } from "../assets/asset-keys";
 import { PlantFallback } from "../assets/procedural-furniture";
 import { PALETTE } from "../palette";
 import { OFFICE, type OfficeLayout } from "./office-layout";
+import { rectObstacle, type Obstacle } from "../life/geometry";
 import { PotPlant } from "./pod-furniture";
 
 /** A tall indoor tree: trunk + layered leaf clusters in a stone planter. */
@@ -196,4 +197,27 @@ export function OfficeProps({ layout }: { layout: OfficeLayout }) {
       </mesh>
     </group>
   );
+}
+
+/** Onde a decoração fixa do escritório (recepção, lounge pequeno, estante, plantas, racks) bloqueia o caminho dos personagens. */
+export function officePropObstacles(layout: OfficeLayout): Obstacle[] {
+  const { width, depth, screen } = layout;
+  const frontZ = depth / 2;
+  const backZ = -depth / 2;
+  const rightOfScreenX = (width / 2 + screen.width / 2) / 2;
+  const circle = (cx: number, cz: number, r: number, label: string): Obstacle => ({ kind: "circle", cx, cz, r, label });
+  const loungeX = width / 2 - 4.4;
+  const loungeZ = frontZ - 1.9;
+  return [
+    rectObstacle(-width / 2 + 3.2, frontZ - 1.5, 1.55, 0.4, "reception"),
+    circle(-width / 2 + 1.1, frontZ - 1.2, 0.35, "plant"),
+    rectObstacle(loungeX, loungeZ - 0.75, 1.3, 0.5, "sofa"),
+    circle(loungeX, loungeZ + 0.55, 0.6, "coffee-table"),
+    circle(loungeX - 1.9, loungeZ + 0.7, 0.7, "small-sofa"),
+    circle(width / 2 - 0.9, frontZ - 1.0, 0.4, "plant"),
+    rectObstacle(rightOfScreenX + 0.4, backZ + 0.35, Math.min(2.4, width / 2 - screen.width / 2 - 1.6) / 2, 0.2, "bookshelf"),
+    circle(width / 2 - 0.8, backZ + 0.8, 0.4, "plant"),
+    circle(-screen.width / 2 - 0.5, backZ + 0.6, 0.35, "plant"),
+    ...layout.racks.map((r) => circle(r.x, r.z, 0.5, "rack")),
+  ];
 }

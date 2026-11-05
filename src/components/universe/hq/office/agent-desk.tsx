@@ -8,7 +8,8 @@ import { ErgoChair, Keyboard, Mouse, DeskLamp, Mug, PodMonitor, POD, type ChairS
 import { hashSeed } from "../assets/office-decor";
 import { PALETTE } from "../palette";
 import type { DeskSlot } from "./office-layout";
-import type { LifeSim } from "../life/sim";
+import { useLife } from "../life/life-context";
+import { deskChairAway } from "../life/policy";
 import type { AgentSessionView } from "@/server/claude/agent-service";
 
 const WORK_BLUE = "#1f7bff";
@@ -83,13 +84,12 @@ interface AgentDeskProps {
   selected: boolean;
   dimmedByFocus: boolean;
   reduced: boolean;
-  /** Simulação visual: diz se o agente está na mesa (a cadeira acompanha). Quem se mexe é o personagem, não a mesa. */
-  life: LifeSim;
   onFocus: () => void;
 }
 
 /** Uma sessão de agente Claude = uma mesa: azul e digitando quando trabalha, vermelha se a última ferramenta falhou, calma quando aguarda. */
-export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimmedByFocus, reduced, life, onFocus }: AgentDeskProps) {
+export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimmedByFocus, reduced, onFocus }: AgentDeskProps) {
+  const life = useLife();
   const [hovered, setHovered] = useState(false);
   const seed = useMemo(() => hashSeed(session.id), [session.id]);
   const state = session.state;
@@ -120,13 +120,7 @@ export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimm
       topMaterial.current.emissiveIntensity = glow * (0.55 + 0.3 * pulse);
     }
     // A cadeira sai da mesa quando o agente se levanta e volta quando ele senta de novo.
-    const actor = life.actors.get(session.id);
-    let awayTarget = 0;
-    if (actor) {
-      if (actor.phase === "desk") awayTarget = 0;
-      else if (actor.phase === "sitting" && actor.intent.kind === "work") awayTarget = 1 - actor.vis.sit;
-      else awayTarget = 1;
-    }
+    const awayTarget = deskChairAway(life?.actors.get(session.id));
     b.away = damp(b.away, awayTarget, 7, dt);
     if (chairGroup.current) {
       chairGroup.current.position.z = -0.03 - b.away * 0.42;

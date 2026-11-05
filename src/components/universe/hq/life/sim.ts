@@ -229,7 +229,7 @@ export class LifeSim {
       to: desk.seat,
       toYaw: desk.yaw,
       dwell: 0,
-      leaveDelay: 2 + this.rng() * 5,
+      leaveDelay: input.mustWork ? 0 : 3 + this.rng() * 40,
       idleFor: 0,
       arrived: true,
       reservation: null,
@@ -300,7 +300,8 @@ export class LifeSim {
   // Decisão: o que fazer quando está livre
   // ---------------------------------------------------------------------------
 
-  private decide(a: Actor): Intent {
+  /** Escolhe a próxima atividade livre; null = o lounge está lotado agora (o personagem fica onde está e tenta de novo). */
+  private decide(a: Actor): Intent | null {
     const world = this.world!;
     const lounge = world.lounge;
     const options: Array<{ weight: number; make: () => Intent | null; kind: string }> = [];
@@ -357,21 +358,7 @@ export class LifeSim {
       options.splice(options.indexOf(chosen), 1);
       total = options.reduce((s, o) => s + o.weight, 0);
     }
-    // Tudo ocupado: circula até o ponto do lounge mais afastado dos outros (não reserva nada).
-    a.lastKind = "wander";
-    a.wanderStreak = 0;
-    let best = lounge.wander[0];
-    let bestGap = -1;
-    for (const p of lounge.wander) {
-      let gap = Infinity;
-      for (const o of this.actors.values()) if (o !== a) gap = Math.min(gap, dist(o, p));
-      if (gap > bestGap) {
-        bestGap = gap;
-        best = p;
-      }
-    }
-    a.reservation = null;
-    return { kind: "wander", point: best, key: null };
+    return null;
   }
 
   private reserve(a: Actor, intent: Intent): boolean {
@@ -501,8 +488,13 @@ export class LifeSim {
     a.idleFor += dt;
     if (a.idleFor >= a.leaveDelay) {
       a.idleFor = 0;
-      a.intent = this.decide(a);
-      a.activity = this.activityFor(a.intent);
+      const next = this.decide(a);
+      if (!next) {
+        a.leaveDelay = 4 + this.rng() * 8; // lounge lotado: tenta de novo daqui a pouco
+        return;
+      }
+      a.intent = next;
+      a.activity = this.activityFor(next);
       this.startRising(a, a.desk.approach);
     }
   }
@@ -542,10 +534,10 @@ export class LifeSim {
     if (a.mustWork) {
       a.intent = { kind: "work" };
     } else if (a.intent.kind === "work") {
-      a.intent = this.decide(a);
+      a.intent = this.decide(a) ?? { kind: "wander", point: this.world!.lounge.wander[0], key: null };
     } else if ((a.intent.kind === "seat" || a.intent.kind === "pool" || a.intent.kind === "chat" || (a.intent.kind === "wander" && a.intent.key)) && !this.reservedBy(a)) {
       // a reserva foi feita antes de levantar; se algo a tomou, escolhe de novo
-      a.intent = this.decide(a);
+      a.intent = this.decide(a) ?? { kind: "wander", point: this.world!.lounge.wander[0], key: null };
     }
     a.activity = this.activityFor(a.intent);
     this.beginWalk(a);
@@ -879,7 +871,12 @@ export class LifeSim {
     if (a.dwell <= 0) {
       const approach = a.seat?.approach ?? this.approachFromHere(a);
       const previousSeat = a.reservation;
-      a.intent = this.decide(a);
+      const next = this.decide(a);
+      if (!next) {
+        a.dwell = 6 + this.rng() * 10; // sem alternativa livre: fica mais um pouco
+        return;
+      }
+      a.intent = next;
       // `decide` reserva o novo lugar; o antigo fica retido até terminar de levantar.
       if (previousSeat && a.reservation !== previousSeat) a.holdKey = previousSeat;
       a.activity = this.activityFor(a.intent);
@@ -893,7 +890,14 @@ export class LifeSim {
     a.dwell -= dt;
     const leave = () => {
       const previous = a.reservation;
-      a.intent = this.decide(a);
+      const next = this.decide(a);
+      if (!next) {
+        a.dwell = 6 + this.rng() * 10;
+        a.leaveAt = 0;
+        a.waitT = 0;
+        return;
+      }
+      a.intent = next;
       if (previous && this.reservations.get(previous) === a.id && a.reservation !== previous) this.reservations.delete(previous);
       a.activity = this.activityFor(a.intent);
       this.beginWalk(a);
