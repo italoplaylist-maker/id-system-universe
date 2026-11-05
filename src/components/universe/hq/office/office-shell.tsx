@@ -164,7 +164,7 @@ export function partitionDoorZ(depth: number): number {
   return depth / 2 - 1.9;
 }
 
-export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", eastDoor = false }: { layout: OfficeLayout; nocEnabled?: boolean; westWall?: "windows" | "none"; eastDoor?: boolean }) {
+export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", eastDoor = false, screenPanel = true }: { layout: OfficeLayout; nocEnabled?: boolean; westWall?: "windows" | "none"; eastDoor?: boolean; screenPanel?: boolean }) {
   const { width, depth } = layout;
   const H = OFFICE.WALL_HEIGHT;
   const T = OFFICE.WALL_THICKNESS;
@@ -205,6 +205,8 @@ export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", 
 
       {/* back wall + slat acoustic panel behind the screen */}
       <FadingWall outward={[0, 0, -1]} position={[0, H / 2, backZ]} args={[width + T, H, T]} color={WALL_COLOR} />
+      {screenPanel && (
+        <>
       <mesh position={[0, layout.screen.y, backZ + T / 2 + 0.03]} receiveShadow>
         <boxGeometry args={[layout.screen.width + 1.0, layout.screen.height + 0.9, 0.04]} />
         <meshStandardMaterial color="#3a2a20" roughness={0.8} />
@@ -215,6 +217,8 @@ export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", 
           <meshStandardMaterial color={i % 5 === 2 ? "#6d4c34" : "#7a5639"} roughness={0.7} />
         </mesh>
       ))}
+        </>
+      )}
       <mesh position={[0, H - 0.22, backZ + T / 2 + 0.03]}>
         <boxGeometry args={[width - 0.4, 0.045, 0.03]} />
         <meshStandardMaterial color={PALETTE.brand} emissive={PALETTE.brand} emissiveIntensity={0.9} />

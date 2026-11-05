@@ -6,10 +6,9 @@ import { ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
 import { computeOfficeLayout, OFFICE } from "./office/office-layout";
 import { OfficeShell, partitionDoorZ } from "./office/office-shell";
-import { AgentDesk, agentTitle } from "./office/agent-desk";
-import { AgentsBoard } from "./office/agents-board";
-import { TallPlant } from "./office/office-props";
-import { Html } from "@react-three/drei";
+import { agentTitle } from "./office/agent-desk";
+import { AgentsWing } from "./office/agents-wing";
+import { computeLoungeLayout, LOUNGE_MIN_DEPTH, LOUNGE_WIDTH } from "./life/lounge-layout";
 import { useAgentSessions } from "@/hooks/use-agents";
 import { OfficeProps } from "./office/office-props";
 import { NocWall } from "./office/noc-wall";
@@ -105,33 +104,46 @@ export function HqScene({
   const agentsEnabled = agentSessions !== undefined;
 
   const agentEntries = useMemo(
-    () => (agentSessions ?? []).map((s, i) => ({ session: s, name: agentTitle(s), accent: AGENT_ACCENTS[i % AGENT_ACCENTS.length] })),
+    () => {
+      const list = agentSessions ?? [];
+      const titles = list.map((s) => agentTitle(s));
+      // Vários agentes no mesmo repositório: um sufixo curto os distingue na placa da mesa.
+      return list.map((s, i) => ({
+        session: s,
+        name: titles.filter((t) => t === titles[i]).length > 1 ? `${titles[i]} #${s.id.slice(-3)}` : titles[i],
+        accent: AGENT_ACCENTS[i % AGENT_ACCENTS.length],
+      }));
+    },
     [agentSessions],
   );
-  // Duas salas lado a lado com a mesma profundidade (paredes de fundo alinhadas).
-  const { layout, agentsLayout } = useMemo(() => {
+  const agentLayoutKey = agentEntries.map((e) => `${e.session.id}:${e.name}:${e.accent}`).join("|");
+  // Três salas lado a lado (operações · agentes · lounge) com a mesma profundidade: fundos alinhados.
+  const { layout, agentsLayout, loungeLayout, loungeShellLayout } = useMemo(() => {
     const agentInputs = agentEntries.map((e) => ({ id: e.session.id, name: e.name, accent: e.accent }));
     const mainNatural = computeOfficeLayout(activeProjects, enabledProviders).depth;
     const agentsNatural = agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 10 }).depth : 0;
-    const minDepth = Math.max(mainNatural, agentsNatural);
-    return {
-      layout: computeOfficeLayout(activeProjects, enabledProviders, { minDepth }),
-      agentsLayout: agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 10, minDepth }) : null,
-    };
-  }, [activeProjects, enabledProviders, agentEntries, agentsEnabled]);
+    const minDepth = Math.max(mainNatural, agentsNatural, agentsEnabled ? LOUNGE_MIN_DEPTH : 0);
+    const main = computeOfficeLayout(activeProjects, enabledProviders, { minDepth });
+    const agents = agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 10, minDepth }) : null;
+    const lounge = agents ? computeLoungeLayout(main.width / 2 + agents.width, main.depth, partitionDoorZ(main.depth)) : null;
+    const loungeShell = lounge ? computeOfficeLayout([], [], { minWidth: LOUNGE_WIDTH, minDepth: main.depth }) : null;
+    return { layout: main, agentsLayout: agents, loungeLayout: lounge, loungeShellLayout: loungeShell };
+    // As salas só dependem de QUEM são os agentes (ids/nomes), não do que eles estão fazendo agora:
+    // o estado muda a cada poucos segundos e não pode reconstruir layout nem malha de navegação.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjects, enabledProviders, agentLayoutKey, agentsEnabled]);
   const agentsOffsetX = agentsLayout ? layout.width / 2 + agentsLayout.width / 2 : 0;
 
-  // O "mundo" que a câmera, o céu, a sombra e a luz enxergam: as duas salas juntas.
+  // O "mundo" que a câmera, o céu, a sombra e a luz enxergam: as três salas juntas.
   const world = useMemo(() => {
-    if (!agentsLayout) return { width: layout.width, depth: layout.depth, center: layout.center, radius: layout.radius, bounds: layout.bounds };
-    const extra = agentsLayout.width;
+    if (!agentsLayout || !loungeLayout) return { width: layout.width, depth: layout.depth, center: layout.center, radius: layout.radius, bounds: layout.bounds };
+    const extra = agentsLayout.width + loungeLayout.width;
     const bounds = { ...layout.bounds, maxX: layout.bounds.maxX + extra };
     const width = layout.width + extra;
     const center: [number, number, number] = [extra / 2, layout.center[1], layout.center[2]];
     const radius = Math.sqrt((width / 2) ** 2 + (layout.depth / 2) ** 2 + (OFFICE.WALL_HEIGHT / 2) ** 2) + 2;
     return { width, depth: layout.depth, center, radius, bounds };
-  }, [layout, agentsLayout]);
-  const agentById = useMemo(() => new Map(agentEntries.map((e) => [e.session.id, e])), [agentEntries]);
+  }, [layout, agentsLayout, loungeLayout]);
   const agentStats = useMemo(() => {
     const list = agentSessions ?? [];
     return {
@@ -187,6 +199,10 @@ export function HqScene({
       dpr={reducedGraphics ? 1 : [1, 1.6]}
       gl={{ antialias: !reducedGraphics }}
       className="bg-background"
+      onCreated={({ gl, scene }) => {
+        // Só em builds de diagnóstico (NEXT_PUBLIC_DEBUG_SCENE=1): expõe o renderer para medir draw calls/memória.
+        if (process.env.NEXT_PUBLIC_DEBUG_SCENE) (window as unknown as { __isuScene?: unknown }).__isuScene = { gl, scene };
+      }}
       onPointerMissed={() => selectedProjectId && setSelectedProjectId(null)}
     >
       <color attach="background" args={[bgColor]} />
@@ -285,57 +301,19 @@ export function HqScene({
           );
         })}
 
-        {agentsLayout && (
-          <group position={[agentsOffsetX, 0, 0]}>
-            <OfficeShell layout={agentsLayout} westWall="none" />
-            <AgentsBoard layout={agentsLayout} stats={agentStats} />
-            {[-1, 1].map((sd) => (
-              <group key={sd} position={[sd * (agentsLayout.width / 2 - 1.0), 0, -agentsLayout.depth / 2 + 0.9]}>
-                <TallPlant scale={0.95} />
-              </group>
-            ))}
-            {agentsLayout.desks.map((slot) => {
-              const entry = agentById.get(slot.projectId);
-              if (!entry) return null;
-              const worldPos: [number, number, number] = [slot.x + agentsOffsetX, 1.0, slot.z];
-              return (
-                <AgentDesk
-                  key={slot.projectId}
-                  slot={slot}
-                  session={entry.session}
-                  selected={selectedAgentId === slot.projectId}
-                  dimmedByFocus={focusId !== null && cameraMode !== "overview" && cameraMode !== "free" && focusId !== slot.projectId}
-                  reduced={reducedGraphics}
-                  onFocus={() => {
-                    onSelectAgent(slot.projectId);
-                    focusProject(slot.projectId, worldPos, 2.6, `Agente · ${slot.name}`);
-                  }}
-                />
-              );
-            })}
-          </group>
-        )}
-        {agentsLayout && (
-          <Html position={[layout.width / 2, 3.0, partitionDoorZ(layout.depth)]} center zIndexRange={[20, 0]}>
-            <button
-              type="button"
-              onClick={() => focusProject("agents-room", [agentsOffsetX, 1.0, 0], agentsLayout.radius * 0.5, "Sala dos Agentes")}
-              style={{
-                padding: "3px 10px",
-                borderRadius: 999,
-                background: agentStats.approvals > 0 ? "rgba(120,80,0,0.92)" : "rgba(10,13,20,0.85)",
-                border: agentStats.approvals > 0 ? "1px solid #fbbf24" : "1px solid rgba(255,255,255,0.18)",
-                color: "#f1f4fa",
-                fontFamily: "ui-sans-serif, system-ui",
-                fontSize: 11,
-                fontWeight: 650,
-                whiteSpace: "nowrap",
-                cursor: "pointer",
-              }}
-            >
-              Sala dos Agentes · {agentStats.approvals > 0 ? `${agentStats.approvals} aguardando aprovação` : agentStats.working > 0 ? `${agentStats.working} trabalhando` : `${agentStats.active} ativo${agentStats.active === 1 ? "" : "s"}`}
-            </button>
-          </Html>
+        {agentsLayout && loungeLayout && loungeShellLayout && (
+          <AgentsWing
+            mainLayout={layout}
+            agentsLayout={agentsLayout}
+            loungeShellLayout={loungeShellLayout}
+            lounge={loungeLayout}
+            agentsOffsetX={agentsOffsetX}
+            entries={agentEntries}
+            stats={agentStats}
+            selectedAgentId={selectedAgentId}
+            onSelectAgent={onSelectAgent}
+            reducedGraphics={reducedGraphics}
+          />
         )}
       </Suspense>
 

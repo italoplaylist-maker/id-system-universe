@@ -4,11 +4,11 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html, RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
-import { EmployeeModel } from "../assets/employee-model";
 import { ErgoChair, Keyboard, Mouse, DeskLamp, Mug, PodMonitor, POD, type ChairStyle } from "./pod-furniture";
 import { hashSeed } from "../assets/office-decor";
 import { PALETTE } from "../palette";
 import type { DeskSlot } from "./office-layout";
+import type { LifeSim } from "../life/sim";
 import type { AgentSessionView } from "@/server/claude/agent-service";
 
 const WORK_BLUE = "#1f7bff";
@@ -83,11 +83,13 @@ interface AgentDeskProps {
   selected: boolean;
   dimmedByFocus: boolean;
   reduced: boolean;
+  /** Simulação visual: diz se o agente está na mesa (a cadeira acompanha). Quem se mexe é o personagem, não a mesa. */
+  life: LifeSim;
   onFocus: () => void;
 }
 
 /** Uma sessão de agente Claude = uma mesa: azul e digitando quando trabalha, vermelha se a última ferramenta falhou, calma quando aguarda. */
-export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimmedByFocus, reduced, onFocus }: AgentDeskProps) {
+export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimmedByFocus, reduced, life, onFocus }: AgentDeskProps) {
   const [hovered, setHovered] = useState(false);
   const seed = useMemo(() => hashSeed(session.id), [session.id]);
   const state = session.state;
@@ -96,7 +98,8 @@ export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimm
   const topMaterial = useRef<THREE.MeshStandardMaterial>(null);
   const haloMaterial = useRef<THREE.MeshBasicMaterial>(null);
   const ringMaterial = useRef<THREE.MeshBasicMaterial>(null);
-  const blend = useRef({ work: state === "WORKING" ? 1 : 0, error: state === "ERROR" ? 1 : 0, ask: state === "APPROVAL" ? 1 : 0, ring: 0 });
+  const chairGroup = useRef<THREE.Group>(null);
+  const blend = useRef({ away: 0, work: state === "WORKING" ? 1 : 0, error: state === "ERROR" ? 1 : 0, ask: state === "APPROVAL" ? 1 : 0, ring: 0 });
   const tmp = useRef(new THREE.Color());
 
   useFrame(({ clock }, delta) => {
@@ -115,6 +118,19 @@ export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimm
       topMaterial.current.color.copy(tmp.current);
       topMaterial.current.emissive.copy(tint);
       topMaterial.current.emissiveIntensity = glow * (0.55 + 0.3 * pulse);
+    }
+    // A cadeira sai da mesa quando o agente se levanta e volta quando ele senta de novo.
+    const actor = life.actors.get(session.id);
+    let awayTarget = 0;
+    if (actor) {
+      if (actor.phase === "desk") awayTarget = 0;
+      else if (actor.phase === "sitting" && actor.intent.kind === "work") awayTarget = 1 - actor.vis.sit;
+      else awayTarget = 1;
+    }
+    b.away = damp(b.away, awayTarget, 7, dt);
+    if (chairGroup.current) {
+      chairGroup.current.position.z = -0.03 - b.away * 0.42;
+      chairGroup.current.rotation.y = b.away * 0.85;
     }
     if (haloMaterial.current) haloMaterial.current.opacity = glow * (0.28 + 0.14 * pulse);
     if (ringMaterial.current) ringMaterial.current.opacity = b.ring * 0.85;
@@ -164,11 +180,8 @@ export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimm
       <group position={[-deskWidth / 2 + 0.2, POD.DESK_TOP_Y, POD.DESK_CENTER_Z - 0.05]}>
         <Mug color={["#e8e4dc", "#c8553d", "#3d6fb3", "#2f2f35"][seed % 4]} />
       </group>
-      <group position={[0, 0, -0.03]}>
+      <group ref={chairGroup} position={[0, 0, -0.03]}>
         <ErgoChair style={CHAIR} />
-      </group>
-      <group>
-        <EmployeeModel accent={slot.accent} pose="seated" activity={state === "WORKING" ? "working" : "idle"} seed={seed} reduced={reduced} />
       </group>
 
       <mesh
