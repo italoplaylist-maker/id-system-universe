@@ -32,13 +32,13 @@ describe("layout compacto", () => {
     for (const d of l.desks) assert.ok(Math.abs(d.x) + 1.25 <= l.width / 2, "mesa encosta na parede");
   });
 
-  it("lounge: dois grupos de sofá, 3 poltronas e 7 banquetas, tudo dentro da sala", () => {
+  it("lounge: sofá + poltrona, sofá em U (3 sofás), 7 banquetas, tudo dentro da sala", () => {
     const l = computeLoungeLayout(30, LOUNGE_MIN_DEPTH, LOUNGE_MIN_DEPTH / 2 - 1.9);
     assert.equal(l.width, LOUNGE_WIDTH);
-    assert.equal(l.furniture.sofas.length, 2);
-    assert.equal(l.furniture.armchairs.length, 3);
+    assert.equal(l.furniture.sofas.length, 4); // 2 de fundo + 2 laterais do U
+    assert.equal(l.furniture.armchairs.length, 1);
     assert.equal(l.furniture.stools.length, 7);
-    assert.equal(l.seats.filter((s) => s.kind === "sofa").length, 6);
+    assert.equal(l.seats.filter((s) => s.kind === "sofa").length, 10);
     assert.equal(l.seats.filter((s) => s.kind === "stool").length, 7);
     for (const s of l.seats) {
       assert.ok(s.pos.x > l.x0 && s.pos.x < l.x0 + l.width, `${s.id} fora da sala (x)`);

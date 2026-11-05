@@ -119,9 +119,12 @@ export function computeOfficeLayout(projects: Pick<UniverseProject, "id" | "name
 export const POD = {
   CELL: 5.6,
   AISLE: 2.8,
-  BACK_ZONE: 2.6,
+  BACK_ZONE: 4.6,
   FRONT_ZONE: 1.8,
   SIDE_MARGIN: 0.7,
+  /** Sala de projeto (vidro) encostada na parede de fundo. */
+  ROOM_W: 3.4,
+  ROOM_D: 2.7,
   /** Assentos da mesma dupla ficam a ±SEAT_Z do centro do pod, voltados um para o outro (com vidro no meio). */
   SEAT_Z: 1.5,
   SEAT_X: 1.1,
@@ -140,6 +143,8 @@ export interface AgentPodLayout extends OfficeLayout {
   pods: PodInfo[];
   /** z local do corredor central (onde fica a porta voltada para o átrio). */
   aisleZ: number;
+  /** Salas de projeto de vidro nos cantos do fundo (centro e medidas, plano local). */
+  rooms: Array<{ x: number; z: number; w: number; d: number }>;
 }
 
 /**
@@ -194,5 +199,6 @@ export function computeAgentPods(agents: Pick<UniverseProject, "id" | "name" | "
   });
 
   const base = computeOfficeLayout([], [], { minWidth: width, minDepth: depth });
-  return { ...base, width, depth, desks, pods, aisleZ };
+  const rooms = Array.from({ length: cols }, (_, c) => ({ x: (c === 0 ? -1 : 1) * (width / 2 - POD.SIDE_MARGIN - POD.ROOM_W / 2), z: -depth / 2 + 0.3 + POD.ROOM_D / 2, w: POD.ROOM_W, d: POD.ROOM_D }));
+  return { ...base, width, depth, desks, pods, aisleZ, rooms };
 }

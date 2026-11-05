@@ -24,7 +24,7 @@ function world(nProjects: number, nAgents: number) {
     techDesks: tech.desks.map((d) => ({ id: d.projectId, x: d.x, z: d.z })),
     techObstacles: officePropObstacles(tech),
     agentDesks: pods.desks.map((d) => ({ id: d.projectId, x: d.x, z: d.z, yaw: d.yaw ?? 0 })),
-    agentObstacles: [],
+    agentObstacles: pods.rooms.map((r) => ({ kind: "rect" as const, minX: r.x - r.w / 2, maxX: r.x + r.w / 2, minZ: r.z - r.d / 2, maxZ: r.z + r.d / 2 })),
     lounge,
     atriumObstacles: atriumObstacles(),
   });

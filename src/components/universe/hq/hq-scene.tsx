@@ -216,7 +216,10 @@ export function HqScene({
       techDesks: layout.desks.map((d) => ({ id: d.projectId, x: d.x, z: d.z, halfW: deskHalfW(d.projectId) })),
       techObstacles: officePropObstacles(layout),
       agentDesks: agentsLayout.desks.map((d) => ({ id: d.projectId, x: d.x, z: d.z, yaw: d.yaw ?? 0 })),
-      agentObstacles: [-1, 1].map((sd) => ({ kind: "circle" as const, cx: sd * (agentsLayout.width / 2 - 0.9), cz: -agentsLayout.depth / 2 + 0.9, r: 0.38, label: "plant" })),
+      agentObstacles: [
+        ...[-1, 1].map((sd) => ({ kind: "circle" as const, cx: sd * (agentsLayout.width / 2 - 0.9), cz: -agentsLayout.depth / 2 + 0.9, r: 0.38, label: "plant" })),
+        ...agentsLayout.rooms.map((r) => ({ kind: "rect" as const, minX: r.x - r.w / 2, maxX: r.x + r.w / 2, minZ: r.z - r.d / 2, maxZ: r.z + r.d / 2, label: "project-room" })),
+      ],
       lounge: loungeLayout,
       atriumObstacles: atriumObstacles(),
     };

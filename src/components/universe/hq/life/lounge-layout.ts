@@ -92,7 +92,8 @@ export function computeLoungeLayout(x0: number, depth: number, doorZ: number, wi
 
   // ---- sofás e poltronas (frente): dois grupos de sofá + mesa de centro, três poltronas ------------
   const sofaV = 9.45 + s;
-  const sofaCenters = [4.75, 9.85];
+  // Grupo 1: sofá + poltrona. Grupo 2: sofá em U (sofá de fundo + dois laterais) em volta da mesa de centro, aberto para a câmera.
+  const sofaCenters = [4.75, 9.2];
   const sofaSeats: SeatSpot[] = sofaCenters.flatMap((cu, g) =>
     [-0.85, 0, 0.85].map((du, i) => ({
       id: `sofa-${g * 3 + i}`,
@@ -105,12 +106,27 @@ export function computeLoungeLayout(x0: number, depth: number, doorZ: number, wi
     })),
   );
   sofaCenters.forEach((cu) => block(cu, sofaV, 1.5, 0.52, "sofa"));
-  const armV = 10.7 + s;
-  const armchairs = [
-    { x: 2.35, yaw: Math.PI / 2, appU: 3.3 },
-    { x: 7.3, yaw: Math.PI / 2, appU: 8.25 },
-    { x: 11.9, yaw: -Math.PI / 2, appU: 10.95 },
+  const tableV = 11.45 + s;
+  // Sofás laterais do U (2 lugares cada), de frente um para o outro, a mesa de centro entre eles.
+  const uCenter = sofaCenters[1];
+  const sideSofas = [
+    { u: uCenter - 2.4, yaw: Math.PI / 2, appDu: 1.05 },
+    { u: uCenter + 2.4, yaw: -Math.PI / 2, appDu: -1.05 },
   ];
+  const sideSeats: SeatSpot[] = sideSofas.flatMap((sf, g) =>
+    [-0.45, 0.45].map((dv, k) => ({
+      id: `sofa-${6 + g * 2 + k}`,
+      kind: "sofa" as const,
+      pos: W(sf.u, tableV + dv),
+      yaw: sf.yaw,
+      approach: W(sf.u + sf.appDu, tableV + dv),
+      hipSeat: 0.5,
+      backLean: -0.16,
+    })),
+  );
+  sideSofas.forEach((sf) => block(sf.u, tableV, 0.52, 0.95, "sofa"));
+  const armV = 10.7 + s;
+  const armchairs = [{ x: 2.35, yaw: Math.PI / 2, appU: 3.3 }];
   const armSeats: SeatSpot[] = armchairs.map((a, i) => ({
     id: `armchair-${i}`,
     kind: "armchair",
@@ -121,9 +137,8 @@ export function computeLoungeLayout(x0: number, depth: number, doorZ: number, wi
     backLean: -0.2,
   }));
   armchairs.forEach((a) => block(a.x, armV, 0.48, 0.48, "armchair"));
-  const tableV = 11.45 + s;
   sofaCenters.forEach((cu) => block(cu, tableV, 0.68, 0.42, "coffee-table"));
-  const lampP = W(7.3, sofaV - 0.35);
+  const lampP = W(11.4, sofaV - 0.2);
   obstacles.push({ kind: "circle", cx: lampP.x, cz: lampP.z, r: 0.25, label: "floor-lamp" });
 
   // ---- bar (leste, de frente para a câmera): 7 banquetas ----------------------------------
@@ -172,14 +187,14 @@ export function computeLoungeLayout(x0: number, depth: number, doorZ: number, wi
     depth,
     minZ,
     maxZ,
-    seats: [...sofaSeats, ...armSeats, ...stoolSeats],
+    seats: [...sofaSeats, ...sideSeats, ...armSeats, ...stoolSeats],
     poolSpots,
     chatPairs,
     wander,
     obstacles,
     furniture: {
-      rug: { ...W(7.4, 10.5 + s), w: 11.2, d: 3.5 },
-      sofas: sofaCenters.map((cu) => ({ ...W(cu, sofaV), yaw: 0, length: 2.9 })),
+      rug: { ...W(7.4, 10.8 + s), w: 12.2, d: 4.6 },
+      sofas: [...sofaCenters.map((cu) => ({ ...W(cu, sofaV), yaw: 0, length: 2.9 })), ...sideSofas.map((sf) => ({ ...W(sf.u, tableV), yaw: sf.yaw, length: 1.9 }))],
       armchairs: armchairs.map((a) => ({ ...W(a.x, armV), yaw: a.yaw })),
       coffeeTables: sofaCenters.map((cu) => W(cu, tableV)),
       floorLamps: [lampP],
