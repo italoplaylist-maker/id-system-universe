@@ -43,8 +43,14 @@ export async function getVapidKeys(): Promise<{ publicKey: string; privateKey: s
   return cached;
 }
 
-export function vapidSubject(): string {
-  return process.env.VAPID_SUBJECT || getAppOrigin() || "mailto:notificacoes@id-system.local";
+/** Identificação do servidor perante o serviço de push (Apple e Google exigem https:// ou mailto: válido). */
+export async function vapidSubject(): Promise<string> {
+  if (process.env.VAPID_SUBJECT) return process.env.VAPID_SUBJECT;
+  const origin = getAppOrigin();
+  if (origin?.startsWith("https://")) return origin;
+  // sem APP_URL: usa o endereço real por onde o usuário acessou, guardado na hora de ativar o push
+  const saved = await prisma.systemSetting.findUnique({ where: { key: "push.origin" } });
+  return saved?.value.startsWith("https://") ? saved.value : "mailto:notificacoes@id-system.local";
 }
 
 export function resetVapidCache() {

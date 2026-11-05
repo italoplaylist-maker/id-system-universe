@@ -10,7 +10,13 @@ export interface PushTarget {
   p256dh: string;
   auth: string;
 }
-export type PushSender = (target: PushTarget, payload: NotificationPayload) => Promise<{ ok: true } | { ok: false; gone: boolean }>;
+export type PushSender = (target: PushTarget, payload: NotificationPayload) => Promise<{ ok: true } | { ok: false; gone: boolean; detail?: string }>;
+
+export interface DeliveryResult {
+  ok: boolean;
+  gone: boolean;
+  detail?: string;
+}
 
 const defaultSender: PushSender = async (t, payload) => {
   const keys = await getVapidKeys();
@@ -18,12 +24,16 @@ const defaultSender: PushSender = async (t, payload) => {
     await webpush.sendNotification({ endpoint: t.endpoint, keys: { p256dh: t.p256dh, auth: t.auth } }, JSON.stringify(payload), {
       TTL: 3600,
       urgency: payload.level === "error" || payload.kind === "approval" ? "high" : "normal",
-      vapidDetails: { subject: vapidSubject(), publicKey: keys.publicKey, privateKey: keys.privateKey },
+      vapidDetails: { subject: await vapidSubject(), publicKey: keys.publicKey, privateKey: keys.privateKey },
     });
     return { ok: true };
   } catch (error) {
-    const status = (error as { statusCode?: number }).statusCode;
-    return { ok: false, gone: status === 404 || status === 410 };
+    const e = error as { statusCode?: number; body?: string; message?: string };
+    const status = e.statusCode;
+    const gone = status === 404 || status === 410;
+    // Texto curto e sem segredo: vai para o painel ("HTTP 403 — chave VAPID recusada") e ajuda a achar o motivo de "não chegou".
+    const hint = status === 401 || status === 403 ? " — o serviço de push recusou a identificação do servidor" : status === 413 ? " — mensagem grande demais" : "";
+    return { ok: false, gone, detail: status ? `HTTP ${status}${hint}` : (e.message ?? "sem resposta do serviço de push").slice(0, 120) };
   }
 };
 
@@ -32,20 +42,21 @@ export function setPushSender(s: PushSender | null) {
   holder.__isuPushSender = s ?? undefined;
 }
 
-/** Entrega a um aparelho; endpoint morto (usuário revogou) é removido, falhas repetidas também. */
-export async function deliverPush(target: PushTarget, payload: NotificationPayload): Promise<boolean> {
+/** Entrega a um aparelho; endpoint morto (usuário revogou) é removido, falhas repetidas também. Guarda o resultado para o painel. */
+export async function deliverPush(target: PushTarget, payload: NotificationPayload): Promise<DeliveryResult> {
   const send = holder.__isuPushSender ?? defaultSender;
   const r = await send(target, payload);
+  const now = new Date();
   if (r.ok) {
-    await prisma.pushSubscription.update({ where: { id: target.id }, data: { lastSuccessAt: new Date(), failures: 0 } }).catch(() => undefined);
-    return true;
+    await prisma.pushSubscription.update({ where: { id: target.id }, data: { lastSuccessAt: now, lastAttemptAt: now, lastError: null, failures: 0 } }).catch(() => undefined);
+    return { ok: true, gone: false };
   }
   if (r.gone) {
     await prisma.pushSubscription.deleteMany({ where: { id: target.id } });
   } else {
-    const row = await prisma.pushSubscription.update({ where: { id: target.id }, data: { failures: { increment: 1 } } }).catch(() => null);
+    const row = await prisma.pushSubscription.update({ where: { id: target.id }, data: { failures: { increment: 1 }, lastAttemptAt: now, lastError: r.detail ?? "falha na entrega" } }).catch(() => null);
     if (row && row.failures >= 10) await prisma.pushSubscription.deleteMany({ where: { id: target.id } });
-    logger.warn("push_delivery_failed", { subscriptionId: target.id });
+    logger.warn("push_delivery_failed", { subscriptionId: target.id, detail: r.detail });
   }
-  return false;
+  return { ok: false, gone: r.gone, detail: r.gone ? "o aparelho cancelou as notificações (removido)" : r.detail };
 }

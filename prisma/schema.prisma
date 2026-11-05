@@ -925,6 +925,9 @@ model PushSubscription {
   userAgent     String?
   failures      Int       @default(0)
   lastSuccessAt DateTime?
+  /// Último erro de entrega (ex.: "HTTP 403") — aparece no painel para diagnosticar "não chegou".
+  lastError     String?
+  lastAttemptAt DateTime?
   createdAt     DateTime  @default(now())
 
   @@index([userId])
@@ -939,6 +942,9 @@ model NotificationPreference {
   approvals Boolean  @default(true)
   servers   Boolean  @default(true)
   billing   Boolean  @default(true)
+  /// Canal extra: o mesmo aviso por WhatsApp (chega com o app fechado, em qualquer celular). Número só com dígitos, formato internacional.
+  whatsappEnabled Boolean  @default(false)
+  whatsappNumber  String?
   updatedAt DateTime @updatedAt
 }
 

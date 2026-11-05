@@ -17,6 +17,10 @@ interface UiState {
   requestTab: (tab: PanelTab) => void;
   clearRequestedTab: () => void;
 
+  /** Diálogo de notificações (aberto pelo sino ou pelo aviso "ative as notificações"). */
+  notificationsOpen: boolean;
+  setNotificationsOpen: (open: boolean) => void;
+
   commandPaletteOpen: boolean;
   setCommandPaletteOpen: (open: boolean) => void;
 
@@ -37,6 +41,9 @@ export const useUiStore = create<UiState>((set) => ({
   requestedTab: null,
   requestTab: (tab) => set({ requestedTab: { tab, token: ++requestedTabTokenCounter } }),
   clearRequestedTab: () => set({ requestedTab: null }),
+
+  notificationsOpen: false,
+  setNotificationsOpen: (notificationsOpen) => set({ notificationsOpen }),
 
   commandPaletteOpen: false,
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),

@@ -20,6 +20,9 @@ export async function POST(request: Request) {
     if (!parsed.success) throw new ValidationError("Assinatura de notificação inválida.");
     const meta = await getRequestMeta();
     const { endpoint, keys } = parsed.data;
+    // endereço real do app (https) por onde o usuário ativou: serve de identificação do servidor no push quando APP_URL não está definido
+    const origin = request.headers.get("origin");
+    if (origin?.startsWith("https://")) await prisma.systemSetting.upsert({ where: { key: "push.origin" }, create: { key: "push.origin", value: origin }, update: { value: origin } });
     await prisma.pushSubscription.upsert({
       where: { endpoint },
       create: { userId: user.id, endpoint, p256dh: keys.p256dh, auth: keys.auth, userAgent: meta.userAgent?.slice(0, 300) },

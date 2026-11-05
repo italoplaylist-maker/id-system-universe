@@ -5,6 +5,7 @@ import { getProjectScope } from "@/server/auth/project-access";
 import { notificationBus } from "./bus";
 import { audienceAllows, DEFAULT_PREFS, type Recipient } from "./audience";
 import { deliverPush } from "./push";
+import { sendWhatsAppNotification } from "./whatsapp-channel";
 import type { NotificationInput, NotificationPayload, PrefKind } from "./types";
 
 const KIND_FIELD: Record<PrefKind, "deploys" | "agents" | "approvals" | "servers" | "billing"> = {
@@ -39,25 +40,59 @@ export async function notify(input: NotificationInput): Promise<void> {
     };
     notificationBus.emit({ payload, audience: input.audience, kind: input.kind });
 
-    const subs = await prisma.pushSubscription.findMany({
-      where: { user: { active: true } },
-      include: { user: { include: { notificationPreference: true } } },
+    const users = await prisma.user.findMany({
+      where: { active: true, OR: [{ pushSubscriptions: { some: {} } }, { notificationPreference: { is: { whatsappEnabled: true, whatsappNumber: { not: null } } } }] },
+      include: { pushSubscriptions: true, notificationPreference: true },
     });
-    if (subs.length === 0) return;
-    const scopes = new Map<string, Awaited<ReturnType<typeof getProjectScope>>>();
     await Promise.all(
-      subs.map(async (s) => {
-        let scope = scopes.get(s.userId);
-        if (!scope) {
-          scope = await getProjectScope(s.user);
-          scopes.set(s.userId, scope);
-        }
-        const recipient: Recipient = { user: s.user, scope, enabled: prefsToEnabled(s.user.notificationPreference) };
+      users.map(async (u) => {
+        const scope = await getProjectScope(u);
+        const recipient: Recipient = { user: u, scope, enabled: prefsToEnabled(u.notificationPreference) };
         if (!audienceAllows(recipient, input.kind, input.audience)) return;
-        await deliverPush({ id: s.id, endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth }, payload);
+        await Promise.all([
+          ...u.pushSubscriptions.map((s) => deliverPush({ id: s.id, endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth }, payload)),
+          // WhatsApp: chega com o app fechado em qualquer celular, sem instalar nada
+          u.notificationPreference?.whatsappEnabled && u.notificationPreference.whatsappNumber ? sendWhatsAppNotification(u.notificationPreference.whatsappNumber, payload) : Promise.resolve(),
+        ]);
       }),
     );
   } catch (error) {
     logger.warn("notify_failed", { message: error instanceof Error ? error.message : String(error) });
   }
+}
+
+export interface TestResult {
+  push: Array<{ device: string; ok: boolean; detail?: string }>;
+  whatsapp: { sent: boolean; ok?: boolean; detail?: string };
+}
+
+/** Rótulo curto do aparelho a partir do User-Agent guardado na ativação. */
+export function deviceLabel(ua: string | null | undefined): string {
+  const u = ua ?? "";
+  const os = /iPhone/i.test(u) ? "iPhone" : /iPad/i.test(u) ? "iPad" : /Android/i.test(u) ? "Android" : /Windows/i.test(u) ? "Windows" : /Mac OS X|Macintosh/i.test(u) ? "Mac" : /Linux/i.test(u) ? "Linux" : "Aparelho";
+  const br = /Edg\//i.test(u) ? "Edge" : /Firefox|FxiOS/i.test(u) ? "Firefox" : /Chrome|CriOS/i.test(u) ? "Chrome" : /Safari/i.test(u) ? "Safari" : "";
+  return br ? `${os} · ${br}` : os;
+}
+
+/** Teste de ponta a ponta COM resultado: diz se cada aparelho aceitou a entrega (ou o erro) e se o WhatsApp saiu. */
+export async function sendTestNotification(userId: string, channel: "push" | "whatsapp" | "all"): Promise<TestResult> {
+  const payload: NotificationPayload = { id: randomUUID(), kind: "test", level: "success", title: "Notificações funcionando", body: "Se você está vendo isto com o app fechado, está tudo certo.", url: "/", tag: "test", ts: new Date().toISOString() };
+  const result: TestResult = { push: [], whatsapp: { sent: false } };
+  const user = await prisma.user.findUnique({ where: { id: userId }, include: { pushSubscriptions: true, notificationPreference: true } });
+  if (!user) return result;
+  if (channel === "push" || channel === "all") {
+    notificationBus.emit({ payload, audience: { userId }, kind: "test" }); // pop-up nas abas abertas
+    for (const s of user.pushSubscriptions) {
+      const r = await deliverPush({ id: s.id, endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth }, payload);
+      result.push.push({ device: deviceLabel(s.userAgent), ok: r.ok, detail: r.detail });
+    }
+  }
+  if (channel === "whatsapp" || channel === "all") {
+    const num = user.notificationPreference?.whatsappNumber;
+    if (num) {
+      const r = await sendWhatsAppNotification(num, payload);
+      result.whatsapp = { sent: true, ok: r.ok, detail: r.detail };
+    }
+  }
+  return result;
 }

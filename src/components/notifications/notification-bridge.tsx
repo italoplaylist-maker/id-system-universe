@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { toast } from "sonner";
 import { useSession } from "@/hooks/use-session";
+import { useUiStore } from "@/store/ui-store";
+import { currentSubscription } from "@/lib/push-client";
 
 interface Payload {
   id: string;
@@ -51,5 +53,40 @@ export function NotificationBridge() {
     });
     return () => es.close();
   }, [loggedIn]);
+
+  // Lembrete único por aparelho: sem push nem WhatsApp, os avisos só chegam com o app aberto.
+  const setOpen = useUiStore((st) => st.setNotificationsOpen);
+  useEffect(() => {
+    if (!loggedIn) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        if (window.localStorage.getItem("isu.pushNudge") === "1") return;
+        const sub = await currentSubscription().catch(() => null);
+        if (sub || cancelled) return;
+        const prefs = await fetch("/api/notifications/preferences").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (prefs?.whatsapp?.enabled || cancelled) return;
+        toast.info("Receba os avisos com o app fechado", {
+          id: "push-nudge",
+          description: "Ative as notificações neste aparelho ou por WhatsApp.",
+          duration: 60_000,
+          action: { label: "Ativar", onClick: () => setOpen(true) },
+          onDismiss: () => {
+            try {
+              window.localStorage.setItem("isu.pushNudge", "1");
+            } catch {
+              // sem armazenamento: o lembrete só reaparece no próximo login
+            }
+          },
+        });
+      } catch {
+        // lembrete é só conveniência
+      }
+    }, 6_000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [loggedIn, setOpen]);
   return null;
 }
