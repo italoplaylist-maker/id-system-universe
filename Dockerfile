@@ -51,10 +51,17 @@ ENV NODE_ENV=production \
 
 # Same reason as the builder stage — the query engine that actually serves
 # requests runs here.
-RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+# `git` + CA certificates: the Claude Agent SDK (Central de Agentes) runs the real
+# Claude Code in each agent's working directory and talks to the Anthropic API.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl git ca-certificates && rm -rf /var/lib/apt/lists/*
 
+# A real home directory: Claude keeps agent sessions in ~/.claude, and the Universe
+# resumes them (one persistent session per agent). Mount a volume on /home/nextjs/.claude
+# in Coolify so the sessions survive redeploys.
 RUN groupadd --system --gid 1001 nodejs \
-    && useradd --system --uid 1001 --gid nodejs nextjs
+    && useradd --system --uid 1001 --gid nodejs --create-home --home-dir /home/nextjs nextjs \
+    && mkdir -p /home/nextjs/.claude && chown -R nextjs:nodejs /home/nextjs
+ENV HOME=/home/nextjs
 
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static

@@ -14,6 +14,7 @@ import type { LifeAgent } from "./life/agent-life";
 import type { LifeWorldInput } from "./life/world";
 import { computeLoungeLayout, LOUNGE_MIN_DEPTH, LOUNGE_WIDTH } from "./life/lounge-layout";
 import { useAgentSessions } from "@/hooks/use-agents";
+import { roomAgentToSession, useRoomAgents } from "@/hooks/use-orchestrator";
 import { OfficeProps, officePropObstacles } from "./office/office-props";
 import { NocWall } from "./office/noc-wall";
 import { useServers } from "@/hooks/use-servers";
@@ -107,7 +108,15 @@ export function HqScene({
   // state, not a desk — they only show up as a HUD pill pointing at /projects).
   const { data: sessionUser } = useSession();
   // A sala dos agentes só existe para quem pode ler infraestrutura (a API exige escopo global).
-  const { data: agentSessions } = useAgentSessions(sessionUser ? canUser(sessionUser, "provider:read") : false);
+  const canReadAgents = sessionUser ? canUser(sessionUser, "provider:read") : false;
+  const { data: observedSessions } = useAgentSessions(canReadAgents);
+  const { data: roomAgents } = useRoomAgents(canReadAgents);
+  // Funcionários permanentes (perfis) primeiro, em ordem estável; depois as sessões externas observadas pelo hook.
+  // Os perfis existem independentemente de haver tarefa: terminar, atualizar a página ou sincronizar não os remove.
+  const agentSessions = useMemo(
+    () => (observedSessions === undefined && roomAgents === undefined ? undefined : [...(roomAgents ?? []).map(roomAgentToSession), ...(observedSessions ?? [])]),
+    [observedSessions, roomAgents],
+  );
   const agentsEnabled = agentSessions !== undefined;
 
   const agentEntries = useMemo(
@@ -215,7 +224,7 @@ export function HqScene({
         return [{ id: slot.projectId, accent: slot.accent, mustWork: state === "WORKING" || state === "ERROR", working: state === "WORKING" }];
       }),
       // Agentes do Claude: pelo estado real da sessão.
-      ...agentEntries.map((e) => ({ id: e.session.id, accent: e.accent, mustWork: agentNeedsDesk(e.session.state), working: agentIsTyping(e.session.state) })),
+      ...agentEntries.map((e) => ({ id: e.session.id, accent: e.accent, mustWork: e.session.profile ? true : agentNeedsDesk(e.session.state), working: e.session.profile ? e.session.profile.roomState === "RUNNING" : agentIsTyping(e.session.state) })),
     ],
     [layout.desks, deskStates, agentEntries],
   );

@@ -21,6 +21,8 @@ import { Button } from "@/components/ui/button";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
 import { TimelinePanel } from "@/components/agents/timeline-panel";
 import { FeedsDialog } from "@/components/agents/feed-dialogs";
+import { CommandCenter } from "@/components/agents/command-center";
+import { useRoomAgents } from "@/hooks/use-orchestrator";
 import { useSession } from "@/hooks/use-session";
 import { canUser } from "@/server/auth/rbac";
 import { ProjectManagerDrawer } from "@/components/projects/project-manager-drawer";
@@ -33,7 +35,9 @@ import { ProjectManagerDrawer } from "@/components/projects/project-manager-draw
 export function HqView() {
   const [webglOk, setWebglOk] = useState<boolean | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [centerOpen, setCenterOpen] = useState(false);
   const { data: sessionUser } = useSession();
+  const { data: roomAgents } = useRoomAgents(sessionUser ? canUser(sessionUser, "provider:read") : false);
   const canManageAgents = sessionUser ? canUser(sessionUser, "provider:write") : false;
   const router = useRouter();
   const { selectedApplicationId, selectApplication, reducedGraphics, setReducedGraphics, demoMode, setDemoMode, setViewMode } = useUiStore();
@@ -64,6 +68,10 @@ export function HqView() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
+      if (centerOpen) {
+        setCenterOpen(false);
+        return;
+      }
       if (selectedAgentId) {
         setSelectedAgentId(null);
         return;
@@ -76,7 +84,7 @@ export function HqView() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedAgentId, selectedApplicationId, selectApplication, cameraMode, backOneLevel]);
+  }, [centerOpen, selectedAgentId, selectedApplicationId, selectApplication, cameraMode, backOneLevel]);
 
   useEffect(() => {
     // WebGL support can only be known client-side (canvas probing needs
@@ -154,7 +162,14 @@ export function HqView() {
             selectedAgentId={selectedAgentId}
             onSelectAgent={(id) => {
               selectApplication(null);
-              setSelectedAgentId(id);
+              // Funcionário permanente → Central de comandos; sessão observada pelo hook → linha do tempo.
+              if (roomAgents?.some((a) => a.id === id)) {
+                setSelectedAgentId(id);
+                setCenterOpen(true);
+              } else {
+                setCenterOpen(false);
+                setSelectedAgentId(id);
+              }
             }}
             reducedGraphics={reducedGraphics}
             env={env}
@@ -187,9 +202,18 @@ export function HqView() {
         <WeatherHud timeLabel={timeLabel} />
       </div>
 
-      {selectedAgentId && <TimelinePanel sessionId={selectedAgentId} onClose={() => setSelectedAgentId(null)} canSend={canManageAgents} />}
+      {centerOpen ? (
+        <CommandCenter initialAgentId={selectedAgentId} onClose={() => setCenterOpen(false)} canWrite={canManageAgents} />
+      ) : (
+        selectedAgentId && <TimelinePanel sessionId={selectedAgentId} onClose={() => setSelectedAgentId(null)} canSend={canManageAgents} />
+      )}
 
       <div className="absolute bottom-4 right-4 flex items-center gap-2">
+        {sessionUser && canUser(sessionUser, "provider:read") && (
+          <button onClick={() => setCenterOpen((v) => !v)} className="flex items-center gap-1.5 rounded-full border border-border bg-surface-raised/80 px-3 py-1.5 text-xs text-muted backdrop-blur hover:text-foreground">
+            Central de Agentes
+          </button>
+        )}
         {canManageAgents && <FeedsDialog />}
         {cameraMode !== "overview" && (
           <button
