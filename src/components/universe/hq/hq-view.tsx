@@ -26,6 +26,9 @@ import { CommandCenter } from "@/components/agents/command-center";
 import { useAgentSessions } from "@/hooks/use-agents";
 import { useSession } from "@/hooks/use-session";
 import { canUser } from "@/server/auth/rbac";
+import { motion } from "motion/react";
+import { MotionPanelSlot } from "@/components/ui/motion-panel";
+import { QUALITY_ORDER, QUALITY_PROFILES } from "./render/quality";
 import { ProjectManagerDrawer } from "@/components/projects/project-manager-drawer";
 
 /**
@@ -41,7 +44,7 @@ export function HqView() {
   const { data: observedSessions } = useAgentSessions(sessionUser ? canUser(sessionUser, "provider:read") : false);
   const canManageAgents = sessionUser ? canUser(sessionUser, "provider:write") : false;
   const router = useRouter();
-  const { selectedApplicationId, selectApplication, reducedGraphics, setReducedGraphics, demoMode, setDemoMode, setViewMode } = useUiStore();
+  const { selectedApplicationId, selectApplication, quality, setQuality, hydrateQuality, reducedGraphics, demoMode, setDemoMode, setViewMode } = useUiStore();
   const cameraMode = useCameraStore((s) => s.mode);
   const focusLabel = useCameraStore((s) => s.focusLabel);
   const resetCamera = useCameraStore((s) => s.reset);
@@ -66,6 +69,10 @@ export function HqView() {
   // ESC steps back one level at a time: closes the resource panel first (if
   // open), else returns the camera to the overview — never both at once
   // (briefing: "ESC novamente: Italoc -> HQ").
+  useEffect(() => {
+    hydrateQuality();
+  }, [hydrateQuality]);
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
@@ -174,6 +181,7 @@ export function HqView() {
               }
             }}
             reducedGraphics={reducedGraphics}
+            quality={quality}
             env={env}
           />
         </HqErrorBoundary>
@@ -204,11 +212,13 @@ export function HqView() {
         <WeatherHud timeLabel={timeLabel} />
       </div>
 
-      {centerOpen ? (
-        <CommandCenter initialAgentId={selectedAgentId} onClose={() => setCenterOpen(false)} canWrite={canManageAgents} />
-      ) : (
-        selectedAgentId && <TimelinePanel sessionId={selectedAgentId} onClose={() => setSelectedAgentId(null)} canSend={canManageAgents} />
-      )}
+      <MotionPanelSlot panelKey={centerOpen ? "center" : selectedAgentId ? `timeline:${selectedAgentId}` : null}>
+        {centerOpen ? (
+          <CommandCenter initialAgentId={selectedAgentId} onClose={() => setCenterOpen(false)} canWrite={canManageAgents} />
+        ) : (
+          selectedAgentId && <TimelinePanel sessionId={selectedAgentId} onClose={() => setSelectedAgentId(null)} canSend={canManageAgents} />
+        )}
+      </MotionPanelSlot>
 
       <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-end gap-2 pointer-events-none [&>*]:pointer-events-auto">
         {sessionUser && canUser(sessionUser, "provider:read") && (
@@ -227,12 +237,21 @@ export function HqView() {
             <span aria-hidden>⌂</span> Visão Geral
           </button>
         )}
-        <button
-          onClick={() => setReducedGraphics(!reducedGraphics)}
-          className="rounded-full border border-border bg-surface-raised/80 px-3 py-1.5 text-xs text-muted backdrop-blur hover:text-foreground"
-        >
-          {reducedGraphics ? "Reduced Graphics: On" : "Reduced Graphics: Off"}
-        </button>
+        <div role="radiogroup" aria-label="Qualidade gráfica" className="flex items-center rounded-full border border-border bg-surface-raised/80 p-0.5 text-xs backdrop-blur">
+          <span className="px-2 text-muted">Gráficos</span>
+          {QUALITY_ORDER.map((q) => (
+            <button
+              key={q}
+              role="radio"
+              aria-checked={quality === q}
+              onClick={() => setQuality(q)}
+              className={`relative rounded-full px-2.5 py-1 transition-colors ${quality === q ? "text-white" : "text-muted hover:text-foreground"}`}
+            >
+              {quality === q && <motion.span layoutId="quality-pill" className="absolute inset-0 -z-0 rounded-full bg-accent" transition={{ type: "spring", visualDuration: 0.25, bounce: 0.15 }} />}
+              <span className="relative">{QUALITY_PROFILES[q].label}</span>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -3,6 +3,8 @@
 import { Suspense, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { ContactShadows } from "@react-three/drei";
+import { QUALITY_PROFILES, type GraphicsQuality } from "./render/quality";
+import { StudioEnvironment } from "./render/studio-environment";
 import * as THREE from "three";
 import { computeOfficeLayout, OFFICE } from "./office/office-layout";
 import { OfficeShell, PARTITION_DOOR_WIDTH, partitionDoorZ } from "./office/office-shell";
@@ -47,6 +49,8 @@ interface HqSceneProps {
   /** Projetos e recursos já chegaram do servidor (ou é demo). Antes disso ninguém é desenhado. */
   dataReady: boolean;
   reducedGraphics: boolean;
+  /** Nível de qualidade (alto/médio/baixo). `reducedGraphics` é o mesmo que "low". */
+  quality?: GraphicsQuality;
   env: EnvironmentState;
 }
 
@@ -79,9 +83,13 @@ export function HqScene({
   selectedAgentId,
   onSelectAgent,
   dataReady,
-  reducedGraphics,
+  reducedGraphics: reducedGraphicsProp,
+  quality: qualityProp,
   env,
 }: HqSceneProps) {
+  const quality: GraphicsQuality = qualityProp ?? (reducedGraphicsProp ? "low" : "high");
+  const profile = QUALITY_PROFILES[quality];
+  const reducedGraphics = quality === "low";
   const { data: weatherData } = useWeather();
   const weatherCondition = weatherData && "ok" in weatherData && weatherData.ok ? weatherData.condition : null;
   const isRaining = weatherCondition === "CHUVA" || weatherCondition === "CHUVA_FORTE";
@@ -265,9 +273,9 @@ export function HqScene({
 
   return (
     <Canvas
-      shadows={!reducedGraphics}
-      dpr={reducedGraphics ? 1 : [1, 1.6]}
-      gl={{ antialias: !reducedGraphics }}
+      shadows={profile.shadows ? "soft" : false}
+      dpr={profile.dpr}
+      gl={{ antialias: profile.antialias, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: THREE.MathUtils.lerp(0.9, 1.05, env.daylightFactor), powerPreference: "high-performance" }}
       className="bg-background"
       onCreated={({ gl, scene }) => {
         // Só em builds de diagnóstico (NEXT_PUBLIC_DEBUG_SCENE=1): expõe o renderer para medir draw calls/memória.
@@ -278,6 +286,7 @@ export function HqScene({
       <color attach="background" args={[bgColor]} />
       <fog attach="fog" args={[bgColor, world.radius * 1.9, world.radius * 3.6]} />
 
+      {profile.environment && <StudioEnvironment daylight={env.daylightFactor} profile={profile} />}
       <SkyScene env={env} weatherCondition={weatherCondition} radius={world.radius} reducedGraphics={reducedGraphics} />
       <ExteriorScene center={world.center} buildingRadius={world.radius} nightFactor={nightFactor} reducedGraphics={reducedGraphics} />
       {!reducedGraphics && isRaining && <RainEffect center={world.center} radius={world.radius} heavy={weatherCondition === "CHUVA_FORTE"} />}
@@ -292,8 +301,10 @@ export function HqScene({
         ]}
         intensity={2.6 * Math.max(sunStrength, 0.08)}
         color={env.sun.altitude < 0.12 ? "#ffb46b" : "#ffffff"}
-        castShadow={!reducedGraphics}
-        shadow-mapSize={[2048, 2048]}
+        castShadow={profile.shadows}
+        shadow-mapSize={[profile.shadowMapSize, profile.shadowMapSize]}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.03}
         shadow-camera-left={-world.width / 1.6}
         shadow-camera-right={world.width / 1.6}
         shadow-camera-top={world.depth}
@@ -321,7 +332,7 @@ export function HqScene({
         <planeGeometry args={[world.radius * 2.6, world.radius * 2.8]} />
         <meshStandardMaterial color="#141c28" roughness={1} />
       </mesh>
-      {!reducedGraphics && <ContactShadows position={[centerX, 0.003, centerZ]} opacity={0.4} scale={world.radius * 2.4} blur={2.2} far={4} color="#000000" />}
+      {profile.contactShadows && <ContactShadows position={[centerX, 0.003, centerZ]} opacity={0.4} scale={world.radius * 2.4} blur={2.2} far={4} color="#000000" />}
 
       <Suspense fallback={null}>
         {withLife(

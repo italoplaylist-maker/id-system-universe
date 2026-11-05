@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MotionConfig } from "motion/react";
 
 export function QueryProvider({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -17,5 +18,10 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
       }),
   );
 
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={client}>
+      {/* Uma única configuração de movimento para o app: respeita prefers-reduced-motion (tira transform/layout, mantém opacidade). */}
+      <MotionConfig reducedMotion="user">{children}</MotionConfig>
+    </QueryClientProvider>
+  );
 }

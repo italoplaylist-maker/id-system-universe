@@ -6,6 +6,8 @@ import * as THREE from "three";
 import { PALETTE } from "../palette";
 import { OFFICE, type OfficeLayout } from "./office-layout";
 import { useCameraStore } from "@/store/camera-store";
+import { useUiStore } from "@/store/ui-store";
+import { QUALITY_PROFILES } from "../render/quality";
 
 const WALL_COLOR = "#d6d9e0";
 const TRIM = "#5b6372";
@@ -45,6 +47,64 @@ function makeFloorTexture(width: number, depth: number): THREE.CanvasTexture {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
   return texture;
+}
+
+/**
+ * Mapas PBR do piso de madeira, no mesmo desenho de tábuas do mapa de cor: rugosidade (cada tábua
+ * com acabamento um pouco diferente, veios mais lisos) e relevo (juntas fundas, veio sutil).
+ * Determinístico — o piso não muda de aparência a cada render.
+ */
+function makeFloorPbrMaps(width: number, depth: number): { roughness: THREE.CanvasTexture; bump: THREE.CanvasTexture } {
+  const plankW = 64;
+  const make = (paint: (ctx: CanvasRenderingContext2D) => void) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext("2d")!;
+    paint(ctx);
+    const t = new THREE.CanvasTexture(canvas);
+    t.wrapS = THREE.RepeatWrapping;
+    t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(width / 4, depth / 4);
+    t.anisotropy = 8;
+    return t;
+  };
+  const roughness = make((ctx) => {
+    for (let i = 0; i < 8; i += 1) {
+      const offset = (i * 173) % 512;
+      for (let seg = 0; seg < 2; seg += 1) {
+        const x0 = (offset + seg * 256) % 512;
+        const g = 150 + (((i * 3 + seg * 5) * 37) % 46); // 150..195
+        ctx.fillStyle = `rgb(${g},${g},${g})`;
+        ctx.fillRect(x0, i * plankW, 256, plankW);
+        if (x0 + 256 > 512) ctx.fillRect(x0 - 512, i * plankW, 256, plankW);
+      }
+      ctx.fillStyle = "rgb(235,235,235)"; // junta: mais áspera
+      ctx.fillRect(0, i * plankW, 512, 2);
+    }
+  });
+  const bump = make((ctx) => {
+    ctx.fillStyle = "rgb(150,150,150)";
+    ctx.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 8; i += 1) {
+      const y = i * plankW;
+      const offset = (i * 173) % 512;
+      ctx.strokeStyle = "rgba(0,0,0,0.10)";
+      for (let g = 0; g < 7; g += 1) {
+        ctx.beginPath();
+        ctx.moveTo(0, y + 6 + g * 8 + ((i * 7 + g * 3) % 4));
+        ctx.lineTo(512, y + 8 + g * 8 + ((i * 5 + g) % 4));
+        ctx.stroke();
+      }
+      ctx.fillStyle = "rgb(40,40,40)"; // junta longitudinal
+      ctx.fillRect(0, y, 512, 2);
+      for (let seg = 0; seg < 2; seg += 1) {
+        const x = (offset + seg * 256) % 512; // junta de topo
+        ctx.fillRect(x, y, 2, plankW);
+      }
+    }
+  });
+  return { roughness, bump };
 }
 
 /** Wall that stays 100% solid in Overview and fades out (without writing depth) only when the free camera ends up behind it. */
@@ -98,7 +158,7 @@ function GlassWall({ length, height, mullions, gap }: { length: number; height: 
     <group>
       <mesh position={[0, height / 2, 0]}>
         <planeGeometry args={[length, height]} />
-        <meshStandardMaterial color="#cfe6ff" transparent opacity={0.1} roughness={0.05} metalness={0.3} depthWrite={false} side={THREE.DoubleSide} />
+        <meshPhysicalMaterial color="#cfe6ff" transparent opacity={0.12} roughness={0.04} metalness={0.1} ior={1.5} reflectivity={0.6} clearcoat={1} clearcoatRoughness={0.05} envMapIntensity={1.4} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
       {Array.from({ length: mullions + 1 }).map((_, i) => {
         const x = -length / 2 + i * step;
@@ -171,6 +231,15 @@ export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", 
   const backZ = -depth / 2;
   const floorTexture = useMemo(() => makeFloorTexture(width, depth), [width, depth]);
   useEffect(() => () => floorTexture.dispose(), [floorTexture]);
+  const rich = QUALITY_PROFILES[useUiStore((s) => s.quality)].richMaterials;
+  const floorPbr = useMemo(() => (rich ? makeFloorPbrMaps(width, depth) : null), [rich, width, depth]);
+  useEffect(() => {
+    if (!floorPbr) return;
+    return () => {
+      floorPbr.roughness.dispose();
+      floorPbr.bump.dispose();
+    };
+  }, [floorPbr]);
 
   // With the NOC wall, windows only cover the rest of the west wall (from the end of the NOC panel to the front).
   const winStart = nocEnabled ? layout.noc.z1 + 0.15 : -depth / 2;
@@ -189,7 +258,15 @@ export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", 
       </mesh>
       <mesh position={[0, 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[width, depth]} />
-        <meshStandardMaterial map={floorTexture} roughness={0.38} metalness={0.05} />
+        <meshStandardMaterial
+          map={floorTexture}
+          roughness={floorPbr ? 1 : 0.38}
+          roughnessMap={floorPbr?.roughness ?? null}
+          bumpMap={floorPbr?.bump ?? null}
+          bumpScale={floorPbr ? 0.6 : 0}
+          metalness={0.04}
+          envMapIntensity={0.9}
+        />
       </mesh>
       <mesh position={[0, 0.02, depth / 2 + 0.05]}>
         <boxGeometry args={[width + 0.5, 0.05, 0.1]} />
