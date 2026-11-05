@@ -121,8 +121,8 @@ export function AgentsWing({ mainLayout, agentsLayout, loungeShellLayout, lounge
       {cameraMode !== "overview" &&
         [
           { id: "lounge-pool", label: "Sinuca", p: [f.pool.x, f.pool.z] as const, r: 3.8 },
-          { id: "lounge-bar", label: "Bar", p: [f.bar.x - 1.4, f.bar.z] as const, r: 4.8 },
-          { id: "lounge-sofas", label: "Sofás", p: [f.rug.x, f.rug.z] as const, r: 4.0 },
+          { id: "lounge-bar", label: "Bar", p: [f.bar.x - 3.2, f.bar.z] as const, r: 3.8 },
+          { id: "lounge-sofas", label: "Sofás", p: [f.rug.x, f.rug.z] as const, r: 5.4 },
         ].map((h) => (
           <Html key={h.id} position={[h.p[0], 2.5, h.p[1]]} center zIndexRange={[20, 0]}>
             <button type="button" onClick={() => focusProject(h.id, [h.p[0], 1.0, h.p[1]], h.r, h.label)} style={{ ...pill(false), opacity: focusId === h.id ? 0.5 : 0.95 }}>

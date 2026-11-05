@@ -6,14 +6,14 @@ import type { UniverseProject, UniverseProviderSummary } from "@/types/domain";
 export const OFFICE = {
   WALL_HEIGHT: 3.9,
   WALL_THICKNESS: 0.18,
-  SLOT_X: 3.0,
-  SLOT_Z: 3.0,
+  SLOT_X: 2.5,
+  SLOT_Z: 2.6,
   /** Free space between the back wall and the first desk row (the screen + walkway). */
-  BACK_ZONE: 3.3,
+  BACK_ZONE: 3.0,
   /** Free space between the last desk row and the open front edge (lounge + reception). */
-  FRONT_ZONE: 3.6,
-  SIDE_MARGIN: 1.7,
-  MIN_WIDTH: 15,
+  FRONT_ZONE: 2.3,
+  SIDE_MARGIN: 0.95,
+  MIN_WIDTH: 12.5,
 } as const;
 
 export interface DeskSlot {
@@ -55,7 +55,7 @@ export const SCREEN_CANVAS = { width: 2048, height: 410 } as const;
 
 /** Columns grow with the square root of the project count so the room stays roughly 3:2 instead of one endless row. */
 function columnsFor(count: number): number {
-  return Math.max(3, Math.min(8, Math.round(Math.sqrt(Math.max(count, 1) * 1.8))));
+  return Math.max(3, Math.min(7, Math.round(Math.sqrt(Math.max(count, 1) * 1.1))));
 }
 
 export function computeOfficeLayout(projects: Pick<UniverseProject, "id" | "name" | "accent">[], providers: Pick<UniverseProviderSummary, "id" | "name" | "color">[], options: { minWidth?: number; minDepth?: number } = {}): OfficeLayout {

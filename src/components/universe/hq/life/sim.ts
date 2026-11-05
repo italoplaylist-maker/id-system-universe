@@ -1,6 +1,7 @@
 import { angleDelta, dist, forward, makeRng, type Vec2 } from "./geometry";
 import type { ChatPair, SeatKind, SeatSpot, StandSpot } from "./lounge-layout";
 import type { DeskInfo, LifeWorld } from "./world";
+import { PoolGame, type PoolPlan } from "./pool-game";
 
 /**
  * Simulação VISUAL da vida dos agentes. Lê o estado real (precisa trabalhar? está digitando?)
@@ -62,6 +63,8 @@ export interface Actor {
   leaveDelay: number;
   idleFor: number;
   arrived: boolean;
+  /** Sinuca: ponto exato (mundo) de onde o atirador bate; só vale com intent "pool". */
+  poolGoal: { pos: Vec2; yaw: number } | null;
   reservation: string | null;
   /** Reserva anterior mantida até terminar de levantar (ninguém senta antes de eu sair). */
   holdKey: string | null;
@@ -105,12 +108,13 @@ function newVisual(): ActorVisual {
 
 interface PoolState {
   shooter: string | null;
-  stage: "wait" | "aim" | "stroke" | "follow";
+  /** move: o atirador anda até o ponto atrás da bola branca; aim/stroke/follow: mira, tacada e acompanhamento. */
+  stage: "wait" | "move" | "aim" | "stroke" | "follow";
   t: number;
   dur: number;
   lastShot: Map<string, number>;
-  shotToken: number;
-  shotBy: string | null;
+  plan: PoolPlan | null;
+  struck: boolean;
 }
 
 interface ChatState {
@@ -124,7 +128,13 @@ export class LifeSim {
   private world: LifeWorld | null = null;
   private rng: () => number;
   private reservations = new Map<string, string>();
-  private pool: PoolState = { shooter: null, stage: "wait", t: 0, dur: 1, lastShot: new Map(), shotToken: 0, shotBy: null };
+  private pool: PoolState = { shooter: null, stage: "wait", t: 0, dur: 1, lastShot: new Map(), plan: null, struck: false };
+  /** Estado da jogada atual (só leitura; usado em testes e depuração). */
+  get poolTurn(): { shooter: string | null; stage: PoolState["stage"]; plan: PoolPlan | null } {
+    return { shooter: this.pool.shooter, stage: this.pool.stage, plan: this.pool.plan };
+  }
+  /** Bolas da sinuca (dado puro): o desenho 3D só lê. */
+  readonly poolGame = new PoolGame();
   private chats = new Map<string, ChatState>();
   private visuals = new Map<string, ActorVisual>();
   time = 0;
@@ -145,9 +155,6 @@ export class LifeSim {
     return v;
   }
 
-  get poolShot(): { token: number; by: string | null } {
-    return { token: this.pool.shotToken, by: this.pool.shotBy };
-  }
 
   // ---------------------------------------------------------------------------
   // Mundo e entrada (estado real)
@@ -240,7 +247,7 @@ export class LifeSim {
     a.x = pos.x;
     a.z = pos.z;
     a.vis.sit = 0;
-    a.toYaw = intent.kind === "pool" ? intent.spot.yaw : intent.kind === "chat" ? intent.pair[intent.side].yaw : a.yaw;
+    a.toYaw = intent.kind === "pool" ? (a.poolGoal?.yaw ?? intent.spot.yaw) : intent.kind === "chat" ? intent.pair[intent.side].yaw : a.yaw;
     a.yaw = a.toYaw;
     a.dwell = this.dwellFor(a) * (0.3 + this.rng() * 0.7);
     a.waitT = 0;
@@ -272,6 +279,7 @@ export class LifeSim {
       leaveDelay: input.mustWork ? 0 : 3 + this.rng() * 40,
       idleFor: 0,
       arrived: true,
+      poolGoal: null,
       reservation: null,
       holdKey: null,
       seat: null,
@@ -330,7 +338,7 @@ export class LifeSim {
 
   private spotFor(a: Actor): Vec2 | null {
     if (a.intent.kind === "seat") return a.intent.seat.pos;
-    if (a.intent.kind === "pool") return a.intent.spot.pos;
+    if (a.intent.kind === "pool") return a.poolGoal?.pos ?? a.intent.spot.pos;
     if (a.intent.kind === "chat") return a.intent.pair[a.intent.side].pos;
     if (a.intent.kind === "wander") return a.intent.point;
     return null;
@@ -356,7 +364,9 @@ export class LifeSim {
     const stools = freeSeats("stool");
     if (stools.length) options.push({ kind: "stool", weight: 2.6 * penalty("stool"), make: () => ({ kind: "seat", seat: pick(stools) }) });
 
-    const poolFree = lounge.poolSpots.filter((s) => !this.isTaken(s.id));
+    const shooterGoal = this.pool.shooter ? this.actors.get(this.pool.shooter)?.poolGoal?.pos : undefined;
+    // não se junta à mesa num lugar colado em quem está para tacar
+    const poolFree = lounge.poolSpots.filter((s) => !this.isTaken(s.id) && !(shooterGoal && dist(s.pos, shooterGoal) < 0.9));
     if (poolFree.length) {
       const someonePlays = lounge.poolSpots.some((s) => this.isTaken(s.id));
       options.push({ kind: "pool", weight: (someonePlays ? 4 : 2.2) * penalty("pool"), make: () => ({ kind: "pool", spot: pick(poolFree) }) });
@@ -594,7 +604,7 @@ export class LifeSim {
       case "seat":
         return a.intent.seat.approach;
       case "pool":
-        return a.intent.spot.pos;
+        return a.poolGoal?.pos ?? a.intent.spot.pos;
       case "chat":
         return a.intent.pair[a.intent.side].pos;
       case "wander":
@@ -844,7 +854,7 @@ export class LifeSim {
       case "wander": {
         a.phase = "standing";
         a.phaseT = 0;
-        a.toYaw = a.intent.kind === "pool" ? a.intent.spot.yaw : a.intent.kind === "chat" ? a.intent.pair[a.intent.side].yaw : a.yaw;
+        a.toYaw = a.intent.kind === "pool" ? (a.poolGoal?.yaw ?? a.intent.spot.yaw) : a.intent.kind === "chat" ? a.intent.pair[a.intent.side].yaw : a.yaw;
         a.dwell = this.dwellFor(a);
         a.waitT = 0;
         return;
@@ -982,43 +992,104 @@ export class LifeSim {
     return out;
   }
 
+  /** Mesa de sinuca no mundo (o desenho não gira a mesa: espaço da mesa = mundo − centro). */
+  private poolCenter(): Vec2 | null {
+    const f = this.world?.lounge.furniture.pool;
+    return f ? { x: f.x, z: f.z } : null;
+  }
+
+  private releaseShooter() {
+    const p = this.pool;
+    const a = p.shooter ? this.actors.get(p.shooter) : undefined;
+    if (a && a.poolGoal) {
+      a.poolGoal = null;
+      // volta ao ponto fixo dele na mesa
+      if (a.intent.kind === "pool" && a.phase === "standing") this.beginWalk(a);
+    }
+    p.shooter = null;
+    p.plan = null;
+    p.struck = false;
+    p.stage = "wait";
+    p.t = 0;
+  }
+
   private stepPool(dt: number) {
     const p = this.pool;
+    this.poolGame.step(dt);
+    const center = this.poolCenter();
     const players = this.poolPlayers();
-    if (players.length === 0) {
+    const shooterActor = p.shooter ? this.actors.get(p.shooter) : undefined;
+    if (p.shooter && (!shooterActor || shooterActor.intent.kind !== "pool")) {
+      if (shooterActor) shooterActor.poolGoal = null;
       p.shooter = null;
+      p.plan = null;
+      p.struck = false;
+      p.stage = "wait";
+      p.t = 0;
+    }
+    if (!center || (players.length === 0 && !p.shooter)) {
       p.stage = "wait";
       p.t = 0;
       return;
     }
     p.t += dt;
-    if (p.shooter && !players.some((x) => x.id === p.shooter)) {
-      p.shooter = null;
-      p.stage = "wait";
-      p.t = 0;
-    }
     if (p.stage === "wait" && p.t >= 1.2) {
-      // Quem atirou há mais tempo joga agora.
-      players.sort((x, y) => (p.lastShot.get(x.id) ?? -1) - (p.lastShot.get(y.id) ?? -1));
-      p.shooter = players[0].id;
-      p.stage = "aim";
+      // Quem atirou há mais tempo joga agora; só começa se a mesa estiver parada.
+      if (!this.poolGame.settled) return;
+      const ready = players.filter((x) => !x.poolGoal);
+      ready.sort((x, y) => (p.lastShot.get(x.id) ?? -1) - (p.lastShot.get(y.id) ?? -1));
+      const shooter = ready[0];
+      if (!shooter) return;
+      // Ninguém pode ficar em cima de quem joga: corpos parados E lugares já reservados por outros (mesmo que ainda a caminho).
+      const others = players.filter((x) => x !== shooter).map((x) => ({ x: x.x - center.x, z: x.z - center.z }));
+      for (const spot of this.world!.lounge.poolSpots) {
+        const holder = this.reservations.get(spot.id);
+        if (holder && holder !== shooter.id && this.actors.has(holder)) others.push({ x: spot.pos.x - center.x, z: spot.pos.z - center.z });
+      }
+      const plan = this.poolGame.plan(others, this.rng);
+      if (!plan) {
+        p.t = 0;
+        return;
+      }
+      p.shooter = shooter.id;
+      p.plan = plan;
+      p.struck = false;
+      shooter.poolGoal = { pos: { x: center.x + plan.stand.x, z: center.z + plan.stand.z }, yaw: plan.yaw };
+      shooter.arrived = false;
+      this.beginWalk(shooter);
+      p.stage = "move";
       p.t = 0;
-      p.dur = 1.8 + this.rng() * 0.8;
+    } else if (p.stage === "move") {
+      const a = shooterActor;
+      const goal = a?.poolGoal;
+      if (a && goal && a.phase === "standing" && a.arrived && dist(a, goal.pos) < 0.2) {
+        a.toYaw = goal.yaw;
+        // só mira depois de ter virado o corpo para a bola
+        if (Math.abs(angleDelta(a.yaw, goal.yaw)) > 0.1) return;
+        p.stage = "aim";
+        p.t = 0;
+        p.dur = 1.8 + this.rng() * 0.8;
+      } else if (p.t > 14) {
+        this.releaseShooter(); // não chegou (caminho bloqueado): desiste desta jogada
+      }
     } else if (p.stage === "aim" && p.t >= p.dur) {
       p.stage = "stroke";
       p.t = 0;
       p.dur = 0.55;
-      p.shotToken += 1;
-      p.shotBy = p.shooter;
       if (p.shooter) p.lastShot.set(p.shooter, this.time);
-    } else if (p.stage === "stroke" && p.t >= p.dur) {
-      p.stage = "follow";
-      p.t = 0;
-      p.dur = 3 + this.rng() * 1.5;
-    } else if (p.stage === "follow" && p.t >= p.dur) {
-      p.stage = "wait";
-      p.t = 0;
-      p.shooter = null;
+    } else if (p.stage === "stroke") {
+      // A bola só sai quando o taco encosta (≈60% do movimento).
+      if (!p.struck && p.plan && p.t >= p.dur * 0.6) {
+        p.struck = true;
+        this.poolGame.strike(p.plan);
+      }
+      if (p.t >= p.dur) {
+        p.stage = "follow";
+        p.t = 0;
+        p.dur = 1.2;
+      }
+    } else if (p.stage === "follow" && p.t >= p.dur && this.poolGame.settled) {
+      this.releaseShooter();
     }
   }
 

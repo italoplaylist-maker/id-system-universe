@@ -7,7 +7,6 @@ import { PlantFallback } from "../assets/procedural-furniture";
 import { PALETTE } from "../palette";
 import { OFFICE, type OfficeLayout } from "./office-layout";
 import { rectObstacle, type Obstacle } from "../life/geometry";
-import { PotPlant } from "./pod-furniture";
 
 /** A tall indoor tree: trunk + layered leaf clusters in a stone planter. */
 export function TallPlant({ scale = 1 }: { scale?: number }) {
@@ -39,55 +38,6 @@ export function TallPlant({ scale = 1 }: { scale?: number }) {
           <meshStandardMaterial color={i % 2 ? "#3a8a57" : "#2f7a4c"} roughness={0.75} flatShading />
         </mesh>
       ))}
-    </group>
-  );
-}
-
-function Sofa({ length = 2.4 }: { length?: number }) {
-  return (
-    <group>
-      <RoundedBox args={[length, 0.34, 0.9]} radius={0.08} smoothness={4} position={[0, 0.3, 0]} castShadow>
-        <meshStandardMaterial color="#3c4a63" roughness={0.9} />
-      </RoundedBox>
-      <RoundedBox args={[length, 0.5, 0.2]} radius={0.08} smoothness={4} position={[0, 0.65, -0.36]} castShadow>
-        <meshStandardMaterial color="#3c4a63" roughness={0.9} />
-      </RoundedBox>
-      {[-1, 1].map((s) => (
-        <RoundedBox key={s} args={[0.2, 0.48, 0.9]} radius={0.08} smoothness={4} position={[s * (length / 2 - 0.1), 0.5, 0]} castShadow>
-          <meshStandardMaterial color="#35425a" roughness={0.9} />
-        </RoundedBox>
-      ))}
-      {[-0.5, 0.5].map((x) => (
-        <RoundedBox key={x} args={[length / 2 - 0.3, 0.14, 0.7]} radius={0.06} smoothness={3} position={[x * (length / 2 - 0.1), 0.52, 0.04]}>
-          <meshStandardMaterial color="#47587a" roughness={0.95} />
-        </RoundedBox>
-      ))}
-      {[-1, 1].map((sx) =>
-        [-1, 1].map((sz) => (
-          <mesh key={`${sx}${sz}`} position={[sx * (length / 2 - 0.15), 0.06, sz * 0.32]}>
-            <cylinderGeometry args={[0.025, 0.02, 0.12, 8]} />
-            <meshStandardMaterial color="#1b1e25" metalness={0.7} roughness={0.4} />
-          </mesh>
-        )),
-      )}
-    </group>
-  );
-}
-
-function CoffeeTable() {
-  return (
-    <group>
-      <mesh position={[0, 0.36, 0]} castShadow>
-        <cylinderGeometry args={[0.55, 0.55, 0.04, 32]} />
-        <meshStandardMaterial color="#d6c3a5" roughness={0.5} />
-      </mesh>
-      <mesh position={[0, 0.18, 0]}>
-        <cylinderGeometry args={[0.04, 0.3, 0.36, 12]} />
-        <meshStandardMaterial color="#1b1e25" metalness={0.7} roughness={0.4} />
-      </mesh>
-      <group position={[0.15, 0.38, 0.05]}>
-        <PotPlant scale={0.8} />
-      </group>
     </group>
   );
 }
@@ -159,21 +109,6 @@ export function OfficeProps({ layout }: { layout: OfficeLayout }) {
       </group>
       <WorldAsset asset={ASSET_KEYS.PLANT} fallback={<TallPlant scale={1.05} />} position={[-width / 2 + 1.1, 0, frontZ - 1.2]} />
 
-      {/* lounge, front-right: rug, sofa, coffee table, plants */}
-      <group position={[width / 2 - 4.4, 0, frontZ - 1.9]}>
-        <RoundedBox args={[4.4, 0.012, 2.8]} radius={0.04} smoothness={2} position={[0, 0.006, 0]} receiveShadow>
-          <meshStandardMaterial color="#2c3446" roughness={1} />
-        </RoundedBox>
-        <group position={[0, 0, -0.75]}>
-          <WorldAsset asset={ASSET_KEYS.SOFA} fallback={<Sofa length={2.5} />} />
-        </group>
-        <group position={[0, 0, 0.55]}>
-          <CoffeeTable />
-        </group>
-        <group position={[-1.9, 0, 0.7]} rotation={[0, 1.2, 0]}>
-          <Sofa length={1.1} />
-        </group>
-      </group>
       <group position={[width / 2 - 0.9, 0, frontZ - 1.0]}>
         <TallPlant scale={1.2} />
       </group>
@@ -206,14 +141,9 @@ export function officePropObstacles(layout: OfficeLayout): Obstacle[] {
   const backZ = -depth / 2;
   const rightOfScreenX = (width / 2 + screen.width / 2) / 2;
   const circle = (cx: number, cz: number, r: number, label: string): Obstacle => ({ kind: "circle", cx, cz, r, label });
-  const loungeX = width / 2 - 4.4;
-  const loungeZ = frontZ - 1.9;
   return [
     rectObstacle(-width / 2 + 3.2, frontZ - 1.5, 1.55, 0.4, "reception"),
     circle(-width / 2 + 1.1, frontZ - 1.2, 0.35, "plant"),
-    rectObstacle(loungeX, loungeZ - 0.75, 1.3, 0.5, "sofa"),
-    circle(loungeX, loungeZ + 0.55, 0.6, "coffee-table"),
-    circle(loungeX - 1.9, loungeZ + 0.7, 0.7, "small-sofa"),
     circle(width / 2 - 0.9, frontZ - 1.0, 0.4, "plant"),
     rectObstacle(rightOfScreenX + 0.4, backZ + 0.35, Math.min(2.4, width / 2 - screen.width / 2 - 1.6) / 2, 0.2, "bookshelf"),
     circle(width / 2 - 0.8, backZ + 0.8, 0.4, "plant"),

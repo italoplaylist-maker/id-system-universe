@@ -29,9 +29,10 @@ export interface ChatPair {
 
 export interface LoungeFurniture {
   rug: { x: number; z: number; w: number; d: number };
-  sofa: { x: number; z: number; yaw: number; length: number };
+  sofas: Array<{ x: number; z: number; yaw: number; length: number }>;
   armchairs: Array<{ x: number; z: number; yaw: number }>;
-  coffeeTable: { x: number; z: number };
+  coffeeTables: Vec2[];
+  floorLamps: Vec2[];
   pool: { x: number; z: number; length: number; width: number };
   bar: { x: number; z: number; length: number; depth: number };
   backBar: { x: number; z: number; length: number };
@@ -56,8 +57,8 @@ export interface LoungeLayout {
   door: Vec2;
 }
 
-export const LOUNGE_WIDTH = 13;
-export const LOUNGE_MIN_DEPTH = 13;
+export const LOUNGE_WIDTH = 16;
+export const LOUNGE_MIN_DEPTH = 14.4;
 
 /**
  * Sala de convivência: mesa de sinuca ao fundo, bar encostado na parede leste (os clientes
@@ -81,7 +82,7 @@ export function computeLoungeLayout(x0: number, depth: number, doorZ: number, wi
 
   // ---- sinuca (fundo, oeste) -------------------------------------------------
   const poolC = W(4.3, 4.6);
-  block(4.3, 4.6, 1.5, 0.9, "pool");
+  block(4.3, 4.6, 1.4, 0.82, "pool");
   const poolSpots: StandSpot[] = [
     { id: "pool-s1", pos: W(3.55, 5.95), yaw: Math.PI },
     { id: "pool-s2", pos: W(5.05, 5.95), yaw: Math.PI },
@@ -89,22 +90,26 @@ export function computeLoungeLayout(x0: number, depth: number, doorZ: number, wi
     { id: "pool-n2", pos: W(5.05, 3.25), yaw: 0 },
   ];
 
-  // ---- sofás e poltronas (frente) --------------------------------------------
-  const sofaV = 8.75 + s;
-  const sofaSeats: SeatSpot[] = [4.95, 5.8, 6.65].map((u, i) => ({
-    id: `sofa-${i}`,
-    kind: "sofa",
-    pos: W(u, sofaV + 0.1),
-    yaw: 0,
-    approach: W(u, sofaV + 1.05),
-    hipSeat: 0.5,
-    backLean: -0.16,
-  }));
-  block(5.8, sofaV, 1.5, 0.52, "sofa");
-  const armV = 10.0 + s;
+  // ---- sofás e poltronas (frente): dois grupos de sofá + mesa de centro, três poltronas ------------
+  const sofaV = 9.45 + s;
+  const sofaCenters = [4.75, 9.85];
+  const sofaSeats: SeatSpot[] = sofaCenters.flatMap((cu, g) =>
+    [-0.85, 0, 0.85].map((du, i) => ({
+      id: `sofa-${g * 3 + i}`,
+      kind: "sofa" as const,
+      pos: W(cu + du, sofaV + 0.1),
+      yaw: 0,
+      approach: W(cu + du, sofaV + 1.05),
+      hipSeat: 0.5,
+      backLean: -0.16,
+    })),
+  );
+  sofaCenters.forEach((cu) => block(cu, sofaV, 1.5, 0.52, "sofa"));
+  const armV = 10.7 + s;
   const armchairs = [
-    { x: 3.4, yaw: Math.PI / 2, appU: 4.35 },
-    { x: 8.2, yaw: -Math.PI / 2, appU: 7.25 },
+    { x: 2.35, yaw: Math.PI / 2, appU: 3.3 },
+    { x: 7.3, yaw: Math.PI / 2, appU: 8.25 },
+    { x: 11.9, yaw: -Math.PI / 2, appU: 10.95 },
   ];
   const armSeats: SeatSpot[] = armchairs.map((a, i) => ({
     id: `armchair-${i}`,
@@ -116,25 +121,27 @@ export function computeLoungeLayout(x0: number, depth: number, doorZ: number, wi
     backLean: -0.2,
   }));
   armchairs.forEach((a) => block(a.x, armV, 0.48, 0.48, "armchair"));
-  const tableV = 10.75 + s;
-  block(5.8, tableV, 0.68, 0.42, "coffee-table");
+  const tableV = 11.45 + s;
+  sofaCenters.forEach((cu) => block(cu, tableV, 0.68, 0.42, "coffee-table"));
+  const lampP = W(7.3, sofaV - 0.35);
+  obstacles.push({ kind: "circle", cx: lampP.x, cz: lampP.z, r: 0.25, label: "floor-lamp" });
 
-  // ---- bar (leste, de frente para a câmera) ----------------------------------
-  const barU = 11.6;
-  const barV0 = 6.8 + s;
-  const barV1 = 12.2 + s;
+  // ---- bar (leste, de frente para a câmera): 7 banquetas ----------------------------------
+  const barU = 14.6;
+  const barV0 = 6.7;
+  const barV1 = 13.5 + s;
   const barLen = barV1 - barV0;
   block(barU, (barV0 + barV1) / 2, 0.38, barLen / 2, "bar-counter");
   // atrás do balcão: área do barman + prateleira (ninguém entra)
-  block(12.3, (barV0 + barV1) / 2, 0.7, barLen / 2 + 0.1, "bar-back");
-  const stoolVs = [7.45, 8.55, 9.65, 10.75, 11.85].map((v) => v + s);
-  const stools: Vec2[] = stoolVs.map((v) => W(10.72, v));
+  block(barU + 0.7, (barV0 + barV1) / 2, 0.7, barLen / 2 + 0.1, "bar-back");
+  const stoolVs = Array.from({ length: 7 }, (_, i) => 7.5 + i * 0.93 + (i / 6) * s);
+  const stools: Vec2[] = stoolVs.map((v) => W(barU - 0.88, v));
   const stoolSeats: SeatSpot[] = stoolVs.map((v, i) => ({
     id: `stool-${i}`,
     kind: "stool",
-    pos: W(10.72, v),
+    pos: W(barU - 0.88, v),
     yaw: Math.PI / 2,
-    approach: W(9.75, v),
+    approach: W(barU - 1.85, v),
     hipSeat: 0.76,
     backLean: 0.04,
   }));
@@ -150,13 +157,14 @@ export function computeLoungeLayout(x0: number, depth: number, doorZ: number, wi
     pair("chat-1", W(8.1, 4.4), W(8.1, 5.4)),
     pair("chat-2", W(1.7, 7.7 + s * 0.5), W(2.7, 7.7 + s * 0.5)),
     pair("chat-3", W(8.9, 2.2), W(9.9, 2.2)),
+    pair("chat-4", W(12.6, 3.2), W(12.6, 4.2)),
   ];
 
   // ---- plantas e decoração fixa ------------------------------------------------
-  const plants: Vec2[] = [W(0.65, 0.8), W(12.35, 0.8), W(0.65, depth - 0.7), W(7.9, 0.75)];
+  const plants: Vec2[] = [W(0.65, 0.8), W(width - 0.65, 0.8), W(0.65, depth - 0.7), W(7.9, 0.75), W(13.6, 0.8)];
   plants.forEach((p) => obstacles.push({ kind: "circle", cx: p.x, cz: p.z, r: 0.34, label: "plant" }));
 
-  const wander = [W(1.5, 2.0), W(6.6, 2.0), W(1.4, 5.6), W(8.6, 7.0 + s * 0.4), W(7.9, depth - 0.9), W(2.8, depth - 0.9)];
+  const wander = [W(1.5, 2.0), W(6.6, 2.0), W(1.4, 5.6), W(8.6, 7.4 + s * 0.4), W(7.9, depth - 0.9), W(2.8, depth - 0.9), W(11.0, 2.2), W(12.4, 6.0)];
 
   return {
     x0,
@@ -170,19 +178,21 @@ export function computeLoungeLayout(x0: number, depth: number, doorZ: number, wi
     wander,
     obstacles,
     furniture: {
-      rug: { ...W(5.8, 10.1 + s), w: 5.6, d: 3.4 },
-      sofa: { ...W(5.8, sofaV), yaw: 0, length: 2.9 },
+      rug: { ...W(7.4, 10.5 + s), w: 11.2, d: 3.5 },
+      sofas: sofaCenters.map((cu) => ({ ...W(cu, sofaV), yaw: 0, length: 2.9 })),
       armchairs: armchairs.map((a) => ({ ...W(a.x, armV), yaw: a.yaw })),
-      coffeeTable: W(5.8, tableV),
+      coffeeTables: sofaCenters.map((cu) => W(cu, tableV)),
+      floorLamps: [lampP],
       pool: { x: poolC.x, z: poolC.z, length: 2.74, width: 1.52 },
       bar: { ...W(barU, (barV0 + barV1) / 2), length: barLen, depth: 0.76 },
-      backBar: { ...W(12.55, (barV0 + barV1) / 2), length: barLen },
+      backBar: { ...W(barU + 0.95, (barV0 + barV1) / 2), length: barLen },
       stools,
       plants,
       art: [
         { x: x0 + 3.0, z: minZ + 0.12, w: 1.6, h: 1.0, y: 2.1, wall: "back" },
         { x: x0 + 5.6, z: minZ + 0.12, w: 1.2, h: 1.2, y: 2.05, wall: "back" },
         { x: x0 + 8.4, z: minZ + 0.12, w: 1.8, h: 1.0, y: 2.1, wall: "back" },
+        { x: x0 + 10.6, z: minZ + 0.12, w: 1.3, h: 1.1, y: 2.05, wall: "back" },
       ],
     },
     door: { x: x0, z: doorZ },

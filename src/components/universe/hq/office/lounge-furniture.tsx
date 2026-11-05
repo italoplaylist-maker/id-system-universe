@@ -8,6 +8,7 @@ import { PALETTE } from "../palette";
 import { TallPlant } from "./office-props";
 import type { LoungeLayout } from "../life/lounge-layout";
 import type { LifeSim } from "../life/sim";
+import { POCKETS, POOL, PoolGame } from "../life/pool-game";
 
 const WALNUT = "#6b4a32";
 const WALNUT_DARK = "#4a3224";
@@ -45,55 +46,19 @@ function InstancedBoxes({ size, items }: { size: [number, number, number]; items
 // Mesa de sinuca
 // ---------------------------------------------------------------------------
 
-const BALL_R = 0.034;
+const BALL_R = POOL.BALL_R;
 const TABLE_TOP = 0.82;
-const PLAY_L = 2.22;
-const PLAY_W = 1.08;
+const PLAY_L = POOL.PLAY_L;
+const PLAY_W = POOL.PLAY_W;
 /** Cores das bolas 1–15 (cheias e listradas aproximadas por cor sólida) + branca. */
 const BALL_COLORS = ["#f5f5f0", "#f2c230", "#2f5fd0", "#d83a2e", "#5a2a86", "#ee7a22", "#1f7a3d", "#8c2a2a", "#1a1a1a", "#f2c230", "#2f5fd0", "#d83a2e", "#5a2a86", "#ee7a22", "#1f7a3d", "#8c2a2a"];
-const POCKETS: Array<[number, number]> = [
-  [-PLAY_L / 2, -PLAY_W / 2], [0, -PLAY_W / 2 - 0.02], [PLAY_L / 2, -PLAY_W / 2],
-  [-PLAY_L / 2, PLAY_W / 2], [0, PLAY_W / 2 + 0.02], [PLAY_L / 2, PLAY_W / 2],
-];
 
-function rackPositions(): Array<[number, number]> {
-  // triângulo no lado direito: 5 fileiras
-  const out: Array<[number, number]> = [];
-  const x0 = PLAY_L * 0.22;
-  const d = BALL_R * 2.04;
-  for (let row = 0; row < 5; row += 1) {
-    for (let k = 0; k <= row; k += 1) out.push([x0 + row * d * 0.866, (k - row / 2) * d]);
-  }
-  return out;
-}
-
-interface BallState {
-  pos: Float32Array; // x,z por bola (espaço da mesa)
-  alive: Uint8Array;
-  anim: null | { kind: "cue" | "object"; ball: number; from: [number, number]; to: [number, number]; t: number; dur: number; sink?: boolean; next?: () => void };
-  queue: Array<() => void>;
-  dirty: boolean;
-  lastToken: number;
-}
-
-function newBalls(): BallState {
-  const pos = new Float32Array(32);
-  const alive = new Uint8Array(16).fill(1);
-  const rack = rackPositions();
-  pos[0] = -PLAY_L * 0.25;
-  pos[1] = 0;
-  // bolas 1..15 na ordem de rack (a 8 no meio ≈ posição 4)
-  rack.forEach((p, i) => {
-    pos[(i + 1) * 2] = p[0];
-    pos[(i + 1) * 2 + 1] = p[1];
-  });
-  return { pos, alive, anim: null, queue: [], dirty: true, lastToken: 0 };
-}
-
-/** Bolas num único InstancedMesh: uma tacada anima a branca até uma bola, que cai numa caçapa. */
+/** Bolas num único InstancedMesh: as posições vêm da simulação (PoolGame) — o desenho só reescreve quando algo mudou. */
 function PoolBalls({ life }: { life?: LifeSim }) {
   const mesh = useRef<THREE.InstancedMesh>(null);
-  const state = useRef<BallState>(newBalls());
+  const fallback = useMemo(() => new PoolGame(), []);
+  const game = life?.poolGame ?? fallback;
+  const seen = useRef(-1);
   const tmp = useMemo(() => new THREE.Object3D(), []);
   const color = useMemo(() => new THREE.Color(), []);
 
@@ -102,54 +67,20 @@ function PoolBalls({ life }: { life?: LifeSim }) {
     if (!m) return;
     BALL_COLORS.forEach((c, i) => m.setColorAt(i, color.set(c)));
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
-    state.current.dirty = true;
+    seen.current = -1;
   }, [color]);
 
-  useFrame((_, delta) => {
+  useFrame(() => {
     const m = mesh.current;
-    const st = state.current;
-    if (!m) return;
-    const dt = Math.min(delta, 0.05);
-
-    // nova tacada vinda da simulação
-    if (life) {
-      const shot = life.poolShot;
-      if (shot.token !== st.lastToken) {
-        st.lastToken = shot.token;
-        if (!st.anim) startShot(st);
-      }
+    if (!m || seen.current === game.version) return;
+    seen.current = game.version;
+    for (let i = 0; i < 16; i += 1) {
+      tmp.position.set(game.pos[i * 2], BALL_R, game.pos[i * 2 + 1]);
+      tmp.scale.setScalar(game.alive[i] ? 1 : 0);
+      tmp.updateMatrix();
+      m.setMatrixAt(i, tmp.matrix);
     }
-    if (st.anim) {
-      const a = st.anim;
-      a.t += dt;
-      const k = Math.min(1, a.t / a.dur);
-      const e = 1 - (1 - k) * (1 - k);
-      st.pos[a.ball * 2] = a.from[0] + (a.to[0] - a.from[0]) * e;
-      st.pos[a.ball * 2 + 1] = a.from[1] + (a.to[1] - a.from[1]) * e;
-      st.dirty = true;
-      if (k >= 1) {
-        if (a.sink) st.alive[a.ball] = 0;
-        st.anim = null;
-        const next = st.queue.shift();
-        if (next) next();
-        // pouca bola na mesa: nova rodada
-        else if (st.alive.reduce((n, v, i) => n + (i > 0 ? v : 0), 0) <= 3) {
-          const fresh = newBalls();
-          st.pos.set(fresh.pos);
-          st.alive.set(fresh.alive);
-        }
-      }
-    }
-    if (st.dirty) {
-      st.dirty = false;
-      for (let i = 0; i < 16; i += 1) {
-        tmp.position.set(st.pos[i * 2], BALL_R, st.pos[i * 2 + 1]);
-        tmp.scale.setScalar(st.alive[i] ? 1 : 0);
-        tmp.updateMatrix();
-        m.setMatrixAt(i, tmp.matrix);
-      }
-      m.instanceMatrix.needsUpdate = true;
-    }
+    m.instanceMatrix.needsUpdate = true;
   });
 
   return (
@@ -158,35 +89,6 @@ function PoolBalls({ life }: { life?: LifeSim }) {
       <meshStandardMaterial roughness={0.18} metalness={0.05} />
     </instancedMesh>
   );
-}
-
-function startShot(st: BallState) {
-  const alive = [...st.alive].map((v, i) => (i > 0 && v ? i : -1)).filter((i) => i > 0);
-  if (alive.length === 0 || !st.alive[0]) return;
-  const target = alive[Math.floor(Math.random() * alive.length)];
-  const cue: [number, number] = [st.pos[0], st.pos[1]];
-  const obj: [number, number] = [st.pos[target * 2], st.pos[target * 2 + 1]];
-  const dx = obj[0] - cue[0];
-  const dz = obj[1] - cue[1];
-  const len = Math.hypot(dx, dz) || 1;
-  const stop: [number, number] = [obj[0] - (dx / len) * BALL_R * 2.1, obj[1] - (dz / len) * BALL_R * 2.1];
-  // caçapa mais próxima da bola alvo
-  let pocket = POCKETS[0];
-  let best = Infinity;
-  for (const p of POCKETS) {
-    const d = Math.hypot(p[0] - obj[0], p[1] - obj[1]);
-    if (d < best) {
-      best = d;
-      pocket = p;
-    }
-  }
-  st.anim = { kind: "cue", ball: 0, from: cue, to: stop, t: 0, dur: 0.7 };
-  st.queue.push(() => {
-    st.anim = { kind: "object", ball: target, from: obj, to: [pocket[0] * 0.98, pocket[1] * 0.98], t: 0, dur: 0.8 + best * 0.5, sink: true };
-    // a branca desliza um pouco depois da batida
-    st.pos[0] = stop[0];
-    st.pos[1] = stop[1];
-  });
 }
 
 function PoolTable({ x, z, life }: { x: number; z: number; life?: LifeSim }) {
@@ -348,24 +250,37 @@ function Bottles({ x, z, length }: { x: number; z: number; length: number }) {
   );
 }
 
-function Bar({ layout }: { layout: LoungeLayout }) {
+function Bar({ layout, life }: { layout: LoungeLayout; life?: LifeSim }) {
   const { bar, backBar, stools } = layout.furniture;
   const glassesRef = useRef<THREE.InstancedMesh>(null);
   const counterSlats = useMemo(
     () => Array.from({ length: Math.floor(bar.length / 0.14) }).map((_, i) => ({ p: [-bar.depth / 2 + 0.085, 0.5, -bar.length / 2 + 0.1 + i * 0.14] as [number, number, number], c: i % 4 === 0 ? "#7d5a3d" : WALNUT })),
     [bar.length, bar.depth],
   );
-  useEffect(() => {
+  const glassObj = useMemo(() => new THREE.Object3D(), []);
+  const lastMask = useRef(-1);
+  // Um copo no balcão diante de cada banqueta OCUPADA; some da mesa enquanto está na mão de quem bebe.
+  useFrame(() => {
     const g = glassesRef.current;
     if (!g) return;
-    const o = new THREE.Object3D();
-    for (let i = 0; i < 9; i += 1) {
-      o.position.set(((i * 37) % 7) * 0.02 - 0.06, 1.07 + 0.05, -bar.length / 2 + 0.5 + i * (bar.length - 1) / 9);
-      o.updateMatrix();
-      g.setMatrixAt(i, o.matrix);
+    let mask = 0;
+    if (life) {
+      for (const a of life.actors.values()) {
+        if (a.phase !== "seated" || a.seat?.kind !== "stool") continue;
+        const idx = Number(a.seat.id.split("-")[1]);
+        if (Number.isInteger(idx) && a.vis.drink < 0.04 && a.vis.sit > 0.95) mask |= 1 << idx;
+      }
     }
+    if (mask === lastMask.current) return;
+    lastMask.current = mask;
+    stools.forEach((p, i) => {
+      glassObj.position.set(-0.2, 1.1, p.z - bar.z);
+      glassObj.scale.setScalar(mask & (1 << i) ? 1 : 0);
+      glassObj.updateMatrix();
+      g.setMatrixAt(i, glassObj.matrix);
+    });
     g.instanceMatrix.needsUpdate = true;
-  }, [bar.length]);
+  });
   return (
     <group>
       {/* balcão: corpo ripado + tampo de pedra + LED sob a borda */}
@@ -386,7 +301,7 @@ function Bar({ layout }: { layout: LoungeLayout }) {
           <cylinderGeometry args={[0.022, 0.022, bar.length - 0.1, 10]} />
           <meshStandardMaterial color={BRASS} metalness={0.9} roughness={0.25} />
         </mesh>
-        <instancedMesh ref={glassesRef} args={[undefined, undefined, 9]}>
+        <instancedMesh ref={glassesRef} args={[undefined, undefined, Math.max(1, stools.length)]}>
           <cylinderGeometry args={[0.034, 0.028, 0.1, 12]} />
           <meshStandardMaterial color="#d8ecff" transparent opacity={0.5} roughness={0.08} />
         </instancedMesh>
@@ -651,15 +566,21 @@ export function LoungeRoom({ layout, life }: { layout: LoungeLayout; life?: Life
         <boxGeometry args={[f.rug.w - 0.4, 0.004, f.rug.d - 0.4]} />
         <meshStandardMaterial color="#3a4660" roughness={1} />
       </mesh>
-      <Sofa x={f.sofa.x} z={f.sofa.z} yaw={f.sofa.yaw} length={f.sofa.length} color="#35445f" />
+      {f.sofas.map((sf, i) => (
+        <Sofa key={i} x={sf.x} z={sf.z} yaw={sf.yaw} length={sf.length} color={i % 2 ? "#3f4a63" : "#35445f"} />
+      ))}
       {f.armchairs.map((a, i) => (
         <Sofa key={i} x={a.x} z={a.z} yaw={a.yaw} length={1.0} color="#5a3e33" />
       ))}
-      <CoffeeTable x={f.coffeeTable.x} z={f.coffeeTable.z} />
-      <FloorLamp x={f.rug.x + f.rug.w / 2 - 0.2} z={f.sofa.z - 0.5} />
+      {f.coffeeTables.map((t, i) => (
+        <CoffeeTable key={i} x={t.x} z={t.z} />
+      ))}
+      {f.floorLamps.map((l, i) => (
+        <FloorLamp key={i} x={l.x} z={l.z} />
+      ))}
 
       <PoolTable x={f.pool.x} z={f.pool.z} life={life} />
-      <Bar layout={layout} />
+      <Bar layout={layout} life={life} />
 
       {f.plants.map((p, i) => (
         <group key={i} position={[p.x, 0, p.z]}>
@@ -668,7 +589,8 @@ export function LoungeRoom({ layout, life }: { layout: LoungeLayout; life?: Life
       ))}
 
       {/* iluminação: poucas luzes, bem posicionadas */}
-      <pointLight position={[f.rug.x, 2.7, f.rug.z - 0.5]} intensity={1.5} color="#ffd9a8" distance={7.5} decay={1.6} />
+      <pointLight position={[f.sofas[0].x, 2.7, f.rug.z - 0.5]} intensity={1.5} color="#ffd9a8" distance={7.5} decay={1.6} />
+      <pointLight position={[f.sofas[f.sofas.length - 1].x, 2.7, f.rug.z - 0.5]} intensity={1.5} color="#ffd9a8" distance={7.5} decay={1.6} />
       <pointLight position={[f.bar.x - 0.8, 2.8, f.bar.z]} intensity={1.6} color="#ffc98a" distance={7.5} decay={1.6} />
       <pointLight position={[f.pool.x, 2.6, f.pool.z]} intensity={2.4} color="#fff0d6" distance={5.5} decay={1.5} />
     </group>

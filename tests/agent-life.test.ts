@@ -1,42 +1,32 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { computeLoungeLayout } from "@/components/universe/hq/life/lounge-layout";
+import { computeLoungeLayout, LOUNGE_MIN_DEPTH, LOUNGE_WIDTH } from "@/components/universe/hq/life/lounge-layout";
+import { computeOfficeLayout } from "@/components/universe/hq/office/office-layout";
 import { buildLifeWorld } from "@/components/universe/hq/life/world";
 import { LifeSim, type Actor, type SyncInput } from "@/components/universe/hq/life/sim";
 import { dist } from "@/components/universe/hq/life/geometry";
 import { agentIsTyping, agentNeedsDesk } from "@/components/universe/hq/life/policy";
 
-const DEPTH = 13;
-/** Mesma regra do escritório: a sala cresce com as linhas de mesas (mínimo 13 m para caber o lounge). */
-const depthFor = (count: number) => Math.max(DEPTH, 3.3 + Math.ceil(count / 3) * 3 + 3.6);
-const AGENTS_MIN = 12;
-const AGENTS_MAX = 24.4;
+const proj = (n: number, prefix: string) => Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}`, name: `${prefix}${String(i).padStart(3, "0")}`, accent: "#ffffff" }));
 
+/** Mesma montagem do hq-scene: operações | agentes | lounge, todas com a mesma profundidade, usando o layout real das salas. */
 function makeWorld(count: number, mainCount = 0) {
-  const mainCols = Math.max(3, Math.round(Math.sqrt(Math.max(mainCount, 1) * 1.8)));
-  const depth = Math.max(depthFor(count), mainCount > 0 ? 3.3 + Math.ceil(mainCount / mainCols) * 3 + 3.6 : 0);
-  const mainW = Math.max(15, mainCols * 3 + 3.4);
-  // Com sala de operações: ela ocupa [-W/2, W/2] e a dos agentes vem logo depois; sem ela, mantém as coordenadas antigas.
-  const agentsMin = mainCount > 0 ? mainW / 2 : AGENTS_MIN;
-  const agentsMax = agentsMin + (AGENTS_MAX - AGENTS_MIN);
+  const mainNatural = computeOfficeLayout(proj(mainCount, "p"), [], {}).depth;
+  const agentsNatural = computeOfficeLayout(proj(count, "a"), [], { minWidth: 9 }).depth;
+  const depth = Math.max(mainNatural, agentsNatural, LOUNGE_MIN_DEPTH);
+  const main = computeOfficeLayout(proj(mainCount, "p"), [], { minDepth: depth });
+  const agents = computeOfficeLayout(proj(count, "a"), [], { minWidth: 9, minDepth: depth });
+  const agentsOffsetX = main.width / 2 + agents.width / 2;
+  const loungeX0 = main.width / 2 + agents.width;
   const doorZ = depth / 2 - 1.9;
-  const lounge = computeLoungeLayout(agentsMax, depth, doorZ);
-  const cols = 3;
-  const agentDesks = Array.from({ length: count }, (_, i) => ({
-    id: `a${i}`,
-    x: agentsMin + 3.4 + (i % cols) * 3.0,
-    z: -depth / 2 + 3.3 + 1.5 + Math.floor(i / cols) * 3.0,
-  }));
-  const mainDesks = Array.from({ length: mainCount }, (_, i) => {
-    const inRow = Math.floor(i / mainCols) === Math.ceil(mainCount / mainCols) - 1 ? mainCount - Math.floor(i / mainCols) * mainCols : mainCols;
-    return { id: `p${i}`, x: ((i % mainCols) - (inRow - 1) / 2) * 3.0, z: -depth / 2 + 3.3 + 1.5 + Math.floor(i / mainCols) * 3.0, halfW: 0.8 };
-  });
+  const lounge = computeLoungeLayout(loungeX0, depth, doorZ);
   const rooms = [
-    ...(mainCount > 0 ? [{ minX: -mainW / 2, maxX: mainW / 2 }] : []),
-    { minX: agentsMin, maxX: agentsMax },
-    { minX: agentsMax, maxX: agentsMax + 13 },
+    { minX: -main.width / 2, maxX: main.width / 2 },
+    { minX: main.width / 2, maxX: loungeX0 },
+    { minX: loungeX0, maxX: loungeX0 + LOUNGE_WIDTH },
   ];
-  return buildLifeWorld({ rooms, doorZ, depth, lounge, desks: [...mainDesks, ...agentDesks], doorWidth: 1.15 });
+  const desks = [...main.desks.map((d) => ({ id: d.projectId, x: d.x, z: d.z, halfW: 0.8 })), ...agents.desks.map((d) => ({ id: d.projectId, x: d.x + agentsOffsetX, z: d.z }))];
+  return buildLifeWorld({ rooms, doorZ, depth, lounge, desks, doorWidth: 1.15 });
 }
 
 function setup(count: number, mustWork: boolean | ((i: number) => boolean) = false, seed = 7, mainCount = 0) {
@@ -117,8 +107,8 @@ describe("Vida dos agentes — navegação", () => {
     const w = makeWorld(3);
     const inside = { x: w.lounge.furniture.pool.x, z: w.lounge.furniture.pool.z };
     assert.equal(w.grid.isFree(inside.x, inside.z), false);
-    assert.equal(w.grid.isFree(AGENTS_MAX, -3), false, "a divisória fora da porta é parede");
-    assert.equal(w.grid.isFree(AGENTS_MAX, w.lounge.door.z), true, "o vão da porta é livre");
+    assert.equal(w.grid.isFree(w.lounge.x0, -3), false, "a divisória fora da porta é parede");
+    assert.equal(w.grid.isFree(w.lounge.x0, w.lounge.door.z), true, "o vão da porta é livre");
   });
 });
 
@@ -187,14 +177,14 @@ describe("Vida dos agentes — cenários", () => {
   });
 
   it("5. ao terminar a tarefa, vai para o lounge e escolhe uma atividade", () => {
-    const { sim } = setup(1, true);
+    const { sim, world } = setup(1, true);
     const a = get(sim, "a0");
     run(sim, 1);
     assert.equal(a.phase, "desk");
     setMust(sim, { a0: false });
     const t = runUntil(sim, () => a.phase === "seated" || (a.phase === "standing" && a.arrived), 60);
     assert.ok(t < 60, "chegou a uma atividade");
-    assert.ok(a.x > AGENTS_MAX, "está na sala de convivência (além da divisória)");
+    assert.ok(a.x > world.lounge.x0, "está na sala de convivência (além da divisória)");
     assert.notEqual(a.activity, "working");
   });
 
@@ -389,5 +379,37 @@ describe("Vida dos agentes — cenários", () => {
     run(sim, 30);
     assert.equal(a.phase, "desk");
     assert.ok(a.vis.work < 0.05, "sem animação de digitar");
+  });
+});
+
+describe("Sinuca — o atirador fica atrás da bola branca, na linha da tacada", () => {
+  it("em toda jogada o jogador está no ponto planejado, virado para a bola, ao alcance do taco; a bola só sai na batida", () => {
+    const { world, sim } = setup(6, false, 11);
+    const pool = world.lounge.furniture.pool;
+    let aimSamples = 0;
+    let shots = 0;
+    let lastAlive = 15;
+    run(sim, 900, () => {
+      const turn = sim.poolTurn;
+      const shooter = turn.shooter ? sim.actors.get(turn.shooter) : undefined;
+      if (turn.plan && shooter && (turn.stage === "aim" || turn.stage === "stroke")) {
+        aimSamples += 1;
+        const cue = { x: pool.x + sim.poolGame.pos[0], z: pool.z + sim.poolGame.pos[1] };
+        // ainda não bateu: a branca está onde o plano supôs, e o jogador está no ponto planejado
+        if (turn.stage === "aim") {
+          assert.ok(dist(shooter, { x: pool.x + turn.plan.stand.x, z: pool.z + turn.plan.stand.z }) < 0.25, "jogador longe do ponto planejado");
+          assert.ok(dist(shooter, cue) <= 2.45, "bola fora do alcance do taco");
+          const toBall = Math.atan2(cue.x - shooter.x, cue.z - shooter.z);
+          let d = Math.abs(toBall - shooter.yaw) % (Math.PI * 2);
+          if (d > Math.PI) d = Math.PI * 2 - d;
+          assert.ok(d < 0.2, "jogador não está virado para a bola branca");
+        }
+      }
+      const alive = sim.poolGame.alive.reduce((n, v, i) => n + (i > 0 ? v : 0), 0);
+      if (alive < lastAlive) shots += 1;
+      lastAlive = alive <= 3 ? 15 : alive;
+    });
+    assert.ok(aimSamples > 30, "ninguém jogou sinuca");
+    assert.ok(shots >= 2, "nenhuma bola foi encaçapada");
   });
 });

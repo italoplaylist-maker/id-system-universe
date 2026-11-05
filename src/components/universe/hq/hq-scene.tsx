@@ -137,10 +137,10 @@ export function HqScene({
   const { layout, agentsLayout, loungeLayout, loungeShellLayout } = useMemo(() => {
     const agentInputs = agentEntries.map((e) => ({ id: e.session.id, name: e.name, accent: e.accent }));
     const mainNatural = computeOfficeLayout(activeProjects, enabledProviders).depth;
-    const agentsNatural = agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 10 }).depth : 0;
+    const agentsNatural = agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 9 }).depth : 0;
     const minDepth = Math.max(mainNatural, agentsNatural, agentsEnabled ? LOUNGE_MIN_DEPTH : 0);
     const main = computeOfficeLayout(activeProjects, enabledProviders, { minDepth });
-    const agents = agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 10, minDepth }) : null;
+    const agents = agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 9, minDepth }) : null;
     const lounge = agents ? computeLoungeLayout(main.width / 2 + agents.width, main.depth, partitionDoorZ(main.depth)) : null;
     const loungeShell = lounge ? computeOfficeLayout([], [], { minWidth: LOUNGE_WIDTH, minDepth: main.depth }) : null;
     return { layout: main, agentsLayout: agents, loungeLayout: lounge, loungeShellLayout: loungeShell };

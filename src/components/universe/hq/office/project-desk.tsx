@@ -272,20 +272,20 @@ export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, s
   return (
     <group position={[slot.x, 0, slot.z]} rotation={[0, Math.PI, 0]}>
       {/* carpet pad defining the pod */}
-      <RoundedBox args={[2.7, 0.012, 2.45]} radius={0.04} smoothness={2} position={[0, 0.006, 0.45]} receiveShadow>
+      <RoundedBox args={[2.3, 0.012, 2.2]} radius={0.04} smoothness={2} position={[0, 0.006, 0.5]} receiveShadow>
         <meshStandardMaterial color="#2a303c" roughness={1} />
       </RoundedBox>
       <mesh position={[0, 0.0125, 0.45]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[1.28, 1.34, 4, 1, Math.PI / 4]} />
+        <ringGeometry args={[1.08, 1.13, 4, 1, Math.PI / 4]} />
         <meshBasicMaterial color={slot.accent} transparent opacity={0.0} />
       </mesh>
       {/* state halo (blue = working / red = error) and hover/selection ring */}
-      <mesh position={[0, 0.016, 0.45]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[1.6, 40]} />
+      <mesh position={[0, 0.016, 0.5]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[1.3, 40]} />
         <meshBasicMaterial ref={haloMaterial} color={WORK_BLUE} transparent opacity={0} depthWrite={false} />
       </mesh>
-      <mesh position={[0, 0.02, 0.45]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[1.42, 1.5, 48]} />
+      <mesh position={[0, 0.02, 0.5]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[1.18, 1.25, 48]} />
         <meshBasicMaterial ref={ringMaterial} color={PALETTE.brand} transparent opacity={0} depthWrite={false} />
       </mesh>
 
