@@ -48,4 +48,8 @@ export async function register() {
 
   const { pruneAgentData } = await import("@/server/claude/agent-service");
   setInterval(safely("agent_prune", () => pruneAgentData()), 60 * 60_000);
+
+  // Orquestrador de agentes Claude: despacha a fila e recupera tarefas interrompidas por reinício.
+  const { startOrchestratorWorker } = await import("@/server/orchestrator/worker");
+  startOrchestratorWorker();
 }

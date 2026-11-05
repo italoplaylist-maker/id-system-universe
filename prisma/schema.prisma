@@ -792,3 +792,99 @@ model AgentApproval {
 
   @@index([sessionId, status, createdAt])
 }
+
+// ---------------------------------------------------------------------------
+// Orquestrador de agentes Claude: o Universe é quem manda; a execução é real (Claude Agent SDK).
+// ---------------------------------------------------------------------------
+
+/// Funcionário permanente da Sala dos Agentes. Existe independentemente de ter tarefa.
+model AgentProfile {
+  id              String      @id @default(cuid())
+  name            String
+  specialty       String?
+  /// Diretório de trabalho NO SERVIDOR do Universe (onde o Claude roda).
+  cwd             String
+  projectId       String?
+  model           String?
+  /// default | acceptEdits | plan — "bypassPermissions" nunca é oferecido.
+  permissionMode  String      @default("default")
+  /// Pausado: continua na sala, mas não recebe execuções (tarefas ficam na fila).
+  paused          Boolean     @default(false)
+  /// Sessão Claude persistente (resume) — o contexto continua entre tarefas.
+  claudeSessionId String?
+  lastError       String?
+  lastActiveAt    DateTime?
+  /// Ordem estável das mesas.
+  position        Int         @default(0)
+  archivedAt      DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  tasks           AgentTask[]
+
+  @@index([archivedAt, position])
+}
+
+model AgentTask {
+  id              String              @id @default(cuid())
+  agentId         String
+  agent           AgentProfile        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  /// Um clique em ENVIAR = uma chave. Reenvio com a mesma chave devolve a mesma tarefa.
+  idempotencyKey  String              @unique
+  prompt          String
+  /// QUEUED | STARTING | RUNNING | WAITING_APPROVAL | COMPLETED | FAILED | CANCELLED | INTERRUPTED
+  status          String              @default("QUEUED")
+  createdById     String?
+  createdAt       DateTime            @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  /// Última batida do executor: quem para de bater por 45 s foi interrompido (worker caiu).
+  heartbeatAt     DateTime?
+  result          String?
+  error           String?
+  claudeSessionId String?
+  costUsd         Float?
+  turns           Int?
+  cancelRequested Boolean             @default(false)
+  nextSeq         Int                 @default(1)
+  events          AgentTaskEvent[]
+  approvals       AgentTaskApproval[]
+
+  @@index([agentId, status])
+  @@index([status, createdAt])
+}
+
+model AgentTaskEvent {
+  id     String    @id @default(cuid())
+  taskId String
+  task   AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  seq    Int
+  ts     DateTime  @default(now())
+  /// message_sent | started | assistant_text | tool_use | tool_result | approval_requested | approval_decided | completed | failed | cancelled | interrupted | info
+  kind   String
+  tool   String?
+  text   String?
+
+  @@unique([taskId, seq])
+}
+
+model AgentTaskApproval {
+  id          String    @id @default(cuid())
+  taskId      String
+  task        AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tool        String
+  detail      String
+  /// PENDING | APPROVED | DENIED | EXPIRED
+  status      String    @default("PENDING")
+  decidedById String?
+  createdAt   DateTime  @default(now())
+  decidedAt   DateTime?
+
+  @@index([taskId, status])
+}
+
+/// Linha única ("default"): limites do orquestrador.
+model OrchestratorSetting {
+  id            String   @id @default("default")
+  maxConcurrent Int      @default(2)
+  updatedAt     DateTime @updatedAt
+}
