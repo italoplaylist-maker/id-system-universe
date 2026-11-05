@@ -5,6 +5,7 @@ import { AlertTriangle, Ban, CheckCircle2, Clock, Loader2, PauseCircle, Plus, Se
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ToolsPanel } from "./tools-panel";
+import { StoragePanel } from "./storage-panel";
 import { AttachButton, AttachmentStrip, MicButton, useComposerAttachments, useDictation } from "./composer-attachments";
 import { cn } from "@/lib/cn";
 import {
@@ -469,6 +470,7 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
               {tasks && tasks.length === 0 && <li className="px-4 py-4 text-muted">{tab === "active" ? "Nada em andamento nem na fila." : "Sem histórico ainda."}</li>}
             </ul>
             <GitPanel agentId={selected.id} canWrite={canWrite} />
+            {canWrite && <StoragePanel />}
             {canWrite && (
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs">
                 <label className="flex items-center gap-1.5 text-muted">

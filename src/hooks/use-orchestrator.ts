@@ -200,3 +200,25 @@ export function useOrchestratorMutations() {
     }),
   };
 }
+
+export interface StorageReportView {
+  workspaces: { path: string; bytes: number; agents: Array<{ agentId: string; name: string; bytes: number; heavyBytes: number; idleHours: number | null; busy: boolean }>; orphanBytes: number };
+  claude: { path: string; bytes: number; transcriptsBytes: number };
+  attachments: { bytes: number };
+  database: { taskEvents: number; universeEvents: number; syncEvents: number };
+  memory: { rssMB: number; heapUsedMB: number };
+  totalBytes: number;
+}
+
+/** Uso de disco/memória do servidor. Só mede quando o painel pede (percorrer pastas custa I/O). */
+export function useStorageReport(enabled: boolean) {
+  return useQuery({ queryKey: [...KEY, "storage"], queryFn: () => apiFetch<{ report: StorageReportView }>("/api/orchestrator/storage"), enabled, staleTime: 30_000 });
+}
+
+export function useCleanStorage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<{ result: { freedBytes: number; actions: string[] }; report: StorageReportView }>("/api/orchestrator/storage", { method: "POST" }),
+    onSuccess: (data) => queryClient.setQueryData([...KEY, "storage"], { report: data.report }),
+  });
+}

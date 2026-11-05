@@ -10,6 +10,7 @@ import { buildUniverseMcp, UNIVERSE_AUTO_ALLOWED, UNIVERSE_MERGE_TOOL } from "./
 import { notifyApprovalRequested, notifyTaskFinished } from "./notify";
 import { loadMcpServersForRun } from "./tools-config";
 import { seedDefaultPacks } from "./skill-packs";
+import { cleanupStorage } from "./storage";
 import { getWorkspacePreparer, syncProjectAgents } from "./workspace";
 import { ACTIVE, appendEvent, getSettings, purgeOldTasks, setTaskRegisteredHook } from "./service";
 
@@ -326,4 +327,8 @@ export function startOrchestratorWorker(): void {
   setTimeout(() => void seedDefaultPacks(), 5_000);
   setInterval(syncAgents, 60_000);
   setInterval(() => void purgeOldTasks().catch(() => undefined), 6 * 3_600_000);
+  // Faxina de disco: dependências/builds regeneráveis de agentes parados, transcrições velhas, caches e eventos antigos.
+  const janitor = () => void cleanupStorage().catch((error) => logger.error("storage_cleanup_failed", { message: error instanceof Error ? error.message : String(error) }));
+  setTimeout(janitor, 120_000);
+  setInterval(janitor, 6 * 3_600_000);
 }
