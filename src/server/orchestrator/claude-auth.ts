@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { ValidationError } from "@/lib/errors";
+import { forgetModels } from "./models";
 
 /**
  * Login do Claude pela conta de assinatura (Claude Code) feito DENTRO do Universe.
@@ -134,6 +135,7 @@ export async function submitClaudeLoginCode(rawCode: string): Promise<void> {
     throw new ValidationError(reason ?? "O Claude não aceitou o código. Gere um novo clicando em “Entrar com minha conta Claude”.");
   }
   cache = null;
+  forgetModels();
   if (!(await getClaudeAuthStatus(true)).authenticated) throw new ValidationError("O login terminou, mas o Claude não confirmou a sessão. Tente novamente.");
 }
 
@@ -141,4 +143,5 @@ export async function claudeLogout(): Promise<void> {
   endAttempt();
   await run(["auth", "logout"], 10_000);
   cache = null;
+  forgetModels();
 }

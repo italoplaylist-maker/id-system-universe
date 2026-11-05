@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ToolsPanel } from "./tools-panel";
 import { cn } from "@/lib/cn";
 import {
+  useAvailableModels,
   useOrchestratorMutations,
   useOrchestratorSettings,
   useOrchestratorStatus,
@@ -147,6 +148,11 @@ function AgentForm({ initial, onDone }: { initial?: RoomAgentView; onDone: () =>
     effort: initial?.effort ?? "", allowed: (initial?.allowedTools ?? []).join("\n"), disallowed: (initial?.disallowedTools ?? []).join("\n"),
   });
   const field = "w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs focus:border-accent focus:outline-none";
+  const { data: models } = useAvailableModels(true);
+  const modelList = models?.models ?? [];
+  const selectedModel = modelList.find((m) => m.value === f.model) ?? null;
+  const EFFORT_LABEL: Record<string, string> = { low: "baixo", medium: "médio", high: "alto", xhigh: "muito alto", max: "máximo" };
+  const effortLevels = selectedModel?.efforts.length ? selectedModel.efforts : ["low", "medium", "high", "xhigh", "max"];
   const lines = (v: string) => v.split("\n").map((l) => l.trim()).filter(Boolean);
   return (
     <form
@@ -163,11 +169,20 @@ function AgentForm({ initial, onDone }: { initial?: RoomAgentView; onDone: () =>
       <input className={field} placeholder="Especialidade (opcional)" value={f.specialty} onChange={(e) => setF({ ...f, specialty: e.target.value })} />
       <input className={field} placeholder="Diretório no servidor, ex.: /srv/meu-projeto" value={f.cwd} onChange={(e) => setF({ ...f, cwd: e.target.value })} required />
       <div className="flex gap-2">
-        <input className={field} placeholder="Modelo (vazio = padrão)" value={f.model} onChange={(e) => setF({ ...f, model: e.target.value })} />
+        <select className={field} value={f.model} onChange={(e) => setF({ ...f, model: e.target.value })} aria-label="Modelo">
+          <option value="">Modelo: padrão da conta</option>
+          {f.model && !modelList.some((m) => m.value === f.model) && <option value={f.model}>{f.model} (atual)</option>}
+          {modelList.map((m) => <option key={m.value} value={m.value}>{m.displayName}{m.resolvedModel ? ` · ${m.resolvedModel}` : ""}</option>)}
+        </select>
         <select className={field} value={f.effort} onChange={(e) => setF({ ...f, effort: e.target.value })} aria-label="Esforço">
-          <option value="">Esforço: padrão</option><option value="low">baixo</option><option value="medium">médio</option><option value="high">alto</option><option value="xhigh">muito alto</option><option value="max">máximo</option>
+          <option value="">Esforço: padrão</option>
+          {effortLevels.map((l) => <option key={l} value={l}>{EFFORT_LABEL[l] ?? l}</option>)}
         </select>
       </div>
+      <p className="text-[11px] text-muted">
+        {models?.error ? `Não consegui listar os modelos agora (${models.error}). Conecte o Claude e tente de novo.` : modelList.length ? "Lista consultada agora no Claude, para a conta conectada." : "Consultando modelos no Claude…"}
+        {selectedModel?.description ? ` ${selectedModel.displayName}: ${selectedModel.description}.` : ""}
+      </p>
       <select className={field} value={f.permissionMode} onChange={(e) => setF({ ...f, permissionMode: e.target.value })} aria-label="Permissões">
         <option value="default">Pedir aprovação para ações sensíveis</option>
         <option value="acceptEdits">Aceitar edições de arquivo (o resto pede aprovação)</option>

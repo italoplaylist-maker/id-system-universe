@@ -74,6 +74,24 @@ export function useOrchestratorStatus(enabled = true) {
   });
 }
 
+export interface AvailableModelView {
+  value: string;
+  displayName: string;
+  description: string | null;
+  resolvedModel: string | null;
+  efforts: string[];
+}
+
+/** Modelos que o Claude oferece agora para a conta conectada (consulta real). */
+export function useAvailableModels(enabled = true) {
+  return useQuery({
+    queryKey: [...KEY, "models"],
+    queryFn: () => apiFetch<{ models: AvailableModelView[]; error: string | null }>("/api/orchestrator/models"),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
 export function useOrchestratorSettings(enabled = true) {
   return useQuery({
     queryKey: [...KEY, "settings"],
