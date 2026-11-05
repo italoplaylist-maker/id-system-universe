@@ -34,7 +34,8 @@ export const ASSET_MANIFEST: Record<AssetKey, AssetManifestEntry> = {
   [ASSET_KEYS.RECEPTION_DESK]: entry("/models/office/reception-desk.glb", "office", "Reception Desk"),
   [ASSET_KEYS.WALL_SCREEN]: entry("/models/office/wall-screen.glb", "office", "Wall Screen"),
   [ASSET_KEYS.SOFA]: entry("/models/decoration/sofa.glb", "decoration", "Sofa"),
-  [ASSET_KEYS.PLANT]: entry("/models/decoration/plant.glb", "decoration", "Plant"),
+  // Poly Haven "Potted Plant 02" (CC0, Rico Cilliers) — otimizado: meshopt + WebP 512px. Ver public/models/LICENSES.md.
+  [ASSET_KEYS.PLANT]: { ...entry("/models/decoration/plant.glb", "decoration", "Plant"), enabled: true, scale: 1.2 },
   [ASSET_KEYS.CABINET]: entry("/models/decoration/cabinet.glb", "decoration", "Cabinet"),
   [ASSET_KEYS.SERVER_RACK]: entry("/models/infrastructure/server-rack.glb", "infrastructure", "Server Rack"),
   [ASSET_KEYS.SERVER_TOWER]: entry("/models/infrastructure/server.glb", "infrastructure", "Server Tower"),

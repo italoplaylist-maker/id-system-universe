@@ -12,6 +12,9 @@ Until a human with normal internet access adds real models, every asset key
 renders its procedural placeholder — built to validate scale, layout,
 interaction and animation states, not to be the final look.
 
+> **Atualização 2026-11-05:** `PLANT` já usa um GLB real (Poly Haven, CC0); piso e HDRI também. Origem e licença de
+> cada arquivo em `public/models/LICENSES.md`. Os demais itens ainda são procedurais.
+
 ## How to add a real model
 
 1. Drop the `.glb` at the path listed below (under `public/models/`).

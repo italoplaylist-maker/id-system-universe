@@ -12,7 +12,7 @@ interface GltfModelProps {
 /** Loads and instances a GLB — `Clone` shares the parsed geometry/material across every placement instead of re-parsing the file per instance (briefing 60). */
 function GltfModel({ path, scale, rotationY }: GltfModelProps) {
   const { scene } = useGLTF(path);
-  return <Clone object={scene} scale={scale} rotation={[0, rotationY, 0]} />;
+  return <Clone object={scene} scale={scale} rotation={[0, rotationY, 0]} castShadow receiveShadow />;
 }
 
 interface BoundaryProps {

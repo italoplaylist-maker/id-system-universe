@@ -8,8 +8,15 @@ import { PALETTE } from "../palette";
 import { OFFICE, type OfficeLayout } from "./office-layout";
 import { rectObstacle, type Obstacle } from "../life/geometry";
 
-/** A tall indoor tree: trunk + layered leaf clusters in a stone planter. */
+/** Planta de interior: modelo real (Poly Haven, CC0) nos níveis Alto/Médio; procedural no Baixo ou se o GLB falhar. */
 export function TallPlant({ scale = 1 }: { scale?: number }) {
+  return (
+    <WorldAsset asset={ASSET_KEYS.PLANT} fallback={<ProceduralPlant scale={scale} />} scale={scale} />
+  );
+}
+
+/** A tall indoor tree: trunk + layered leaf clusters in a stone planter. */
+function ProceduralPlant({ scale = 1 }: { scale?: number }) {
   const leaves: [number, number, number][] = [
     [0, 1.5, 0],
     [0.22, 1.25, 0.1],
@@ -107,7 +114,9 @@ export function OfficeProps({ layout }: { layout: OfficeLayout }) {
       <group position={[-width / 2 + 3.2, 0, frontZ - 1.5]}>
         <Reception accent={PALETTE.brand} />
       </group>
-      <WorldAsset asset={ASSET_KEYS.PLANT} fallback={<TallPlant scale={1.05} />} position={[-width / 2 + 1.1, 0, frontZ - 1.2]} />
+      <group position={[-width / 2 + 1.1, 0, frontZ - 1.2]}>
+        <TallPlant scale={1.05} />
+      </group>
 
       <group position={[width / 2 - 0.9, 0, frontZ - 1.0]}>
         <TallPlant scale={1.2} />
