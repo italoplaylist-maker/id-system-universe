@@ -320,6 +320,10 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
   useEffect(() => {
     if (initialAgentId) setAgentId(initialAgentId); // eslint-disable-line react-hooks/set-state-in-effect
   }, [initialAgentId]);
+  // A escolha é FIXADA na primeira carga: não "segue" o primeiro da lista (que poderia mudar e trocar o agente sob o seu texto).
+  useEffect(() => {
+    if (!agentId && agents && agents.length > 0) setAgentId(agents[0].id); // eslint-disable-line react-hooks/set-state-in-effect
+  }, [agentId, agents]);
   const selected = useMemo(() => agents?.find((a) => a.id === agentId) ?? agents?.[0] ?? null, [agents, agentId]);
   const { data: tasks } = useOrchestratorTasks(tab, selected?.id ?? null, !!selected);
   const { data: last } = useTaskDetail(lastTaskId);

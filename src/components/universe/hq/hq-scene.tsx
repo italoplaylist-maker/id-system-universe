@@ -14,6 +14,7 @@ import type { LifeAgent } from "./life/agent-life";
 import type { LifeWorldInput } from "./life/world";
 import { computeLoungeLayout, LOUNGE_MIN_DEPTH, LOUNGE_WIDTH } from "./life/lounge-layout";
 import { useAgentSessions } from "@/hooks/use-agents";
+import { agentAccent, orderAgentSessions } from "@/lib/agent-order";
 import { roomAgentToSession, useRoomAgents } from "@/hooks/use-orchestrator";
 import { OfficeProps, officePropObstacles } from "./office/office-props";
 import { NocWall } from "./office/noc-wall";
@@ -114,7 +115,7 @@ export function HqScene({
   // Funcionários permanentes (perfis) primeiro, em ordem estável; depois as sessões externas observadas pelo hook.
   // Os perfis existem independentemente de haver tarefa: terminar, atualizar a página ou sincronizar não os remove.
   const agentSessions = useMemo(
-    () => (observedSessions === undefined && roomAgents === undefined ? undefined : [...(roomAgents ?? []).map(roomAgentToSession), ...(observedSessions ?? [])]),
+    () => (observedSessions === undefined && roomAgents === undefined ? undefined : orderAgentSessions((roomAgents ?? []).map(roomAgentToSession), observedSessions ?? [])),
     [observedSessions, roomAgents],
   );
   const agentsEnabled = agentSessions !== undefined;
@@ -127,7 +128,7 @@ export function HqScene({
       return list.map((s, i) => ({
         session: s,
         name: titles.filter((t) => t === titles[i]).length > 1 ? `${titles[i]} #${s.id.slice(-3)}` : titles[i],
-        accent: AGENT_ACCENTS[i % AGENT_ACCENTS.length],
+        accent: agentAccent(s.id, AGENT_ACCENTS),
       }));
     },
     [agentSessions],
@@ -137,10 +138,10 @@ export function HqScene({
   const { layout, agentsLayout, loungeLayout, loungeShellLayout } = useMemo(() => {
     const agentInputs = agentEntries.map((e) => ({ id: e.session.id, name: e.name, accent: e.accent }));
     const mainNatural = computeOfficeLayout(activeProjects, enabledProviders).depth;
-    const agentsNatural = agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 9 }).depth : 0;
+    const agentsNatural = agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 9, keepOrder: true }).depth : 0;
     const minDepth = Math.max(mainNatural, agentsNatural, agentsEnabled ? LOUNGE_MIN_DEPTH : 0);
     const main = computeOfficeLayout(activeProjects, enabledProviders, { minDepth });
-    const agents = agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 9, minDepth }) : null;
+    const agents = agentsEnabled ? computeOfficeLayout(agentInputs, [], { minWidth: 9, minDepth, keepOrder: true }) : null;
     const lounge = agents ? computeLoungeLayout(main.width / 2 + agents.width, main.depth, partitionDoorZ(main.depth)) : null;
     const loungeShell = lounge ? computeOfficeLayout([], [], { minWidth: LOUNGE_WIDTH, minDepth: main.depth }) : null;
     return { layout: main, agentsLayout: agents, loungeLayout: lounge, loungeShellLayout: loungeShell };

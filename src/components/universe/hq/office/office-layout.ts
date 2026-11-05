@@ -58,8 +58,9 @@ function columnsFor(count: number): number {
   return Math.max(3, Math.min(7, Math.round(Math.sqrt(Math.max(count, 1) * 1.1))));
 }
 
-export function computeOfficeLayout(projects: Pick<UniverseProject, "id" | "name" | "accent">[], providers: Pick<UniverseProviderSummary, "id" | "name" | "color">[], options: { minWidth?: number; minDepth?: number } = {}): OfficeLayout {
-  const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name, "pt-BR") || a.id.localeCompare(b.id));
+export function computeOfficeLayout(projects: Pick<UniverseProject, "id" | "name" | "accent">[], providers: Pick<UniverseProviderSummary, "id" | "name" | "color">[], options: { minWidth?: number; minDepth?: number; keepOrder?: boolean } = {}): OfficeLayout {
+  // keepOrder: a sala dos agentes mantém a ordem recebida (cada agente tem a sua mesa); só os projetos vão em ordem alfabética.
+  const sorted = options.keepOrder ? [...projects] : [...projects].sort((a, b) => a.name.localeCompare(b.name, "pt-BR") || a.id.localeCompare(b.id));
   const count = sorted.length;
   const cols = columnsFor(count);
   const rows = Math.max(1, Math.ceil(count / cols));

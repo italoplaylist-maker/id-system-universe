@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { agentAccent, orderAgentSessions } from "@/lib/agent-order";
 import { computeOfficeLayout, OFFICE } from "@/components/universe/hq/office/office-layout";
 import { computeLoungeLayout, LOUNGE_MIN_DEPTH, LOUNGE_WIDTH } from "@/components/universe/hq/life/lounge-layout";
 import { PoolGame } from "@/components/universe/hq/life/pool-game";
@@ -72,4 +73,35 @@ describe("sinuca (PoolGame)", () => {
     const plan = g.plan([{ x: 0, z: 1.4 }, { x: 0, z: -1.4 }], makeRng(2));
     if (plan) assert.ok(Math.hypot(plan.stand.x, Math.abs(plan.stand.z) - 1.4) >= 0.85 || Math.abs(plan.stand.x) > 0.85);
   });
+
+describe("Sala dos Agentes: ninguém troca de mesa sozinho", () => {
+  const people = (names: string[]) => names.map((n) => ({ id: `id-${n}`, name: n, accent: "#fff" }));
+  const seat = (l: ReturnType<typeof computeOfficeLayout>, id: string) => l.desks.find((d) => d.projectId === id)!;
+
+  it("com keepOrder, chegar um agente (mesmo com nome que viria antes na ordem alfabética) não mexe nas mesas dos outros", () => {
+    const before = computeOfficeLayout(people(["Zeta", "Mira", "Omega"]), [], { minWidth: 9, keepOrder: true });
+    const after = computeOfficeLayout(people(["Zeta", "Mira", "Omega", "Alfa"]), [], { minWidth: 9, keepOrder: true });
+    for (const n of ["Zeta", "Mira", "Omega"]) {
+      assert.equal(seat(after, `id-${n}`).row, seat(before, `id-${n}`).row);
+      assert.equal(seat(after, `id-${n}`).col, seat(before, `id-${n}`).col);
+    }
+    // sem keepOrder (projetos) segue alfabético: o recém-chegado "Alfa" empurra os outros
+    const alpha = computeOfficeLayout(people(["Zeta", "Mira", "Omega", "Alfa"]), []);
+    assert.equal(seat(alpha, "id-Alfa").col, 0);
+  });
+
+  it("ordem: permanentes primeiro na ordem dada; observados por início, sem depender do último evento", () => {
+    const perm = [{ id: "p2", startedAt: "2026-01-01" }, { id: "p1", startedAt: "2026-01-02" }];
+    const obs = [{ id: "o2", startedAt: "2026-02-02" }, { id: "o1", startedAt: "2026-02-01" }, { id: "p1", startedAt: "2026-01-02" }];
+    assert.deepEqual(orderAgentSessions(perm, obs).map((s) => s.id), ["p2", "p1", "o1", "o2"]);
+    assert.deepEqual(orderAgentSessions(perm, [...obs].reverse()).map((s) => s.id), ["p2", "p1", "o1", "o2"], "mesma ordem não importa como chegam");
+  });
+
+  it("a cor vem do id, não da posição: outro agente entrando não repinta ninguém", () => {
+    const palette = ["#a", "#b", "#c", "#d", "#e", "#f", "#g", "#h"];
+    assert.equal(agentAccent("id-Zeta", palette), agentAccent("id-Zeta", palette));
+    const set = new Set(["a", "b", "c", "d", "e", "f"].map((x) => agentAccent(`id-${x}`, palette)));
+    assert.ok(set.size >= 3, "cores variam entre agentes");
+  });
+});
 });
