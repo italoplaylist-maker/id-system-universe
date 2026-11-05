@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
+import { applyLabelFade, labelOpacity } from "./label-fade";
 import { Html, RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
 import { ErgoChair, Keyboard, Mouse, DeskLamp, Mug, PodMonitor, POD, type ChairStyle } from "./pod-furniture";
@@ -124,11 +125,13 @@ interface AgentDeskProps {
   selected: boolean;
   dimmedByFocus: boolean;
   reduced: boolean;
+  /** Deslocamento X da sala dos agentes no mundo (para medir a distância da câmera). */
+  offsetX?: number;
   onFocus: () => void;
 }
 
 /** Uma sessão de agente Claude = uma mesa: azul e digitando quando trabalha, vermelha se a última ferramenta falhou, calma quando aguarda. */
-export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimmedByFocus, reduced, onFocus }: AgentDeskProps) {
+export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimmedByFocus, reduced, offsetX = 0, onFocus }: AgentDeskProps) {
   const life = useLife();
   const [hovered, setHovered] = useState(false);
   const seed = useMemo(() => hashSeed(session.id), [session.id]);
@@ -140,12 +143,14 @@ export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimm
   const ringMaterial = useRef<THREE.MeshBasicMaterial>(null);
   const chairGroup = useRef<THREE.Group>(null);
   const ledMaterial = useRef<THREE.MeshBasicMaterial>(null);
+  const fadeRef = useRef<HTMLDivElement>(null);
   const blend = useRef({ away: 0, work: state === "WORKING" ? 1 : 0, error: state === "ERROR" ? 1 : 0, ask: state === "APPROVAL" ? 1 : 0, ring: 0 });
   const tmp = useRef(new THREE.Color());
 
-  useFrame(({ clock }, delta) => {
+  useFrame(({ clock, camera }, delta) => {
     const dt = Math.min(delta, 0.05);
     const b = blend.current;
+    applyLabelFade(fadeRef.current, labelOpacity(camera, slot.x + offsetX, 1.8, slot.z, selected || hovered));
     b.work = damp(b.work, state === "WORKING" ? 1 : 0, 6, dt);
     b.error = damp(b.error, state === "ERROR" ? 1 : 0, 6, dt);
     b.ask = damp(b.ask, state === "APPROVAL" ? 1 : 0, 6, dt);
@@ -250,6 +255,7 @@ export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimm
       </mesh>
 
       <Html position={[0, 1.85, 0.4]} center zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
+        <div ref={fadeRef} style={{ visibility: "hidden", opacity: 0, transition: "opacity 160ms ease-out" }}>
         <div
           style={{
             display: "flex",
@@ -269,6 +275,7 @@ export const AgentDesk = memo(function AgentDesk({ slot, session, selected, dimm
         >
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: session.profile ? ROOM_COLOR[session.profile.roomState] : STATE_COLOR[state], boxShadow: state === "WORKING" ? `0 0 8px ${WORK_BLUE}` : "none" }} />
           {slot.name}
+        </div>
         </div>
       </Html>
     </group>

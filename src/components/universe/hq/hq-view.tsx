@@ -22,7 +22,7 @@ import { CreateProjectDialog } from "@/components/projects/create-project-dialog
 import { TimelinePanel } from "@/components/agents/timeline-panel";
 import { FeedsDialog } from "@/components/agents/feed-dialogs";
 import { CommandCenter } from "@/components/agents/command-center";
-import { useRoomAgents } from "@/hooks/use-orchestrator";
+import { useAgentSessions } from "@/hooks/use-agents";
 import { useSession } from "@/hooks/use-session";
 import { canUser } from "@/server/auth/rbac";
 import { ProjectManagerDrawer } from "@/components/projects/project-manager-drawer";
@@ -37,7 +37,7 @@ export function HqView() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [centerOpen, setCenterOpen] = useState(false);
   const { data: sessionUser } = useSession();
-  const { data: roomAgents } = useRoomAgents(sessionUser ? canUser(sessionUser, "provider:read") : false);
+  const { data: observedSessions } = useAgentSessions(sessionUser ? canUser(sessionUser, "provider:read") : false);
   const canManageAgents = sessionUser ? canUser(sessionUser, "provider:write") : false;
   const router = useRouter();
   const { selectedApplicationId, selectApplication, reducedGraphics, setReducedGraphics, demoMode, setDemoMode, setViewMode } = useUiStore();
@@ -163,7 +163,8 @@ export function HqView() {
             onSelectAgent={(id) => {
               selectApplication(null);
               // Funcionário permanente → Central de comandos; sessão observada pelo hook → linha do tempo.
-              if (roomAgents?.some((a) => a.id === id)) {
+              // Só é sessão observada (linha do tempo) se o hook de fato a conhece; qualquer outro funcionário abre a Central.
+              if (!observedSessions?.some((s) => s.id === id)) {
                 setSelectedAgentId(id);
                 setCenterOpen(true);
               } else {

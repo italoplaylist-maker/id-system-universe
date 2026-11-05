@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
+import { applyLabelFade, labelOpacity } from "./label-fade";
 import { Html, RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
 import { EmployeeModel } from "../assets/employee-model";
@@ -211,6 +212,7 @@ export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, s
   const ringMaterial = useRef<THREE.MeshBasicMaterial>(null);
   const chairGroup = useRef<THREE.Group>(null);
   const plateRef = useRef<HTMLDivElement>(null);
+  const fadeRef = useRef<HTMLDivElement>(null);
   const podWorld = useRef(new THREE.Vector3());
   const plateScale = useRef(1);
   const plateDetailRef = useRef<HTMLSpanElement>(null);
@@ -222,6 +224,7 @@ export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, s
     const b = blend.current;
 
     // Nameplate stays readable at any zoom: it scales gently with camera distance instead of growing with it.
+    applyLabelFade(fadeRef.current, labelOpacity(camera, slot.x, 1.8, slot.z, selected || hovered));
     const plate = plateRef.current;
     if (plate) {
       podWorld.current.set(slot.x, 1.8, slot.z);
@@ -406,6 +409,7 @@ export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, s
 
       {/* name plate — a small tag, physically above the desk (rotated back to face the camera side) */}
       <Html position={[0, 1.85, 0.4]} center zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
+        <div ref={fadeRef} style={{ visibility: "hidden", opacity: 0, transition: "opacity 160ms ease-out" }}>
         <div
           ref={plateRef}
           style={{
@@ -430,6 +434,7 @@ export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, s
           <span ref={plateDetailRef} style={{ display: "none", color: state === "WORKING" ? "#9fd1ff" : "#9aa5bb", fontWeight: 500 }}>
             · {state === "WORKING" ? "trabalhando" : statusLabel}
           </span>
+        </div>
         </div>
       </Html>
     </group>

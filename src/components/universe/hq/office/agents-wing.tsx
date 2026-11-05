@@ -87,6 +87,7 @@ export function AgentsWing({ mainLayout, agentsLayout, loungeShellLayout, lounge
               selected={selectedAgentId === slot.projectId}
               dimmedByFocus={focusId !== null && cameraMode !== "overview" && cameraMode !== "free" && focusId !== slot.projectId}
               reduced={reducedGraphics}
+              offsetX={agentsOffsetX}
               onFocus={() => {
                 onSelectAgent(slot.projectId);
                 focusProject(slot.projectId, worldPos, 2.6, `Agente · ${slot.name}`);
