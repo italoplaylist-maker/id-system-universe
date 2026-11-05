@@ -179,49 +179,109 @@ function speechCtor(): (new () => SpeechRecognitionLike) | null {
 export function useDictation(onText: (text: string) => void) {
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
+  // Só decidido no cliente (depois da hidratação): calcular no render deixava o botão inconsistente.
+  const [supported, setSupported] = useState(false);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
-  const supported = typeof window !== "undefined" && speechCtor() !== null;
+  const wantRef = useRef(false);
+  const onTextRef = useRef(onText);
+  useEffect(() => {
+    onTextRef.current = onText;
+  }, [onText]);
+  useEffect(() => {
+    setSupported(speechCtor() !== null); // eslint-disable-line react-hooks/set-state-in-effect
+  }, []);
 
   const stop = useCallback(() => {
+    wantRef.current = false;
     recRef.current?.stop();
   }, []);
 
-  const start = useCallback(() => {
+  const begin = useCallback(() => {
     const Ctor = speechCtor();
     if (!Ctor) return;
     const rec = new Ctor();
     rec.lang = "pt-BR";
-    rec.continuous = true;
+    // Sem modo contínuo: no Chrome do Android ele repete frases e para sozinho. Reiniciamos ao fim de cada frase.
+    rec.continuous = false;
     rec.interimResults = true;
     rec.onresult = (e) => {
       let live = "";
       for (let i = e.resultIndex; i < e.results.length; i += 1) {
         const r = e.results[i];
-        if (r.isFinal) onText(r[0].transcript.trim());
+        if (r.isFinal) onTextRef.current(r[0].transcript.trim());
         else live += r[0].transcript;
       }
       setInterim(live);
     };
     rec.onerror = (e) => {
-      if (e.error === "not-allowed" || e.error === "service-not-allowed") toast.error("Permita o microfone neste navegador para ditar.");
-      else if (e.error !== "no-speech" && e.error !== "aborted") toast.error(`Não consegui ouvir (${e.error}).`);
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        wantRef.current = false;
+        toast.error("Microfone bloqueado. Toque no cadeado ao lado do endereço e permita o microfone para este site.");
+      } else if (e.error === "audio-capture") {
+        wantRef.current = false;
+        toast.error("Nenhum microfone encontrado neste aparelho.");
+      } else if (e.error === "network") {
+        wantRef.current = false;
+        toast.error("O ditado do navegador precisa de internet e não funciona em alguns navegadores (ex.: Brave, Firefox). Use Chrome, Edge ou Safari.");
+      } else if (e.error !== "no-speech" && e.error !== "aborted") {
+        wantRef.current = false;
+        toast.error(`Não consegui ouvir (${e.error}).`);
+      }
     };
     rec.onend = () => {
-      setListening(false);
-      setInterim("");
       recRef.current = null;
+      setInterim("");
+      if (wantRef.current) {
+        // terminou a frase: continua ouvindo até o usuário parar
+        try {
+          begin();
+          return;
+        } catch {
+          wantRef.current = false;
+        }
+      }
+      setListening(false);
     };
     recRef.current = rec;
+    rec.start();
+  }, []);
+
+  const start = useCallback(async () => {
+    if (!speechCtor()) return;
+    if (!window.isSecureContext) {
+      toast.error("O microfone só funciona em conexão segura (https).");
+      return;
+    }
+    // Pede a permissão ANTES: o reconhecimento de voz falha em silêncio em vários navegadores quando ela ainda não foi dada.
+    if (navigator.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((t) => t.stop());
+      } catch (err) {
+        const name = err instanceof DOMException ? err.name : "";
+        toast.error(name === "NotFoundError" ? "Nenhum microfone encontrado neste aparelho." : "Microfone bloqueado. Toque no cadeado ao lado do endereço e permita o microfone para este site.");
+        return;
+      }
+    }
+    wantRef.current = true;
     setListening(true);
     try {
-      rec.start();
+      begin();
     } catch {
+      wantRef.current = false;
       setListening(false);
+      toast.error("Não consegui iniciar o microfone.");
     }
-  }, [onText]);
+  }, [begin]);
 
-  useEffect(() => () => recRef.current?.stop(), []);
-  return { supported, listening, interim, toggle: () => (listening ? stop() : start()) };
+  useEffect(
+    () => () => {
+      wantRef.current = false;
+      recRef.current?.stop();
+    },
+    [],
+  );
+  return { supported, listening, interim, toggle: () => (listening ? stop() : void start()) };
 }
 
 export function MicButton({ listening, supported, onClick }: { listening: boolean; supported: boolean; onClick: () => void }) {

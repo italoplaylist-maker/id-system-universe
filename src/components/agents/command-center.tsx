@@ -349,7 +349,7 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
 
   const btn = "rounded px-2 py-1 text-xs font-medium";
   return (
-    <aside className="absolute inset-y-0 right-0 z-20 flex w-full max-w-md flex-col border-l border-border bg-surface-raised/95 shadow-2xl backdrop-blur" aria-label="Central de Agentes">
+    <aside className="absolute inset-y-0 right-0 z-20 flex w-full max-w-md flex-col overflow-y-auto overscroll-contain border-l border-border bg-surface-raised/95 shadow-2xl backdrop-blur" aria-label="Central de Agentes">
       <div className="flex items-start justify-between gap-3 border-b border-border p-4">
         <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-wider text-muted">Central de Agentes</p>
@@ -450,7 +450,7 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
               <button className={cn(btn, tab === "active" ? "bg-surface text-foreground" : "text-muted")} onClick={() => setTab("active")}>Ativas e fila</button>
               <button className={cn(btn, tab === "history" ? "bg-surface text-foreground" : "text-muted")} onClick={() => setTab("history")}>Histórico</button>
             </div>
-            <ul className="min-h-0 flex-1 divide-y divide-border overflow-y-auto text-xs">
+            <ul className="max-h-72 min-h-[8rem] shrink-0 divide-y divide-border overflow-y-auto text-xs">
               {tasks?.map((t) => (
                 <li key={t.id}>
                   <button className="flex w-full items-start gap-2 px-4 py-2.5 text-left hover:bg-surface" onClick={() => setOpenTask(t.id)}>

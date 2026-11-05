@@ -12,7 +12,7 @@ export function UniverseShell() {
   const { viewMode } = useUiStore();
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <div className="flex h-dvh flex-col overflow-hidden bg-background">
       <TopBar />
       <div className="relative flex flex-1 overflow-hidden">
         {viewMode === "UNIVERSE" ? <HqView /> : <ListView />}
