@@ -38,6 +38,8 @@ export async function appendEvent(taskId: string, kind: string, text?: string, t
 // Agentes (funcionários permanentes)
 // ---------------------------------------------------------------------------
 
+const toolRule = z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9_:*().,\- /@]+$/, "Regra de ferramenta inválida.");
+
 const profileSchema = z.object({
   name: z.string().trim().min(2, "Informe o nome do agente.").max(60),
   specialty: z.string().trim().max(120).optional().nullable(),
@@ -45,6 +47,9 @@ const profileSchema = z.object({
   projectId: z.string().max(40).optional().nullable(),
   model: z.string().trim().max(80).optional().nullable(),
   permissionMode: z.enum(["default", "acceptEdits", "plan"]).default("default"),
+  effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional().nullable(),
+  allowedTools: z.array(toolRule).max(60).optional(),
+  disallowedTools: z.array(toolRule).max(60).optional(),
 });
 
 export async function createAgent(input: unknown, actor: Actor) {
@@ -52,7 +57,7 @@ export async function createAgent(input: unknown, actor: Actor) {
   if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Dados inválidos.");
   const last = await prisma.agentProfile.aggregate({ _max: { position: true } });
   const agent = await prisma.agentProfile.create({
-    data: { ...parsed.data, specialty: parsed.data.specialty || null, projectId: parsed.data.projectId || null, model: parsed.data.model || null, position: (last._max.position ?? -1) + 1 },
+    data: { ...parsed.data, effort: parsed.data.effort || null, specialty: parsed.data.specialty || null, projectId: parsed.data.projectId || null, model: parsed.data.model || null, position: (last._max.position ?? -1) + 1 },
   });
   await recordAuditEvent({ userId: actor.userId, action: "AGENT_PROFILE_CREATED", status: "SUCCESS", entityType: "AgentProfile", entityId: agent.id, metadata: { name: agent.name }, ipAddress: actor.ip, userAgent: actor.userAgent });
   orchestratorBus.emit({ type: "agent", agentId: agent.id });
@@ -69,7 +74,7 @@ export async function updateAgent(id: string, input: unknown, actor: Actor) {
   const resetSession = data.cwd !== undefined && data.cwd !== existing.cwd;
   const agent = await prisma.agentProfile.update({
     where: { id },
-    data: { ...data, ...(data.specialty !== undefined ? { specialty: data.specialty || null } : {}), ...(data.model !== undefined ? { model: data.model || null } : {}), ...(resetSession ? { claudeSessionId: null } : {}) },
+    data: { ...data, ...(data.specialty !== undefined ? { specialty: data.specialty || null } : {}), ...(data.model !== undefined ? { model: data.model || null } : {}), ...(data.effort !== undefined ? { effort: data.effort || null } : {}), ...(resetSession ? { claudeSessionId: null } : {}) },
   });
   await recordAuditEvent({ userId: actor.userId, action: "AGENT_PROFILE_UPDATED", status: "SUCCESS", entityType: "AgentProfile", entityId: id, ipAddress: actor.ip, userAgent: actor.userAgent });
   orchestratorBus.emit({ type: "agent", agentId: id });
@@ -256,6 +261,9 @@ export interface RoomAgentView {
   projectId: string | null;
   model: string | null;
   permissionMode: string;
+  effort: string | null;
+  allowedTools: string[];
+  disallowedTools: string[];
   paused: boolean;
   hasSession: boolean;
   /** Estado real derivado das tarefas — a animação 3D só representa isto. */
@@ -307,6 +315,9 @@ export async function listRoomAgents(now: Date = new Date()): Promise<RoomAgentV
       projectId: a.projectId,
       model: a.model,
       permissionMode: a.permissionMode,
+      effort: a.effort,
+      allowedTools: a.allowedTools,
+      disallowedTools: a.disallowedTools,
       paused: a.paused,
       hasSession: !!a.claudeSessionId,
       state,

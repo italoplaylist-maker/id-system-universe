@@ -808,6 +808,12 @@ model AgentProfile {
   model           String?
   /// default | acceptEdits | plan — "bypassPermissions" nunca é oferecido.
   permissionMode  String      @default("default")
+  /// low | medium | high | xhigh | max (vazio = padrão do Claude).
+  effort          String?
+  /// Ferramentas liberadas sem pedir aprovação (ex.: "Read", "Bash(git status:*)").
+  allowedTools    String[]    @default([])
+  /// Ferramentas bloqueadas para este agente.
+  disallowedTools String[]    @default([])
   /// Pausado: continua na sala, mas não recebe execuções (tarefas ficam na fila).
   paused          Boolean     @default(false)
   /// Sessão Claude persistente (resume) — o contexto continua entre tarefas.
@@ -887,4 +893,20 @@ model OrchestratorSetting {
   id            String   @id @default("default")
   maxConcurrent Int      @default(2)
   updatedAt     DateTime @updatedAt
+}
+
+/// Servidor MCP disponível para os agentes do Universe (segredos cifrados).
+model AgentMcpServer {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  /// stdio | http | sse
+  type      String
+  command   String?
+  args      String[] @default([])
+  url       String?
+  /// JSON cifrado: env (stdio) ou headers (http/sse). Nunca volta pela API, só as chaves.
+  secretsEnc String?
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

@@ -9,6 +9,12 @@ export interface ExecutorRunInput {
   permissionMode: "default" | "acceptEdits" | "plan";
   agentName: string;
   specialty?: string | null;
+  effort?: string | null;
+  /** Ferramentas liberadas sem pedir aprovação / bloqueadas (regras do Claude Code, ex.: "Bash(git status:*)"). */
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  /** Servidores MCP cadastrados no Universe (já com segredos decifrados, só em memória). */
+  mcpServers?: Record<string, unknown>;
   /** Sessão anterior do agente: o contexto continua. */
   resumeSessionId?: string | null;
   signal: AbortSignal;
@@ -68,9 +74,15 @@ export class ClaudeSdkExecutor implements TaskExecutor {
       abortController,
       permissionMode: input.permissionMode,
       canUseTool,
-      settingSources: ["project"],
+      // "user" = ~/.claude do servidor (skills, CLAUDE.md global, plugins instalados); "project" = o que está no repositório.
+      settingSources: ["user", "project"],
+      skills: "all",
       systemPrompt: { type: "preset", preset: "claude_code", append },
       ...(input.model ? { model: input.model } : {}),
+      ...(input.effort && ["low", "medium", "high", "xhigh", "max"].includes(input.effort) ? { effort: input.effort as "low" | "medium" | "high" | "xhigh" | "max" } : {}),
+      ...(input.allowedTools?.length ? { allowedTools: input.allowedTools } : {}),
+      ...(input.disallowedTools?.length ? { disallowedTools: input.disallowedTools } : {}),
+      ...(input.mcpServers && Object.keys(input.mcpServers).length ? { mcpServers: input.mcpServers as Options["mcpServers"] } : {}),
       ...(input.resumeSessionId ? { resume: input.resumeSessionId } : {}),
     };
 

@@ -5,6 +5,7 @@ import { recordAuditEvent } from "@/server/audit/audit-log";
 import { redactSecrets } from "@/server/claude/agent-service";
 import { orchestratorBus } from "./bus";
 import { ExecutorStartError, getExecutor } from "./executor";
+import { loadMcpServersForRun } from "./tools-config";
 import { getWorkspacePreparer, syncProjectAgents } from "./workspace";
 import { ACTIVE, appendEvent, getSettings, purgeOldTasks, setTaskRegisteredHook } from "./service";
 
@@ -151,6 +152,7 @@ async function runTask(taskId: string): Promise<void> {
     return status === "APPROVED" ? { allow: true } : { allow: false, message: status === "DENIED" ? "Negado por você no ID System Universe." : "Sem decisão no ID System Universe a tempo." };
   };
 
+  const mcpServers = await loadMcpServersForRun().catch(() => ({}));
   const input = (resume: string | null | undefined) => ({
     taskId,
     prompt: task.prompt,
@@ -159,6 +161,10 @@ async function runTask(taskId: string): Promise<void> {
     permissionMode: (agent.permissionMode === "acceptEdits" || agent.permissionMode === "plan" ? agent.permissionMode : "default") as "default" | "acceptEdits" | "plan",
     agentName: agent.name,
     specialty: agent.specialty,
+    effort: agent.effort,
+    allowedTools: agent.allowedTools,
+    disallowedTools: agent.disallowedTools,
+    mcpServers,
     resumeSessionId: resume,
     signal: abort.signal,
     canUseTool: requestApproval,

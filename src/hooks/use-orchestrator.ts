@@ -83,6 +83,32 @@ export function useOrchestratorSettings(enabled = true) {
   });
 }
 
+export interface AgentToolsView {
+  skills: { name: string; description: string | null; content: string }[];
+  claudeMd: string;
+  mcp: { id: string; name: string; type: string; command: string | null; args: string[]; url: string | null; secretKeys: string[]; enabled: boolean }[];
+  plugins: { installed: { id?: string; name?: string; version?: string; enabled?: boolean }[]; marketplaces: { name?: string }[] };
+}
+
+export function useAgentTools(enabled: boolean) {
+  return useQuery({ queryKey: [...KEY, "tools"], queryFn: () => apiFetch<AgentToolsView>("/api/orchestrator/tools"), enabled });
+}
+
+export function useAgentToolsMutations() {
+  const queryClient = useQueryClient();
+  const refresh = () => queryClient.invalidateQueries({ queryKey: [...KEY, "tools"] });
+  const post = (path: string, method: string, body?: unknown) => apiFetch<{ output?: string }>(`/api/orchestrator/tools/${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+  return {
+    saveSkill: useMutation({ mutationFn: (v: { name: string; content: string }) => post("skills", "POST", v), onSettled: refresh }),
+    deleteSkill: useMutation({ mutationFn: (name: string) => post(`skills/${encodeURIComponent(name)}`, "DELETE"), onSettled: refresh }),
+    saveClaudeMd: useMutation({ mutationFn: (content: string) => post("claude-md", "PUT", { content }), onSettled: refresh }),
+    createMcp: useMutation({ mutationFn: (v: unknown) => post("mcp", "POST", v), onSettled: refresh }),
+    toggleMcp: useMutation({ mutationFn: (v: { id: string; enabled: boolean }) => post(`mcp/${v.id}`, "PATCH", { enabled: v.enabled }), onSettled: refresh }),
+    deleteMcp: useMutation({ mutationFn: (id: string) => post(`mcp/${id}`, "DELETE"), onSettled: refresh }),
+    plugin: useMutation({ mutationFn: (v: { action: string; value: string }) => post("plugins", "POST", v), onSettled: refresh }),
+  };
+}
+
 export function useOrchestratorMutations() {
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: KEY });
@@ -99,12 +125,12 @@ export function useOrchestratorMutations() {
       onSettled: refresh,
     }),
     createAgent: useMutation({
-      mutationFn: (input: { name: string; specialty?: string; cwd: string; model?: string; permissionMode?: string }) =>
+      mutationFn: (input: { name: string; specialty?: string; cwd: string; model?: string; permissionMode?: string; effort?: string; allowedTools?: string[]; disallowedTools?: string[] }) =>
         apiFetch<{ agent: { id: string } }>("/api/orchestrator/agents", { method: "POST", body: JSON.stringify(input) }),
       onSettled: refresh,
     }),
     updateAgent: useMutation({
-      mutationFn: ({ id, ...input }: { id: string; name?: string; specialty?: string; cwd?: string; model?: string; permissionMode?: string; paused?: boolean }) =>
+      mutationFn: ({ id, ...input }: { id: string; name?: string; specialty?: string; cwd?: string; model?: string; permissionMode?: string; effort?: string | null; allowedTools?: string[]; disallowedTools?: string[]; paused?: boolean }) =>
         apiFetch(`/api/orchestrator/agents/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
       onSettled: refresh,
     }),

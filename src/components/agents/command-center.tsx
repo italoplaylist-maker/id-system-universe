@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Ban, CheckCircle2, Clock, Loader2, PauseCircle, Plus, Send, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ToolsPanel } from "./tools-panel";
 import { cn } from "@/lib/cn";
 import {
   useOrchestratorMutations,
@@ -139,30 +140,43 @@ function ClaudeLogin({ canWrite }: { canWrite: boolean }) {
   );
 }
 
-function AgentForm({ onDone }: { onDone: () => void }) {
-  const { createAgent } = useOrchestratorMutations();
-  const [f, setF] = useState({ name: "", specialty: "", cwd: "", model: "", permissionMode: "default" });
+function AgentForm({ initial, onDone }: { initial?: RoomAgentView; onDone: () => void }) {
+  const { createAgent, updateAgent } = useOrchestratorMutations();
+  const [f, setF] = useState({
+    name: initial?.name ?? "", specialty: initial?.specialty ?? "", cwd: initial?.cwd ?? "", model: initial?.model ?? "", permissionMode: initial?.permissionMode ?? "default",
+    effort: initial?.effort ?? "", allowed: (initial?.allowedTools ?? []).join("\n"), disallowed: (initial?.disallowedTools ?? []).join("\n"),
+  });
   const field = "w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs focus:border-accent focus:outline-none";
+  const lines = (v: string) => v.split("\n").map((l) => l.trim()).filter(Boolean);
   return (
     <form
       className="space-y-2 border-b border-border p-4"
       onSubmit={(e) => {
         e.preventDefault();
-        createAgent.mutate({ ...f, specialty: f.specialty || undefined, model: f.model || undefined }, { onSuccess: onDone, onError: (err) => toast.error(err.message) });
+        const body = { name: f.name, specialty: f.specialty || undefined, cwd: f.cwd, model: f.model || undefined, permissionMode: f.permissionMode, effort: f.effort || null, allowedTools: lines(f.allowed), disallowedTools: lines(f.disallowed) };
+        if (initial) updateAgent.mutate({ id: initial.id, ...body, specialty: f.specialty, model: f.model }, { onSuccess: onDone, onError: (err) => toast.error(err.message) });
+        else createAgent.mutate({ ...body, effort: f.effort || undefined }, { onSuccess: onDone, onError: (err) => toast.error(err.message) });
       }}
     >
-      <p className="text-xs font-semibold text-foreground">Novo funcionário</p>
+      <p className="text-xs font-semibold text-foreground">{initial ? `Editar ${initial.name}` : "Novo funcionário"}</p>
       <input className={field} placeholder="Nome (ex.: Backend)" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required />
       <input className={field} placeholder="Especialidade (opcional)" value={f.specialty} onChange={(e) => setF({ ...f, specialty: e.target.value })} />
       <input className={field} placeholder="Diretório no servidor, ex.: /srv/meu-projeto" value={f.cwd} onChange={(e) => setF({ ...f, cwd: e.target.value })} required />
-      <input className={field} placeholder="Modelo (opcional)" value={f.model} onChange={(e) => setF({ ...f, model: e.target.value })} />
+      <div className="flex gap-2">
+        <input className={field} placeholder="Modelo (vazio = padrão)" value={f.model} onChange={(e) => setF({ ...f, model: e.target.value })} />
+        <select className={field} value={f.effort} onChange={(e) => setF({ ...f, effort: e.target.value })} aria-label="Esforço">
+          <option value="">Esforço: padrão</option><option value="low">baixo</option><option value="medium">médio</option><option value="high">alto</option><option value="xhigh">muito alto</option><option value="max">máximo</option>
+        </select>
+      </div>
       <select className={field} value={f.permissionMode} onChange={(e) => setF({ ...f, permissionMode: e.target.value })} aria-label="Permissões">
         <option value="default">Pedir aprovação para ações sensíveis</option>
         <option value="acceptEdits">Aceitar edições de arquivo (o resto pede aprovação)</option>
         <option value="plan">Somente planejar (sem executar)</option>
       </select>
+      <textarea className={`${field} h-14 font-mono`} placeholder={"Liberadas sem aprovação, uma por linha:\nRead\nBash(git status:*)"} value={f.allowed} onChange={(e) => setF({ ...f, allowed: e.target.value })} spellCheck={false} />
+      <textarea className={`${field} h-14 font-mono`} placeholder={"Bloqueadas, uma por linha:\nBash(rm:*)"} value={f.disallowed} onChange={(e) => setF({ ...f, disallowed: e.target.value })} spellCheck={false} />
       <div className="flex gap-2">
-        <Button size="sm" type="submit" variant="primary" disabled={createAgent.isPending}>Criar</Button>
+        <Button size="sm" type="submit" variant="primary" disabled={createAgent.isPending || updateAgent.isPending}>{initial ? "Salvar" : "Criar"}</Button>
         <Button size="sm" type="button" variant="secondary" onClick={onDone}>Cancelar</Button>
       </div>
     </form>
@@ -181,6 +195,8 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
   const [openTask, setOpenTask] = useState<string | null>(null);
   const [lastTaskId, setLastTaskId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   // Uma chave por COMANDO: se o envio falhar e o usuário clicar de novo, é a mesma chave (nunca duplica).
   const keyRef = useRef<{ text: string; key: string } | null>(null);
 
@@ -228,16 +244,20 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
             {a.name}
           </button>
         ))}
+        <button onClick={() => setToolsOpen(true)} className={cn(btn, "ml-auto border border-border text-muted hover:text-foreground")}>Ferramentas</button>
         {canWrite && <button onClick={() => setCreating((v) => !v)} className={cn(btn, "border border-dashed border-border text-muted hover:text-foreground")}><Plus className="inline h-3 w-3" /> Novo</button>}
       </div>
 
       {creating && <AgentForm onDone={() => setCreating(false)} />}
+      {editing && selected && <AgentForm initial={selected} onDone={() => setEditing(false)} />}
 
       {agents && agents.length === 0 && !creating && (
         <p className="p-4 text-sm text-muted">Nenhum funcionário ainda. {canWrite ? "Crie o primeiro em “Novo”: informe o diretório do projeto no servidor do Universe." : "Peça a um administrador para criar."}</p>
       )}
 
-      {selected && openTask ? (
+      {toolsOpen ? (
+        <ToolsPanel canWrite={canWrite} onBack={() => setToolsOpen(false)} />
+      ) : selected && openTask ? (
         <TaskDetail taskId={openTask} canWrite={canWrite} onBack={() => setOpenTask(null)} />
       ) : (
         selected && (
@@ -306,6 +326,7 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
                   <button className="flex items-center gap-1 text-muted hover:text-foreground" onClick={() => updateAgent.mutate({ id: selected.id, paused: !selected.paused })}>
                     <PauseCircle className="h-3.5 w-3.5" />{selected.paused ? "Retomar" : "Pausar"}
                   </button>
+                  <button className="flex items-center gap-1 text-muted hover:text-foreground" onClick={() => setEditing((v) => !v)}>Editar</button>
                   <button className="flex items-center gap-1 text-muted hover:text-status-error" onClick={() => { if (window.confirm(`Remover ${selected.name}? O histórico é mantido.`)) archiveAgent.mutate(selected.id, { onError: (e) => toast.error(e.message) }); }}>
                     <Trash2 className="h-3.5 w-3.5" />Remover
                   </button>

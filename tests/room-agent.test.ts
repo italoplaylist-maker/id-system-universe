@@ -4,7 +4,7 @@ import { roomAgentToSession } from "../src/lib/room-agent";
 import type { RoomAgentView } from "../src/server/orchestrator/service";
 
 const base: RoomAgentView = {
-  id: "ag1", name: "Backend", specialty: "API", cwd: "/srv/app", projectId: null, model: null, permissionMode: "default", paused: false, hasSession: true,
+  id: "ag1", name: "Backend", specialty: "API", cwd: "/srv/app", projectId: null, model: null, permissionMode: "default", effort: null, allowedTools: [], disallowedTools: [], paused: false, hasSession: true,
   state: "AVAILABLE", currentTask: null, activity: null, queued: 0, approval: null, lastFinishedAt: null, lastError: null, position: 0,
 };
 
