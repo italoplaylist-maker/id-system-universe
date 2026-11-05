@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import { PALETTE } from "../palette";
+import { MergeStatic } from "../render/merge-static";
 import { useUiStore } from "@/store/ui-store";
 import { TallPlant } from "./office-props";
 import { COMMAND_CANVAS, paintScreen, type CommandCenterStats } from "./command-screen";
@@ -37,7 +38,7 @@ function Slab({ plan }: { plan: HqPlan }) {
         const ang = Math.atan2(-(b.z - a.z), b.x - a.x);
         const mid = Math.atan2(mz, mx);
         const midDeg = ((mid * 180) / Math.PI + 360) % 360;
-        const isDoor = [0, 135, 247.5].some((d) => Math.abs(((midDeg - d + 540) % 360) - 180) < 3);
+        const isDoor = [0, 90, 135, 247.5].some((d) => Math.abs(((midDeg - d + 540) % 360) - 180) < 3);
         return (
           <group key={i} position={[mx, level, mz]} rotation={[0, ang, 0]}>
             <mesh position={[0, 0.02, 0]}>
@@ -253,14 +254,36 @@ function Garden({ level }: { level: number }) {
   );
 }
 
+/** Escada de entrada principal: três degraus largos de madeira e concreto na face sul do átrio. */
+function EntranceSteps({ level }: { level: number }) {
+  const apothem = HQ.ATRIUM_RADIUS * Math.cos(Math.PI / 16);
+  return (
+    <group position={[0, 0, apothem]}>
+      {[0, 1, 2].map((i) => (
+        <mesh key={i} position={[0, level - 0.23 * (i + 1) + 0.115, 0.3 + i * 0.5]} castShadow receiveShadow>
+          <boxGeometry args={[6.4 - i * 0.0, 0.23, 0.5]} />
+          <meshStandardMaterial color={i === 2 ? "#6f737b" : "#8a6a4a"} roughness={0.7} />
+        </mesh>
+      ))}
+      <mesh position={[0, level + 0.02, 0.02]}>
+        <boxGeometry args={[6.4, 0.03, 0.05]} />
+        <meshStandardMaterial color={RED} emissive={RED} emissiveIntensity={1} toneMapped={false} />
+      </mesh>
+    </group>
+  );
+}
+
 export function Atrium({ plan, stats, onOpenActivity, reduced }: { plan: HqPlan; stats: CommandCenterStats; onOpenActivity?: () => void; reduced: boolean }) {
   const level = plan.atrium.level;
   return (
     <group>
-      <Slab plan={plan} />
-      <Floor level={level} />
+      <MergeStatic>
+        <Slab plan={plan} />
+        <Floor level={level} />
+        <Garden level={level} />
+        <EntranceSteps level={level} />
+      </MergeStatic>
       <CommandCore level={level} stats={stats} onOpen={onOpenActivity} reduced={reduced} />
-      <Garden level={level} />
     </group>
   );
 }

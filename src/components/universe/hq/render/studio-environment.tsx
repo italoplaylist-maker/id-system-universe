@@ -44,7 +44,7 @@ export function StudioEnvironment({ daylight, profile }: { daylight: number; pro
   if (step <= 0.25) return procedural;
   return (
     <Suspense fallback={procedural}>
-      <Environment files="/hdri/brown_photostudio_02_1k.hdr" environmentIntensity={0.3 + step * 0.45} environmentRotation={[0, Math.PI * 0.35, 0]} />
+      <Environment files="/hdri/brown_photostudio_02_1k.hdr" environmentIntensity={0.3 + step * 0.3} environmentRotation={[0, Math.PI * 0.35, 0]} />
     </Suspense>
   );
 }

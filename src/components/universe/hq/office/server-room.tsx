@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { PALETTE } from "../palette";
+import { MergeStatic } from "../render/merge-static";
 import { useUiStore } from "@/store/ui-store";
 import type { OfficeLayout } from "./office-layout";
 
@@ -57,7 +58,7 @@ export function ServerRoom({ layout }: { layout: OfficeLayout }) {
   );
   const frame = <meshStandardMaterial color={STEEL} metalness={0.9} roughness={0.3} />;
   return (
-    <group>
+    <MergeStatic key={`${b.x0}|${b.x1}|${b.z0}|${b.z1}`}>
       {/* parede de frente (z1) com vão de porta */}
       {[
         { x: (b.x0 + (doorX - doorW / 2)) / 2, len: doorX - doorW / 2 - b.x0 },
@@ -106,6 +107,6 @@ export function ServerRoom({ layout }: { layout: OfficeLayout }) {
         <meshStandardMaterial color="#1a1f27" roughness={0.55} metalness={0.2} envMapIntensity={0.8} />
       </mesh>
       {quality === "high" && <pointLight position={[(b.x0 + b.x1) / 2, H - 0.3, (b.z0 + b.z1) / 2]} intensity={1.6} color="#9ec5ff" distance={Math.max(w, d) * 1.4} decay={1.8} />}
-    </group>
+    </MergeStatic>
   );
 }

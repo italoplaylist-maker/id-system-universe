@@ -9,6 +9,7 @@ import { AgentsBoard, type AgentsBoardStats } from "./agents-board";
 import { LoungeRoom } from "./lounge-furniture";
 import { TallPlant } from "./office-props";
 import { RoundedBox } from "@react-three/drei";
+import { MergeStatic } from "../render/merge-static";
 import type { AgentPodLayout, OfficeLayout } from "./office-layout";
 import { toWorld } from "../life/geometry";
 import type { HqPlan } from "../plan/hq-plan";
@@ -125,6 +126,7 @@ function ProjectRoom({ x, z, w, d }: { x: number; z: number; w: number; d: numbe
 function PodDecor({ x, z, yaw }: { x: number; z: number; yaw: number }) {
   return (
     <group position={[x, 0, z]} rotation={[0, yaw, 0]}>
+      <MergeStatic>
       <RoundedBox args={[4.0, 0.012, 5.0]} radius={0.04} smoothness={2} position={[0, 0.008, 0]} receiveShadow>
         <meshStandardMaterial color="#232832" roughness={1} />
       </RoundedBox>
@@ -142,6 +144,7 @@ function PodDecor({ x, z, yaw }: { x: number; z: number; yaw: number }) {
         <boxGeometry args={[3.74, 0.03, 0.05]} />
         <meshStandardMaterial color="#8d95a3" metalness={0.9} roughness={0.3} />
       </mesh>
+      </MergeStatic>
     </group>
   );
 }

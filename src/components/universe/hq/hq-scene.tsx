@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { ContactShadows, PerformanceMonitor } from "@react-three/drei";
+import { ContactShadows } from "@react-three/drei";
 import { QUALITY_PROFILES, type GraphicsQuality } from "./render/quality";
 import { StudioEnvironment } from "./render/studio-environment";
 import * as THREE from "three";
@@ -52,8 +52,6 @@ interface HqSceneProps {
   onOpenServers: () => void;
   /** Clique na tela de comando: abre o log de atividade/incidentes. */
   onOpenActivity?: () => void;
-  /** O FPS caiu de forma sustentada: a vista pode reduzir a qualidade. */
-  onPerformanceDecline?: () => void;
   selectedAgentId: string | null;
   onSelectAgent: (id: string) => void;
   /** Projetos e recursos já chegaram do servidor (ou é demo). Antes disso ninguém é desenhado. */
@@ -91,7 +89,6 @@ export function HqScene({
   onOpenProvider,
   onOpenServers,
   onOpenActivity,
-  onPerformanceDecline,
   selectedAgentId,
   onSelectAgent,
   dataReady,
@@ -288,7 +285,7 @@ export function HqScene({
     <Canvas
       shadows={profile.shadows ? "soft" : false}
       dpr={profile.dpr}
-      gl={{ antialias: profile.antialias, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: THREE.MathUtils.lerp(0.9, 1.05, env.daylightFactor), powerPreference: "high-performance" }}
+      gl={{ antialias: profile.antialias, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: THREE.MathUtils.lerp(0.9, 0.88, env.daylightFactor), powerPreference: "high-performance" }}
       className="bg-background"
       onCreated={({ gl, scene }) => {
         // Só em builds de diagnóstico (NEXT_PUBLIC_DEBUG_SCENE=1): expõe o renderer para medir draw calls/memória.
@@ -296,7 +293,6 @@ export function HqScene({
       }}
       onPointerMissed={() => selectedProjectId && setSelectedProjectId(null)}
     >
-      {onPerformanceDecline && quality !== "low" && <PerformanceMonitor ms={250} iterations={8} flipflops={2} onDecline={onPerformanceDecline} />}
       <color attach="background" args={[bgColor]} />
       <fog attach="fog" args={[bgColor, world.radius * 1.9, world.radius * 3.6]} />
 

@@ -10,6 +10,7 @@ import { useTexture } from "@react-three/drei";
 import { useUiStore } from "@/store/ui-store";
 import { QUALITY_PROFILES } from "../render/quality";
 import { HQ } from "../plan/hq-plan";
+import { MergeStatic } from "../render/merge-static";
 
 const WALL_COLOR = "#d6d9e0";
 const TRIM = "#5b6372";
@@ -335,7 +336,7 @@ export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", 
   const windowStep = (winLen - 1.2) / windowCount;
 
   return (
-    <group>
+    <MergeStatic key={`${width}|${depth}|${H}|${doorSide}|${doorAt}|${nocEnabled}|${westWall}|${screenPanel}|${tint}|${cladding}|${tower ? `${tower.side}${tower.extra}` : "-"}|${rich}`}>
       {/* foundation plinth + polished floor + front lip */}
       <mesh position={[0, -0.14, 0]} receiveShadow>
         <boxGeometry args={[width + 0.5, 0.28, depth + 0.5]} />
@@ -465,6 +466,6 @@ export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", 
           <meshStandardMaterial color={TRIM} metalness={0.75} roughness={0.35} />
         </mesh>
       ))}
-    </group>
+    </MergeStatic>
   );
 }

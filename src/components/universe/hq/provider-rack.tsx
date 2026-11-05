@@ -6,6 +6,7 @@ import { WorldAsset } from "./assets/world-asset";
 import { ASSET_KEYS } from "./assets/asset-keys";
 import { ServerRackFallback } from "./assets/procedural-furniture";
 import { PALETTE } from "./palette";
+import { MergeStatic } from "./render/merge-static";
 import type { UniverseProviderSummary } from "@/types/domain";
 
 const HEALTH_COLOR: Record<UniverseProviderSummary["health"], string> = {
@@ -56,7 +57,9 @@ export const ProviderRack = memo(function ProviderRack({ provider, position, sel
         </mesh>
       )}
 
-      <WorldAsset asset={ASSET_KEYS.SERVER_RACK} fallback={<ServerRackFallback color={color} active={provider.health !== "OFFLINE"} />} />
+      <MergeStatic key={provider.health}>
+        <WorldAsset asset={ASSET_KEYS.SERVER_RACK} fallback={<ServerRackFallback color={color} active={provider.health !== "OFFLINE"} />} />
+      </MergeStatic>
 
       <Html position={[0, RACK_HEIGHT + 0.18, 0]} center distanceFactor={8} style={{ pointerEvents: "none" }}>
         <span style={{ fontSize: 11, color: "#e6e9f0", fontFamily: "ui-sans-serif, system-ui", whiteSpace: "nowrap" }}>{provider.name}</span>
