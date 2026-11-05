@@ -84,7 +84,7 @@ function paintScreen(ctx: CanvasRenderingContext2D, stats: CommandCenterStats) {
  * canvas aspect ratio (height derives from width × canvasH/canvasW), so nothing is ever
  * stretched. Repainted only when the displayed numbers change.
  */
-export function CommandScreen({ layout, stats }: { layout: OfficeLayout; stats: CommandCenterStats }) {
+export function CommandScreen({ layout, stats, onOpen }: { layout: OfficeLayout; stats: CommandCenterStats; onOpen?: () => void }) {
   const { width, height, y, z } = layout.screen;
   const materialRef = useRef<THREE.MeshBasicMaterial>(null);
   const textureRef = useRef<THREE.CanvasTexture | null>(null);
@@ -116,7 +116,26 @@ export function CommandScreen({ layout, stats }: { layout: OfficeLayout; stats: 
   }, [key]);
 
   return (
-    <group position={[0, y, z + 0.06]}>
+    <group
+      position={[0, y, z + 0.06]}
+      onClick={
+        onOpen
+          ? (e) => {
+              e.stopPropagation();
+              onOpen();
+            }
+          : undefined
+      }
+      onPointerOver={
+        onOpen
+          ? (e) => {
+              e.stopPropagation();
+              document.body.style.cursor = "pointer";
+            }
+          : undefined
+      }
+      onPointerOut={onOpen ? () => (document.body.style.cursor = "auto") : undefined}
+    >
       <RoundedBox args={[width + 0.22, height + 0.22, 0.12]} radius={0.05} smoothness={3} castShadow>
         <meshStandardMaterial color="#0b0d12" metalness={0.5} roughness={0.4} />
       </RoundedBox>

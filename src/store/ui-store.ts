@@ -28,7 +28,8 @@ interface UiState {
 
   /** Nível de qualidade gráfica da sede 3D. `reducedGraphics` continua existindo (= nível "low") para quem já o usa. */
   quality: GraphicsQuality;
-  setQuality: (value: GraphicsQuality) => void;
+  /** `persist: false` = mudança automática (FPS baixo): vale só nesta sessão, não vira preferência do dispositivo. */
+  setQuality: (value: GraphicsQuality, opts?: { persist?: boolean }) => void;
   /** Lê a preferência deste dispositivo (só no cliente, depois da hidratação, para não divergir do HTML do servidor). */
   hydrateQuality: () => void;
   reducedGraphics: boolean;
@@ -60,8 +61,8 @@ export const useUiStore = create<UiState>((set) => ({
     const quality = readStoredQuality();
     set({ quality, reducedGraphics: quality === "low" });
   },
-  setQuality: (quality) => {
-    writeStoredQuality(quality);
+  setQuality: (quality, opts) => {
+    if (opts?.persist !== false) writeStoredQuality(quality);
     set({ quality, reducedGraphics: quality === "low" });
   },
   reducedGraphics: false,

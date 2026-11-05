@@ -2,7 +2,7 @@
 
 import { Suspense, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { ContactShadows } from "@react-three/drei";
+import { ContactShadows, PerformanceMonitor } from "@react-three/drei";
 import { QUALITY_PROFILES, type GraphicsQuality } from "./render/quality";
 import { StudioEnvironment } from "./render/studio-environment";
 import * as THREE from "three";
@@ -44,6 +44,10 @@ interface HqSceneProps {
   onSelectApplication: (id: string) => void;
   onOpenProvider: (providerId: string) => void;
   onOpenServers: () => void;
+  /** Clique na tela de comando: abre o log de atividade/incidentes. */
+  onOpenActivity?: () => void;
+  /** O FPS caiu de forma sustentada: a vista pode reduzir a qualidade. */
+  onPerformanceDecline?: () => void;
   selectedAgentId: string | null;
   onSelectAgent: (id: string) => void;
   /** Projetos e recursos já chegaram do servidor (ou é demo). Antes disso ninguém é desenhado. */
@@ -80,6 +84,8 @@ export function HqScene({
   onSelectApplication,
   onOpenProvider,
   onOpenServers,
+  onOpenActivity,
+  onPerformanceDecline,
   selectedAgentId,
   onSelectAgent,
   dataReady,
@@ -283,6 +289,7 @@ export function HqScene({
       }}
       onPointerMissed={() => selectedProjectId && setSelectedProjectId(null)}
     >
+      {onPerformanceDecline && quality !== "low" && <PerformanceMonitor ms={250} iterations={8} flipflops={2} onDecline={onPerformanceDecline} />}
       <color attach="background" args={[bgColor]} />
       <fog attach="fog" args={[bgColor, world.radius * 1.9, world.radius * 3.6]} />
 
@@ -339,7 +346,7 @@ export function HqScene({
           <>
         <OfficeShell layout={layout} nocEnabled={nocEnabled} eastDoor={agentsLayout !== null} />
         {nocEnabled && <NocWall layout={layout} servers={monitoredServers} onOpen={onOpenServers} />}
-        <CommandScreen layout={layout} stats={stats} />
+        <CommandScreen layout={layout} stats={stats} onOpen={onOpenActivity} />
         <OfficeProps layout={layout} />
 
         {layout.racks.map((rack) => {

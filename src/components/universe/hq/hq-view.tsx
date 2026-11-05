@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -40,6 +40,7 @@ export function HqView() {
   const [webglOk, setWebglOk] = useState<boolean | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [centerOpen, setCenterOpen] = useState(false);
+  const mountedAt = useRef(0);
   const { data: sessionUser } = useSession();
   const { data: observedSessions } = useAgentSessions(sessionUser ? canUser(sessionUser, "provider:read") : false);
   const canManageAgents = sessionUser ? canUser(sessionUser, "provider:write") : false;
@@ -71,6 +72,7 @@ export function HqView() {
   // (briefing: "ESC novamente: Italoc -> HQ").
   useEffect(() => {
     hydrateQuality();
+    mountedAt.current = Date.now();
   }, [hydrateQuality]);
 
   useEffect(() => {
@@ -166,6 +168,16 @@ export function HqView() {
               router.push("/settings/infrastructure");
             }}
             onOpenServers={() => router.push("/servers")}
+            onOpenActivity={() => router.push("/activity")}
+            onPerformanceDecline={() => {
+              // FPS sustentadamente baixo: desce um nível (só nesta sessão) e avisa; o usuário pode voltar pelo seletor.
+              // Ignora os primeiros 20 s (carga de modelos/texturas causa picos) e abas em segundo plano.
+              if (Date.now() - mountedAt.current < 20_000 || document.visibilityState !== "visible") return;
+              const next = quality === "high" ? "medium" : quality === "medium" ? "low" : null;
+              if (!next) return;
+              setQuality(next, { persist: false });
+              toast.message(`Desempenho baixo: qualidade gráfica reduzida para ${QUALITY_PROFILES[next].label}.`);
+            }}
             dataReady={demoMode || (realApplications !== undefined && realProjects !== undefined)}
             selectedAgentId={selectedAgentId}
             onSelectAgent={(id) => {
