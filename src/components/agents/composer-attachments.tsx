@@ -196,6 +196,7 @@ export function useDictation(onText: (text: string) => void) {
     recRef.current?.stop();
   }, []);
 
+  const beginRef = useRef<() => void>(() => undefined);
   const begin = useCallback(() => {
     const Ctor = speechCtor();
     if (!Ctor) return;
@@ -234,7 +235,7 @@ export function useDictation(onText: (text: string) => void) {
       if (wantRef.current) {
         // terminou a frase: continua ouvindo até o usuário parar
         try {
-          begin();
+          beginRef.current();
           return;
         } catch {
           wantRef.current = false;
@@ -245,6 +246,9 @@ export function useDictation(onText: (text: string) => void) {
     recRef.current = rec;
     rec.start();
   }, []);
+  useEffect(() => {
+    beginRef.current = begin;
+  }, [begin]);
 
   const start = useCallback(async () => {
     if (!speechCtor()) return;
