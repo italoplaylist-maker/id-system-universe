@@ -5,6 +5,7 @@ import { recordAuditEvent } from "@/server/audit/audit-log";
 import { redactSecrets } from "@/server/claude/agent-service";
 import { orchestratorBus } from "./bus";
 import { ExecutorStartError, getExecutor } from "./executor";
+import { prepareForRun } from "./attachments";
 import { buildUniverseMcp, UNIVERSE_AUTO_ALLOWED, UNIVERSE_MERGE_TOOL } from "./git/tools";
 import { notifyApprovalRequested, notifyTaskFinished } from "./notify";
 import { loadMcpServersForRun } from "./tools-config";
@@ -159,6 +160,7 @@ async function runTask(taskId: string): Promise<void> {
     return status === "APPROVED" ? { allow: true } : { allow: false, message: status === "DENIED" ? "Negado por você no ID System Universe." : "Sem decisão no ID System Universe a tempo." };
   };
 
+  const prepared = await prepareForRun(taskId).catch(() => ({ attachments: [], dir: null as string | null }));
   const configured = await loadMcpServersForRun().catch(() => ({}));
   // Ferramentas do Universe (PR/merge/limpeza): o agente não tem credencial de Git, só estas ferramentas.
   const universe = await buildUniverseMcp(agent.id, taskId).catch(() => null);
@@ -172,6 +174,8 @@ async function runTask(taskId: string): Promise<void> {
     agentName: agent.name,
     specialty: agent.specialty,
     effort: agent.effort,
+    attachments: prepared.attachments,
+    attachmentsDir: prepared.dir,
     allowedTools: [...new Set([...agent.allowedTools, ...(universe ? UNIVERSE_AUTO_ALLOWED : [])])],
     disallowedTools: agent.disallowedTools,
     mcpServers,

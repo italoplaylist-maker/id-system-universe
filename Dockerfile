@@ -60,7 +60,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl git ca-
 # in Coolify so the sessions survive redeploys.
 RUN groupadd --system --gid 1001 nodejs \
     && useradd --system --uid 1001 --gid nodejs --create-home --home-dir /home/nextjs nextjs \
-    && mkdir -p /home/nextjs/.claude /home/nextjs/workspaces && chown -R nextjs:nodejs /home/nextjs
+    && mkdir -p /home/nextjs/.claude /home/nextjs/workspaces /home/nextjs/attachments && chown -R nextjs:nodejs /home/nextjs
 ENV HOME=/home/nextjs \
     AGENTS_WORKSPACE_ROOT=/home/nextjs/workspaces
 

@@ -1,4 +1,6 @@
-import type { CanUseTool, Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { readFile } from "node:fs/promises";
+import type { CanUseTool, Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { LIMITS, type RunAttachment } from "./attachments";
 
 /** O que o worker precisa de um executor — o real usa o Claude Agent SDK; os testes injetam um falso. */
 export interface ExecutorRunInput {
@@ -10,6 +12,10 @@ export interface ExecutorRunInput {
   agentName: string;
   specialty?: string | null;
   effort?: string | null;
+  /** Anexos do comando (imagens vão como imagem; arquivos, pelo caminho). */
+  attachments?: RunAttachment[];
+  /** Pasta dos anexos desta tarefa: liberada para leitura do agente. */
+  attachmentsDir?: string | null;
   /** Ferramentas liberadas sem pedir aprovação / bloqueadas (regras do Claude Code, ex.: "Bash(git status:*)"). */
   allowedTools?: string[];
   disallowedTools?: string[];
@@ -79,6 +85,7 @@ export class ClaudeSdkExecutor implements TaskExecutor {
       skills: "all",
       systemPrompt: { type: "preset", preset: "claude_code", append },
       ...(input.model ? { model: input.model } : {}),
+      ...(input.attachmentsDir ? { additionalDirectories: [input.attachmentsDir] } : {}),
       ...(input.effort && ["low", "medium", "high", "xhigh", "max"].includes(input.effort) ? { effort: input.effort as "low" | "medium" | "high" | "xhigh" | "max" } : {}),
       ...(input.allowedTools?.length ? { allowedTools: input.allowedTools } : {}),
       ...(input.disallowedTools?.length ? { disallowedTools: input.disallowedTools } : {}),
@@ -86,11 +93,13 @@ export class ClaudeSdkExecutor implements TaskExecutor {
       ...(input.resumeSessionId ? { resume: input.resumeSessionId } : {}),
     };
 
+    // Sem anexo: texto puro. Com anexo: UMA mensagem de usuário com blocos (imagens inline + texto com os caminhos dos arquivos).
+    const prompt = await buildPrompt(input);
     let started = false;
     let sessionId: string | undefined;
     let result: ExecutorResult = {};
     try {
-      const stream = query({ prompt: input.prompt, options });
+      const stream = query({ prompt, options });
       for await (const message of stream as AsyncIterable<SDKMessage>) {
         const m = message as SDKMessage & { session_id?: string };
         if (m.session_id) sessionId = m.session_id;
@@ -136,6 +145,30 @@ export class ClaudeSdkExecutor implements TaskExecutor {
     }
     return { ...result, sessionId: result.sessionId ?? sessionId };
   }
+}
+
+/** Monta o prompt do Claude. Imagens ≤ 4,5 MB seguem como imagem; o resto (PDF, planilha, imagem grande…) como caminho para a ferramenta Read. */
+export async function buildPrompt(input: Pick<ExecutorRunInput, "prompt" | "attachments">): Promise<string | AsyncIterable<SDKUserMessage>> {
+  const atts = input.attachments ?? [];
+  if (atts.length === 0) return input.prompt;
+  const blocks: Array<Record<string, unknown>> = [];
+  const asFiles: RunAttachment[] = [];
+  for (const a of atts) {
+    if (a.kind === "image" && a.size <= LIMITS.maxInlineImageBytes) {
+      blocks.push({ type: "image", source: { type: "base64", media_type: a.mime, data: (await readFile(a.path)).toString("base64") } });
+    } else asFiles.push(a);
+  }
+  const imageNames = atts.filter((a) => a.kind === "image" && a.size <= LIMITS.maxInlineImageBytes).map((a) => a.name);
+  let text = input.prompt;
+  if (imageNames.length) text += `\n\n(Imagens anexadas: ${imageNames.join(", ")})`;
+  if (asFiles.length) {
+    text += `\n\nArquivos anexados — leia com a ferramenta Read:\n${asFiles.map((a) => `- ${a.path}  (${a.name}, ${a.mime}, ${Math.round(a.size / 1024)} KB)`).join("\n")}`;
+  }
+  blocks.push({ type: "text", text });
+  const message = { type: "user", message: { role: "user", content: blocks }, parent_tool_use_id: null } as unknown as SDKUserMessage;
+  return (async function* () {
+    yield message;
+  })();
 }
 
 const g = globalThis as unknown as { __isuExecutor?: TaskExecutor };

@@ -59,7 +59,7 @@ export function useOrchestratorTasks(scope: "active" | "history", agentId: strin
 export function useTaskDetail(taskId: string | null) {
   return useQuery({
     queryKey: [...KEY, "task", taskId],
-    queryFn: () => apiFetch<{ task: TaskView; events: TaskEventView[]; approval: { id: string; tool: string; detail: string } | null }>(`/api/orchestrator/tasks/${taskId}`),
+    queryFn: () => apiFetch<{ task: TaskView; events: TaskEventView[]; approval: { id: string; tool: string; detail: string } | null; attachments: Array<{ id: string; name: string; mime: string; size: number; kind: "image" | "file" }> }>(`/api/orchestrator/tasks/${taskId}`),
     enabled: !!taskId,
     refetchInterval: 4_000,
   });
@@ -155,8 +155,8 @@ export function useOrchestratorMutations() {
   return {
     /** A chave de idempotência é gerada pelo chamador UMA vez por comando: reenviar a mesma chave nunca duplica. */
     submit: useMutation({
-      mutationFn: ({ agentId, prompt, idempotencyKey }: { agentId: string; prompt: string; idempotencyKey: string }) =>
-        apiFetch<{ task: TaskView; duplicate: boolean }>(`/api/orchestrator/agents/${agentId}/tasks`, { method: "POST", body: JSON.stringify({ prompt, idempotencyKey }) }),
+      mutationFn: ({ agentId, prompt, idempotencyKey, attachmentIds }: { agentId: string; prompt: string; idempotencyKey: string; attachmentIds?: string[] }) =>
+        apiFetch<{ task: TaskView; duplicate: boolean }>(`/api/orchestrator/agents/${agentId}/tasks`, { method: "POST", body: JSON.stringify({ prompt, idempotencyKey, attachmentIds }) }),
       onSettled: refresh,
     }),
     cancel: useMutation({ mutationFn: (taskId: string) => apiFetch<{ status: string }>(`/api/orchestrator/tasks/${taskId}/cancel`, { method: "POST" }), onSettled: refresh }),

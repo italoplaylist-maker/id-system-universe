@@ -6,6 +6,7 @@ import { consumeRateLimit } from "@/server/security/rate-limit";
 import { recordAuditEvent } from "@/server/audit/audit-log";
 import { redactSecrets } from "@/server/claude/agent-service";
 import { orchestratorBus } from "./bus";
+import { linkToTask, listForTask, purgeAttachments, validateForTask, type AttachmentView } from "./attachments";
 
 type Actor = { userId: string; ip?: string; userAgent?: string };
 
@@ -99,10 +100,13 @@ export async function archiveAgent(id: string, actor: Actor) {
 // Tarefas
 // ---------------------------------------------------------------------------
 
-const submitSchema = z.object({
-  prompt: z.string().trim().min(1, "Escreva o comando.").max(20000, "O comando pode ter no máximo 20000 caracteres."),
-  idempotencyKey: z.string().min(8, "Chave de envio inválida.").max(100),
-});
+const submitSchema = z
+  .object({
+    prompt: z.string().trim().max(20000, "O comando pode ter no máximo 20000 caracteres."),
+    idempotencyKey: z.string().min(8, "Chave de envio inválida.").max(100),
+    attachmentIds: z.array(z.string().max(60)).max(10, "No máximo 10 anexos por comando.").optional(),
+  })
+  .refine((v) => v.prompt.length > 0 || (v.attachmentIds?.length ?? 0) > 0, { message: "Escreva o comando ou anexe um arquivo." });
 
 export interface TaskView {
   id: string;
@@ -155,13 +159,18 @@ export async function submitTask(agentId: string, input: unknown, actor: Actor):
   if (existing) return { task: toTaskView(existing), duplicate: true };
 
   consumeRateLimit(`orchestrator-submit:${actor.userId}`, 30, 60_000);
+  const attachmentIds = [...new Set(parsed.data.attachmentIds ?? [])];
+  await validateForTask(actor.userId, attachmentIds);
+  const promptText = parsed.data.prompt || "Veja os anexos.";
   try {
     const created = await prisma.agentTask.create({
-      data: { agentId, prompt: parsed.data.prompt, idempotencyKey: parsed.data.idempotencyKey, createdById: actor.userId },
+      data: { agentId, prompt: promptText, idempotencyKey: parsed.data.idempotencyKey, createdById: actor.userId },
       include: { agent: { select: { name: true } } },
     });
-    await appendEvent(created.id, "message_sent", parsed.data.prompt);
-    await recordAuditEvent({ userId: actor.userId, action: "AGENT_TASK_SUBMITTED", status: "SUCCESS", entityType: "AgentTask", entityId: created.id, metadata: { agentId, length: parsed.data.prompt.length }, ipAddress: actor.ip, userAgent: actor.userAgent });
+    await linkToTask(attachmentIds, created.id);
+    const names = (await listForTask(created.id)).map((a) => a.name);
+    await appendEvent(created.id, "message_sent", names.length ? `${promptText}\n📎 ${names.join(", ")}` : promptText);
+    await recordAuditEvent({ userId: actor.userId, action: "AGENT_TASK_SUBMITTED", status: "SUCCESS", entityType: "AgentTask", entityId: created.id, metadata: { agentId, length: promptText.length, attachments: attachmentIds.length }, ipAddress: actor.ip, userAgent: actor.userAgent });
     orchestratorBus.emit({ type: "task", taskId: created.id, agentId });
     // Começa já (não espera o próximo ciclo do worker); a resposta HTTP não depende disso.
     hookHolder.__isuTaskHook?.();
@@ -198,7 +207,7 @@ export interface TaskEventView {
   text: string | null;
 }
 
-export async function getTaskDetail(id: string, afterSeq = 0): Promise<{ task: TaskView; events: TaskEventView[]; approval: { id: string; tool: string; detail: string } | null }> {
+export async function getTaskDetail(id: string, afterSeq = 0): Promise<{ task: TaskView; events: TaskEventView[]; approval: { id: string; tool: string; detail: string } | null; attachments: AttachmentView[] }> {
   const t = await prisma.agentTask.findUnique({ where: { id }, include: { agent: { select: { name: true } } } });
   if (!t) throw new NotFoundError("Tarefa não encontrada.");
   const [events, approval, ahead] = await Promise.all([
@@ -210,6 +219,7 @@ export async function getTaskDetail(id: string, afterSeq = 0): Promise<{ task: T
     task: toTaskView(t, t.status === "QUEUED" ? ahead + 1 : null),
     events: events.map((e) => ({ seq: e.seq, ts: e.ts.toISOString(), kind: e.kind, tool: e.tool, text: e.text })),
     approval: approval ? { id: approval.id, tool: approval.tool, detail: approval.detail } : null,
+    attachments: await listForTask(id),
   };
 }
 
@@ -334,6 +344,9 @@ export async function listRoomAgents(now: Date = new Date()): Promise<RoomAgentV
 
 export async function purgeOldTasks(now: Date = new Date(), days = 60): Promise<number> {
   const cutoff = new Date(now.getTime() - days * 86_400_000);
+  const old = await prisma.agentTask.findMany({ where: { status: { in: [...TERMINAL] }, finishedAt: { lt: cutoff } }, select: { id: true } });
+  if (old.length > 0) await purgeAttachments({ taskIds: old.map((t) => t.id) }).catch(() => undefined);
   const r = await prisma.agentTask.deleteMany({ where: { status: { in: [...TERMINAL] }, finishedAt: { lt: cutoff } } });
+  await purgeAttachments().catch(() => undefined); // uploads que nunca viraram comando (>24 h)
   return r.count;
 }

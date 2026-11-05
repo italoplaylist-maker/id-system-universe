@@ -5,6 +5,7 @@ import { AlertTriangle, Ban, CheckCircle2, Clock, Loader2, PauseCircle, Plus, Se
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ToolsPanel } from "./tools-panel";
+import { AttachButton, AttachmentStrip, MicButton, useComposerAttachments, useDictation } from "./composer-attachments";
 import { cn } from "@/lib/cn";
 import {
   useAgentGit,
@@ -53,7 +54,7 @@ function TaskDetail({ taskId, canWrite, onBack }: { taskId: string; canWrite: bo
   const { data } = useTaskDetail(taskId);
   const { cancel, decide } = useOrchestratorMutations();
   if (!data) return <p className="p-4 text-xs text-muted">Carregando…</p>;
-  const { task, events, approval } = data;
+  const { task, events, approval, attachments } = data;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
@@ -62,6 +63,23 @@ function TaskDetail({ taskId, canWrite, onBack }: { taskId: string; canWrite: bo
       </div>
       <div className="space-y-2 overflow-y-auto p-4 text-xs">
         <p className="whitespace-pre-wrap break-words rounded-md border border-border bg-surface p-2 text-foreground">{task.prompt}</p>
+        {attachments.length > 0 && (
+          <ul className="flex flex-wrap gap-2" aria-label="Anexos">
+            {attachments.map((a) => (
+              <li key={a.id}>
+                <a href={`/api/orchestrator/attachments/${a.id}`} target="_blank" rel="noopener noreferrer" className="flex max-w-[11rem] items-center gap-2 rounded-md border border-border bg-surface p-1.5 text-[11px] hover:border-accent">
+                  {a.kind === "image" ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={`/api/orchestrator/attachments/${a.id}`} alt={a.name} className="h-10 w-10 rounded object-cover" />
+                  ) : (
+                    <span className="flex h-10 w-10 items-center justify-center rounded bg-background text-muted">📄</span>
+                  )}
+                  <span className="min-w-0 truncate text-foreground">{a.name}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
         {canWrite && approval && (
           <div className="space-y-2 rounded-md border border-status-warning/40 bg-status-warning/10 p-3" role="alert">
             <p className="flex items-center gap-1.5 font-semibold text-status-warning"><AlertTriangle className="h-3.5 w-3.5" />O agente pede permissão para usar {approval.tool}</p>
@@ -282,6 +300,7 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
   const [openTask, setOpenTask] = useState<string | null>(null);
   const [lastTaskId, setLastTaskId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const att = useComposerAttachments();
   const [editing, setEditing] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   // Uma chave por COMANDO: se o envio falhar e o usuário clicar de novo, é a mesma chave (nunca duplica).
@@ -294,15 +313,22 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
   const { data: tasks } = useOrchestratorTasks(tab, selected?.id ?? null, !!selected);
   const { data: last } = useTaskDetail(lastTaskId);
 
+  const dictation = useDictation((t) => setText((cur) => (cur && !/\s$/.test(cur) ? `${cur} ${t}` : cur + t)));
+  const canSend = (text.trim().length > 0 || att.ids.length > 0) && !att.uploading;
+
   const send = () => {
-    if (!selected || !text.trim() || submit.isPending) return;
-    if (!keyRef.current || keyRef.current.text !== text) keyRef.current = { text, key: newKey() };
+    if (!selected || !canSend || submit.isPending) return;
+    // A chave de envio muda se o texto OU os anexos mudarem; repetir o mesmo clique reaproveita a mesma chave (nunca duplica).
+    const sig = `${text}|${att.ids.join(",")}`;
+    if (!keyRef.current || keyRef.current.text !== sig) keyRef.current = { text: sig, key: newKey() };
+    if (dictation.listening) dictation.toggle();
     submit.mutate(
-      { agentId: selected.id, prompt: text, idempotencyKey: keyRef.current.key },
+      { agentId: selected.id, prompt: text, idempotencyKey: keyRef.current.key, attachmentIds: att.ids },
       {
         onSuccess: ({ task }) => {
           setLastTaskId(task.id);
           setText("");
+          att.clear();
           keyRef.current = null;
         },
         onError: (e) => toast.error(e.message),
@@ -352,23 +378,49 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
             {canWrite && (
               <div className="space-y-2 border-b border-border p-4">
                 <label htmlFor="cc-command" className="text-xs font-medium text-foreground">Comando para {selected.name}</label>
-                <textarea
-                  id="cc-command"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
+                <div
+                  className="space-y-2"
+                  onDragOver={(e) => {
+                    if (e.dataTransfer.types.includes("Files")) e.preventDefault();
                   }}
-                  rows={3}
-                  maxLength={20000}
-                  disabled={selected.paused}
-                  placeholder={selected.paused ? "Agente pausado" : "Ex.: rode os testes e me diga o resultado"}
-                  className="w-full resize-none rounded-md border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none disabled:opacity-60"
-                />
+                  onDrop={(e) => {
+                    if (e.dataTransfer.files.length) {
+                      e.preventDefault();
+                      void att.addFiles(Array.from(e.dataTransfer.files));
+                    }
+                  }}
+                >
+                  <textarea
+                    id="cc-command"
+                    value={dictation.listening && dictation.interim ? `${text}${text && !/\s$/.test(text) ? " " : ""}${dictation.interim}` : text}
+                    onChange={(e) => setText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
+                    }}
+                    onPaste={(e) => {
+                      // colar imagem/arquivo (Ctrl+V) anexa, como no Claude
+                      const files = Array.from(e.clipboardData.files);
+                      if (files.length) {
+                        e.preventDefault();
+                        void att.addFiles(files);
+                      }
+                    }}
+                    rows={3}
+                    maxLength={20000}
+                    disabled={selected.paused}
+                    placeholder={selected.paused ? "Agente pausado" : "Ex.: rode os testes e me diga o resultado — ou arraste/cole uma imagem aqui"}
+                    className="w-full resize-none rounded-md border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none disabled:opacity-60"
+                  />
+                  <AttachmentStrip items={att.items} onRemove={att.remove} />
+                </div>
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] text-muted">Ctrl+Enter envia. O servidor executa sozinho — sem abrir o Claude.</p>
-                  <Button size="sm" variant="primary" disabled={!text.trim() || submit.isPending || selected.paused} onClick={send}>
-                    {submit.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}Enviar
+                  <div className="flex items-center gap-1.5">
+                    <AttachButton onFiles={(f) => void att.addFiles(f)} disabled={selected.paused} />
+                    <MicButton listening={dictation.listening} supported={dictation.supported} onClick={dictation.toggle} />
+                    <p className="hidden text-[11px] text-muted sm:block">{dictation.listening ? "Ouvindo… fale o comando" : "Ctrl+Enter envia."}</p>
+                  </div>
+                  <Button size="sm" variant="primary" disabled={!canSend || submit.isPending || selected.paused} onClick={send}>
+                    {submit.isPending || att.uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}{att.uploading ? "Enviando anexo…" : "Enviar"}
                   </Button>
                 </div>
                 {last && (
