@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
 import { TimelinePanel } from "@/components/agents/timeline-panel";
 import { FeedsDialog } from "@/components/agents/feed-dialogs";
+import { NotificationsDialog } from "@/components/notifications/notifications-dialog";
 import { CommandCenter } from "@/components/agents/command-center";
 import { useAgentSessions } from "@/hooks/use-agents";
 import { useSession } from "@/hooks/use-session";
@@ -209,12 +210,13 @@ export function HqView() {
         selectedAgentId && <TimelinePanel sessionId={selectedAgentId} onClose={() => setSelectedAgentId(null)} canSend={canManageAgents} />
       )}
 
-      <div className="absolute bottom-4 right-4 flex items-center gap-2">
+      <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-end gap-2 pointer-events-none [&>*]:pointer-events-auto">
         {sessionUser && canUser(sessionUser, "provider:read") && (
           <button onClick={() => setCenterOpen((v) => !v)} className="flex items-center gap-1.5 rounded-full border border-border bg-surface-raised/80 px-3 py-1.5 text-xs text-muted backdrop-blur hover:text-foreground">
             Central de Agentes
           </button>
         )}
+        <NotificationsDialog variant="pill" />
         {canManageAgents && <FeedsDialog />}
         {cameraMode !== "overview" && (
           <button

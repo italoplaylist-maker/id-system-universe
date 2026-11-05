@@ -20,7 +20,7 @@ const LABEL: Record<keyof Prefs, string> = {
 };
 
 /** Sino da barra superior: ativa os avisos neste aparelho (celular ou computador) e escolhe o que receber. */
-export function NotificationsDialog() {
+export function NotificationsDialog({ variant = "icon" }: { variant?: "icon" | "pill" }) {
   const { data: user } = useSession();
   const [open, setOpen] = useState(false);
   const [support, setSupport] = useState<PushSupport>("unsupported");
@@ -66,9 +66,15 @@ export function NotificationsDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <button className="rounded-md p-2 text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Notificações" title="Notificações">
-          <Bell className="h-4 w-4" />
-        </button>
+        {variant === "pill" ? (
+          <button className="flex items-center gap-1.5 rounded-full border border-border bg-surface-raised/80 px-3 py-1.5 text-xs text-muted backdrop-blur hover:text-foreground" aria-label="Notificações" title="Notificações">
+            <Bell className="h-3.5 w-3.5" aria-hidden /> Notificações
+          </button>
+        ) : (
+          <button className="rounded-md p-2 text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Notificações" title="Notificações">
+            <Bell className="h-4 w-4" />
+          </button>
+        )}
       </DialogTrigger>
       <DialogContent title="Notificações" description="Pop-ups no app e avisos no celular e no computador, mesmo com o Universe fechado.">
         <div className="space-y-4 text-sm">

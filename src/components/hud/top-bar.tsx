@@ -43,8 +43,8 @@ export function TopBar() {
   }
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface/80 px-4 backdrop-blur-md">
-      <div className="flex items-center gap-6">
+    <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-border bg-surface/80 px-4 backdrop-blur-md">
+      <div className="flex shrink-0 items-center gap-6">
         <div className="leading-tight">
           <p className="text-[10px] uppercase tracking-[0.3em] text-muted">ID System</p>
           <p className="text-sm font-semibold">Universe</p>
@@ -67,7 +67,8 @@ export function TopBar() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      {/* No celular a fileira é maior que a tela: rola para o lado em vez de esconder sino, configurações e sair. */}
+      <div className="flex min-w-0 items-center gap-2 overflow-x-auto [scrollbar-width:none] [&>*]:shrink-0">
         <Link href="/projects" className="rounded-md p-2 text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Projetos">
           <Building2 className="h-4 w-4" />
         </Link>
