@@ -369,6 +369,17 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
   useEffect(() => {
     if (!agentId && agents && agents.length > 0) setAgentId(agents[0].id); // eslint-disable-line react-hooks/set-state-in-effect
   }, [agentId, agents]);
+  // Esc fecha a tela cheia (exceto quando o foco está num campo de texto).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   const selected = useMemo(() => agents?.find((a) => a.id === agentId) ?? agents?.[0] ?? null, [agents, agentId]);
   const { data: tasks } = useOrchestratorTasks(tab, selected?.id ?? null, !!selected);
   const { data: last } = useTaskDetail(lastTaskId);
