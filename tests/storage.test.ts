@@ -78,6 +78,20 @@ describe("faxina do servidor (storage)", () => {
     assert.ok(existsSync(join(cwd, "src", "app.ts")), "sem origin: fica, mesmo parada há 90 dias");
   });
 
+  it("pasta de repositórios extras do agente não é tratada como órfã", async () => {
+    const extras = `${cwd}.extras`;
+    big(join(extras, "brain", "nota.md"), 1);
+    const past = new Date(Date.now() - 90 * 86_400_000);
+    utimesSync(extras, past, past);
+    await cleanupStorage({ force: true });
+    assert.ok(existsSync(join(extras, "brain", "nota.md")), "extras preservados");
+    const orphan = join(tmp, "workspaces", "sem-dono");
+    big(join(orphan, "a.bin"), 1);
+    utimesSync(orphan, past, past);
+    await cleanupStorage({ force: true });
+    assert.ok(!existsSync(orphan), "órfão antigo some");
+  });
+
   it("transcrições antigas saem; a da sessão em uso fica", async () => {
     const proj = join(tmp, "home", ".claude", "projects", "p1");
     const old = join(proj, "aaaa-old.jsonl");

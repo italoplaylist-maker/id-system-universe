@@ -4,13 +4,16 @@ import { useState } from "react";
 import Link from "next/link";
 import { Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { useGithubRepos, useOrchestratorMutations, useRefreshGithubRepos } from "@/hooks/use-orchestrator";
+import { useExtraRepoMutations, useGithubRepos, useOrchestratorMutations, useRefreshGithubRepos } from "@/hooks/use-orchestrator";
 
 /** Conectar (ou trocar) o repositório GitHub do agente, direto na central — sem precisar mexer em recursos do projeto. */
-export function RepoConnect({ agentId, canWrite, current, onDone }: { agentId: string; canWrite: boolean; current?: string | null; onDone?: () => void }) {
+export function RepoConnect({ agentId, canWrite, current, onDone, mode = "primary" }: { agentId: string; canWrite: boolean; current?: string | null; onDone?: () => void; mode?: "primary" | "extra" }) {
   const { data, isLoading } = useGithubRepos(canWrite);
   const refresh = useRefreshGithubRepos();
   const { updateAgent } = useOrchestratorMutations();
+  const extra = useExtraRepoMutations();
+  const [all, setAll] = useState(false);
+  const pending = mode === "extra" ? extra.add.isPending : updateAgent.isPending;
   const [repoId, setRepoId] = useState("");
   const [branch, setBranch] = useState("");
 
@@ -47,8 +50,20 @@ export function RepoConnect({ agentId, canWrite, current, onDone }: { agentId: s
       <div className="flex flex-wrap items-center gap-2">
         <button
           className="rounded bg-accent px-3 py-1 text-xs font-semibold text-white disabled:opacity-50"
-          disabled={!repoId || updateAgent.isPending}
-          onClick={() =>
+          disabled={!repoId || pending}
+          onClick={() => {
+            const done = () => {
+              setRepoId("");
+              setBranch("");
+              onDone?.();
+            };
+            if (mode === "extra") {
+              extra.add.mutate(
+                { agentId, githubRepositoryId: repoId, branch: branch.trim() || null, applyToAll: all },
+                { onSuccess: (d) => (toast.success(d.added > 1 ? `Conectado a ${d.added} agentes.` : `Repositório adicionado. ${d.message}`), done()), onError: (e) => toast.error(e.message) },
+              );
+              return;
+            }
             updateAgent.mutate(
               { id: agentId, githubRepositoryId: repoId, githubBranch: branch.trim() || null },
               {
@@ -56,22 +71,26 @@ export function RepoConnect({ agentId, canWrite, current, onDone }: { agentId: s
                   const p = d.agent.prepare;
                   if (p && !p.ok) toast.error(`Conectei, mas não consegui baixar: ${p.message}`);
                   else toast.success(`Repositório conectado.${p?.message && p.message !== "Pronto." ? ` ${p.message}` : ""}`);
-                  setRepoId("");
-                  setBranch("");
-                  onDone?.();
+                  done();
                 },
                 onError: (e) => toast.error(e.message),
               },
-            )
-          }
+            );
+          }}
         >
-          {updateAgent.isPending ? "Conectando e baixando…" : current ? "Trocar repositório" : "Conectar repositório"}
+          {pending ? "Conectando e baixando…" : mode === "extra" ? "Adicionar repositório" : current ? "Trocar repositório" : "Conectar repositório"}
         </button>
         <button className="flex items-center gap-1 text-muted hover:text-foreground" onClick={() => refresh.mutate(undefined, { onError: (e) => toast.error(e.message) })} disabled={refresh.isPending}>
           <RefreshCw className={refresh.isPending ? "h-3 w-3 animate-spin" : "h-3 w-3"} />Atualizar lista
         </button>
         {current && <button className="text-muted hover:text-foreground" onClick={() => onDone?.()}>Cancelar</button>}
       </div>
+      {mode === "extra" && (
+        <label className="flex items-center gap-1.5 text-muted">
+          <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
+          Adicionar também a todos os agentes (ex.: o cérebro)
+        </label>
+      )}
       <p className="text-muted">É daqui que o agente baixa o código e abre PR/merge. {repos.length} repositório(s) liberado(s) pelo GitHub App.</p>
     </div>
   );

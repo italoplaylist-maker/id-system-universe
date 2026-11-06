@@ -11,7 +11,7 @@ import { notifyApprovalRequested, notifyTaskFinished } from "./notify";
 import { loadMcpServersForRun } from "./tools-config";
 import { seedDefaultPacks } from "./skill-packs";
 import { cleanupStorage } from "./storage";
-import { getWorkspacePreparer, syncProjectAgents } from "./workspace";
+import { getWorkspacePreparer, loadExtraRepos, syncProjectAgents } from "./workspace";
 import { ACTIVE, appendEvent, getSettings, purgeOldTasks, setTaskRegisteredHook } from "./service";
 
 /**
@@ -167,6 +167,8 @@ async function runTask(taskId: string): Promise<void> {
   // Ferramentas do Universe (PR/merge/limpeza): o agente não tem credencial de Git, só estas ferramentas.
   const universe = await buildUniverseMcp(agent.id, taskId).catch(() => null);
   const mcpServers: Record<string, unknown> = { ...configured, ...(universe ? { universe } : {}) };
+  // Repositórios extras já clonados (preenchido depois que o workspace é preparado, logo abaixo).
+  let extraRepos: Array<{ dir: string; fullName: string; name: string }> = [];
   const input = (resume: string | null | undefined) => ({
     taskId,
     prompt: task.prompt,
@@ -178,6 +180,7 @@ async function runTask(taskId: string): Promise<void> {
     effort: agent.effort,
     attachments: prepared.attachments,
     attachmentsDir: prepared.dir,
+    extraRepos,
     allowedTools: [...new Set([...agent.allowedTools, ...(universe ? UNIVERSE_AUTO_ALLOWED : [])])],
     disallowedTools: agent.disallowedTools,
     mcpServers,
@@ -193,6 +196,7 @@ async function runTask(taskId: string): Promise<void> {
   try {
     // Antes do Claude iniciar (ainda "INICIANDO"): garante o diretório do agente (clone do GitHub vinculado, se faltar).
     await getWorkspacePreparer()(agent, (text) => appendEvent(taskId, "info", text));
+    extraRepos = await loadExtraRepos(agent.id, agent.cwd).catch(() => []);
     let outcome;
     try {
       outcome = await getExecutor().run(input(agent.claudeSessionId));

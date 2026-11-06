@@ -11,7 +11,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     await guard(false);
     const { id } = await params;
     const checkPermissions = new URL(request.url).searchParams.get("permissions") === "1";
-    return NextResponse.json(await getGitStatus(id, { checkPermissions }));
+    const repo = new URL(request.url).searchParams.get("repo");
+    return NextResponse.json(await getGitStatus(id, { checkPermissions, repo }));
   } catch (error) {
     return apiError(error);
   }

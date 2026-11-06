@@ -9,7 +9,9 @@ import { makeUser, prisma, readBody, resetDb, startServer, type MockServer } fro
 import { setConfig } from "@/server/integrations/config";
 import { connectInstallation } from "@/server/github/github-service";
 import { getGitStatus, publishChanges, resolveAgentRepo } from "@/server/orchestrator/git/ops";
-import { updateAgent } from "@/server/orchestrator/service";
+import { addExtraRepo, getAgentRepos, removeExtraRepo, updateAgent } from "@/server/orchestrator/service";
+import { extraDir } from "@/server/orchestrator/repo-link";
+import { loadExtraRepos } from "@/server/orchestrator/workspace";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const PEM = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
@@ -44,6 +46,14 @@ describe("agente: conectar repositório direto (sem recurso do projeto)", () => 
     git(seed, "add", "-A");
     git(seed, "commit", "-m", "inicial");
     git(seed, "push", join(originDir, "acme", "italoc.git"), "main");
+    git(tmp, "init", "--bare", "-b", "main", join(originDir, "acme", "brain.git"));
+    const seed2 = join(tmp, "seed2");
+    mkdirSync(seed2);
+    git(seed2, "init", "-b", "main");
+    writeFileSync(join(seed2, "CLAUDE.md"), "# cérebro\n");
+    git(seed2, "add", "-A");
+    git(seed2, "commit", "-m", "inicial");
+    git(seed2, "push", join(originDir, "acme", "brain.git"), "main");
     process.env.GITHUB_GIT_URL = `file://${originDir}`;
     process.env.AGENTS_WORKSPACE_ROOT = root;
 
@@ -57,16 +67,16 @@ describe("agente: conectar repositório direto (sem recurso do projeto)", () => 
         return void res.end(JSON.stringify({ token: "inst-token", expires_at: new Date(Date.now() + 3600_000).toISOString() }));
       }
       if (/^\/app\/installations\/\d+$/.test(url)) return void res.end(JSON.stringify({ id: 4242, account: { login: "acme", type: "Organization", id: 1 }, repository_selection: "selected", permissions: gh.perms }));
-      if (url.startsWith("/installation/repositories")) return void res.end(JSON.stringify({ repositories: [{ id: 1, full_name: "acme/italoc", name: "italoc", owner: { login: "acme" }, default_branch: "main", private: true }] }));
+      if (url.startsWith("/installation/repositories")) return void res.end(JSON.stringify({ repositories: [{ id: 1, full_name: "acme/italoc", name: "italoc", owner: { login: "acme" }, default_branch: "main", private: true }, { id: 2, full_name: "acme/brain", name: "brain", owner: { login: "acme" }, default_branch: "main", private: true }] }));
       if (url.includes("/branches")) return void res.end(JSON.stringify([{ name: "main" }]));
-      if (m === "GET" && url.startsWith("/repos/acme/italoc/pulls?")) {
+      if (m === "GET" && url.startsWith("/repos/acme/italoc/pulls?") || url.startsWith("/repos/acme/brain/pulls?")) {
         const head = decodeURIComponent(new URL(url, "http://x").searchParams.get("head") ?? "").split(":")[1];
         return void res.end(JSON.stringify(gh.prs.filter((p) => p.head === head && p.state === "open").map((p) => ({ number: p.number, html_url: p.html_url, title: p.title }))));
       }
-      if (m === "POST" && url === "/repos/acme/italoc/pulls") {
+      if (m === "POST" && (url === "/repos/acme/italoc/pulls" || url === "/repos/acme/brain/pulls")) {
         const b = JSON.parse(body);
         const number = gh.prs.length + 1;
-        const pr = { number, html_url: `https://github.com/acme/italoc/pull/${number}`, title: b.title, head: b.head, state: "open", merged: false };
+        const pr = { number, html_url: `https://github.com/acme/${url.includes("/brain/") ? "brain" : "italoc"}/pull/${number}`, title: b.title, head: b.head, state: "open", merged: false };
         gh.prs.push(pr);
         res.statusCode = 201;
         return void res.end(JSON.stringify({ number, html_url: pr.html_url, title: pr.title }));
@@ -159,6 +169,54 @@ describe("agente: conectar repositório direto (sem recurso do projeto)", () => 
     const backup = (r.prepare?.message ?? "").match(/em (\S+) \(fica/)?.[1];
     assert.ok(backup && existsSync(join(backup, "trabalho.txt")), "arquivo preservado no backup");
     assert.ok(existsSync(join(cwd, ".git")));
+  });
+
+  it("repositório extra (o cérebro): clona ao lado, vira ref própria, publica PR nele sem tocar no principal", async () => {
+    const admin = await makeUser("ADMIN", "a5@test.dev");
+    await updateAgent(agentId, { githubRepositoryId: repoId }, { userId: admin.id });
+    const brain = await prisma.gitHubRepository.findFirstOrThrow({ where: { fullName: "acme/brain" } });
+    const r = await addExtraRepo(agentId, { githubRepositoryId: brain.id }, { userId: admin.id });
+    assert.equal(r.added, 1);
+    const view = await getAgentRepos(agentId);
+    assert.equal(view.extras.length, 1);
+    assert.equal(view.extras[0].dir, "brain");
+    const dir = extraDir(cwd, "brain");
+    assert.ok(existsSync(join(dir, ".git")), "extra clonado em <cwd>.extras/brain");
+    assert.ok(!existsSync(join(cwd, "brain")), "e não dentro do principal");
+    assert.deepEqual((await loadExtraRepos(agentId, cwd)).map((e) => e.fullName), ["acme/brain"]);
+
+    const info = await resolveAgentRepo(agentId, "brain");
+    assert.equal(info.fullName, "acme/brain");
+    assert.equal(info.agent.cwd, dir);
+    assert.equal((await resolveAgentRepo(agentId, "acme/brain")).repoRef, view.extras[0].id);
+    assert.equal((await resolveAgentRepo(agentId)).fullName, "acme/italoc", "sem repo = principal");
+    await assert.rejects(() => resolveAgentRepo(agentId, "acme/outro"), /não tem o repositório/);
+
+    writeFileSync(join(dir, "nota.md"), "# decisão\n");
+    const st = await getGitStatus(agentId, { repo: "brain" });
+    assert.equal(st.repo, "acme/brain");
+    assert.equal(st.changedFiles, 1);
+    assert.equal((await getGitStatus(agentId)).changedFiles, 0, "principal intacto");
+    const pub = await publishChanges(agentId, { title: "Registra decisão", taskId: "taskbrain001", repo: "brain" });
+    assert.equal(pub.pullRequest.url.includes("/acme/brain/"), true);
+    assert.equal((await getGitStatus(agentId, { repo: "brain" })).pullRequests.every((p) => p.repo === "acme/brain"), true);
+
+    // desconectar: o vínculo sai; a cópia só é apagada se tudo foi enviado
+    const rm = await removeExtraRepo(agentId, view.extras[0].id, { userId: admin.id });
+    assert.equal((await getAgentRepos(agentId)).extras.length, 0);
+    assert.equal(typeof rm.cleanup.removed, "boolean");
+  });
+
+  it("não adiciona o principal como extra nem duplica; applyToAll chega aos outros agentes", async () => {
+    const admin = await makeUser("ADMIN", "a6@test.dev");
+    await updateAgent(agentId, { githubRepositoryId: repoId }, { userId: admin.id });
+    await assert.rejects(() => addExtraRepo(agentId, { githubRepositoryId: repoId }, { userId: admin.id }), /já é o repositório principal/);
+    const brain = await prisma.gitHubRepository.findFirstOrThrow({ where: { fullName: "acme/brain" } });
+    const other = await prisma.agentProfile.create({ data: { name: "Outro", cwd: join(root, `outro-${Date.now()}`), position: 5 } });
+    const r = await addExtraRepo(agentId, { githubRepositoryId: brain.id, applyToAll: true }, { userId: admin.id });
+    assert.equal(r.added, 2);
+    assert.equal((await getAgentRepos(other.id)).extras.length, 1);
+    await assert.rejects(() => addExtraRepo(agentId, { githubRepositoryId: brain.id }, { userId: admin.id }), /já está conectado/);
   });
 
   it("rejeita repositório inexistente", async () => {

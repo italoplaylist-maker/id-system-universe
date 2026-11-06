@@ -8,6 +8,7 @@ import { logger } from "@/lib/logger";
 import { attachmentsDir, purgeAttachments } from "./attachments";
 import { workspaceRoot } from "./workspace";
 import { cleanupWorkspace } from "./git/ops";
+import { extraDir, extrasRoot } from "./repo-link";
 
 /**
  * Faxina do servidor: o Universe roda agentes que clonam repositórios, instalam dependências, compilam e guardam
@@ -95,13 +96,19 @@ async function agentState() {
     prisma.agentTask.findMany({ where: { status: { in: [...ACTIVE] } }, select: { agentId: true } }),
     prisma.agentTask.groupBy({ by: ["agentId"], _max: { createdAt: true, finishedAt: true } }),
   ]);
+  const extraRows = await prisma.agentRepository.findMany({ select: { agentId: true, dir: true } });
+  const extraDirs = new Map<string, string[]>();
+  for (const x of extraRows) {
+    const a = agents.find((g) => g.id === x.agentId);
+    if (a) extraDirs.set(a.id, [...(extraDirs.get(a.id) ?? []), extraDir(a.cwd, x.dir)]);
+  }
   const busy = new Set(active.map((a) => a.agentId));
   const lastActivity = new Map<string, number>();
   for (const l of last) {
     const t = Math.max(l._max.createdAt?.getTime() ?? 0, l._max.finishedAt?.getTime() ?? 0);
     lastActivity.set(l.agentId, t);
   }
-  return { agents, busy, lastActivity };
+  return { agents, busy, lastActivity, extraDirs };
 }
 
 /** Candidatas a "pasta pesada": na raiz da cópia e um nível abaixo (apps/*, packages/*, etc.). */
@@ -138,7 +145,7 @@ export interface StorageReport {
 
 export async function getStorageReport(): Promise<StorageReport> {
   const root = workspaceRoot();
-  const { agents, busy, lastActivity } = await agentState();
+  const { agents, busy, lastActivity, extraDirs } = await agentState();
   const now = Date.now();
   const rows: StorageReport["workspaces"]["agents"] = [];
   let known = 0;
@@ -146,9 +153,14 @@ export async function getStorageReport(): Promise<StorageReport> {
   for (const a of agents) {
     if (!existsSync(a.cwd) || !(await insideRoot(a.cwd, root))) continue;
     knownPaths.add(resolve(a.cwd));
-    const bytes = await dirSize(a.cwd);
+    let bytes = await dirSize(a.cwd);
     let heavyBytes = 0;
     for (const rel of await heavyCandidates(a.cwd)) heavyBytes += await dirSize(join(a.cwd, rel));
+    for (const ed of extraDirs.get(a.id) ?? []) {
+      if (!existsSync(ed)) continue;
+      bytes += await dirSize(ed);
+      for (const rel of await heavyCandidates(ed)) heavyBytes += await dirSize(join(ed, rel));
+    }
     known += bytes;
     const la = lastActivity.get(a.id);
     rows.push({ agentId: a.id, name: a.name, bytes, heavyBytes, idleHours: la ? Math.round((now - la) / HOUR) : null, busy: busy.has(a.id) });
@@ -190,16 +202,18 @@ export async function cleanupStorage(opts: { force?: boolean } = {}): Promise<Cl
   const result: CleanupResult = { freedBytes: 0, actions: [] };
   const root = workspaceRoot();
   const now = Date.now();
-  const { agents, busy, lastActivity } = await agentState();
+  const { agents, busy, lastActivity, extraDirs } = await agentState();
 
   // 1) Pastas regeneráveis (e ignoradas pelo Git) de agentes parados.
   for (const a of agents) {
     if (busy.has(a.id) || !existsSync(a.cwd) || !(await insideRoot(a.cwd, root))) continue;
     const idleMs = now - (lastActivity.get(a.id) ?? 0);
     if (!opts.force && idleMs < RETENTION.heavyIdleHours() * HOUR) continue;
-    for (const rel of await heavyCandidates(a.cwd)) {
-      if (!(await isGitIgnored(a.cwd, rel))) continue; // versionada: nunca
-      await removeCounting(join(a.cwd, rel), result, `${a.name}: ${rel}`);
+    for (const base of [a.cwd, ...(extraDirs.get(a.id) ?? []).filter((d) => existsSync(d))]) {
+      for (const rel of await heavyCandidates(base)) {
+        if (!(await isGitIgnored(base, rel))) continue; // versionada: nunca
+        await removeCounting(join(base, rel), result, `${a.name}${base === a.cwd ? "" : ` (${base.split("/").pop()})`}: ${rel}`);
+      }
     }
   }
 
@@ -221,7 +235,7 @@ export async function cleanupStorage(opts: { force?: boolean } = {}): Promise<Cl
 
   // 3) Pastas órfãs em workspaces (de agentes removidos) sem mexer há 30 dias.
   if (existsSync(root)) {
-    const owned = new Set(agents.map((a) => resolve(a.cwd)));
+    const owned = new Set(agents.flatMap((a) => [resolve(a.cwd), resolve(extrasRoot(a.cwd))]));
     for (const e of await readdir(root, { withFileTypes: true }).catch(() => [])) {
       if (!e.isDirectory()) continue;
       const p = resolve(join(root, e.name));

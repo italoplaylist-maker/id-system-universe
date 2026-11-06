@@ -11,6 +11,8 @@ import { AttachButton, AttachmentStrip, MicButton, useComposerAttachments, useDi
 import { cn } from "@/lib/cn";
 import {
   useAgentGit,
+  useAgentRepos,
+  useExtraRepoMutations,
   useAvailableModels,
   useOrchestratorMutations,
   useOrchestratorSettings,
@@ -166,9 +168,13 @@ const MERGE_RULE = "mcp__universe__merge_pull_request";
 
 /** GitHub do agente: estado da cópia, PRs abertos e os botões (enviar, merge, limpar). Mesma lógica das ferramentas que o agente usa sozinho. */
 function GitPanel({ agentId, canWrite }: { agentId: string; canWrite: boolean }) {
-  const { data: git, refetch, isFetching } = useAgentGit(agentId);
+  const [repoRef, setRepoRef] = useState("primary");
+  const { data: git, refetch, isFetching } = useAgentGit(agentId, repoRef);
+  const { data: repos } = useAgentRepos(agentId);
+  const extraMut = useExtraRepoMutations();
   const { publish, mergePr, cleanup } = useOrchestratorMutations();
   const [changing, setChanging] = useState(false);
+  const [adding, setAdding] = useState(false);
   if (!git) return null;
   if (!git.hasRepo) {
     return (
@@ -187,7 +193,33 @@ function GitPanel({ agentId, canWrite }: { agentId: string; canWrite: boolean })
         <span>GitHub · {git.repo}</span>
         {canWrite && <button className="text-[11px] font-normal text-muted hover:text-foreground" onClick={() => setChanging((v) => !v)}>{changing ? "Fechar" : "Trocar repositório"}</button>}
       </p>
-      {changing && <RepoConnect agentId={agentId} canWrite={canWrite} current={git.repo} onDone={() => setChanging(false)} />}
+      {changing && repoRef === "primary" && <RepoConnect agentId={agentId} canWrite={canWrite} current={git.repo} onDone={() => setChanging(false)} />}
+      {repos && (repos.extras.length > 0 || canWrite) && (
+        <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Repositórios do agente">
+          <button role="tab" aria-selected={repoRef === "primary"} className={cn("rounded-full border px-2 py-0.5", repoRef === "primary" ? "border-accent text-foreground" : "border-border text-muted hover:text-foreground")} onClick={() => setRepoRef("primary")}>
+            {repos.primary?.fullName.split("/")[1] ?? "principal"}
+          </button>
+          {repos.extras.map((e) => (
+            <span key={e.id} className={cn("flex items-center gap-1 rounded-full border px-2 py-0.5", repoRef === e.id ? "border-accent text-foreground" : "border-border text-muted")}>
+              <button role="tab" aria-selected={repoRef === e.id} className="hover:text-foreground" onClick={() => setRepoRef(e.id)}>{e.dir}</button>
+              {canWrite && (
+                <button
+                  aria-label={`Desconectar ${e.fullName}`}
+                  className="hover:text-status-error"
+                  onClick={() => {
+                    if (!window.confirm(`Desconectar ${e.fullName} deste agente? A cópia local só é apagada se tudo já estiver no GitHub.`)) return;
+                    extraMut.remove.mutate({ agentId, extraId: e.id }, { onSuccess: () => { if (repoRef === e.id) setRepoRef("primary"); toast.success("Repositório desconectado."); }, onError: (er) => toast.error(er.message) });
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          ))}
+          {canWrite && <button className="rounded-full border border-dashed border-border px-2 py-0.5 text-muted hover:text-foreground" onClick={() => setAdding((v) => !v)}>{adding ? "Fechar" : "+ repositório"}</button>}
+        </div>
+      )}
+      {adding && <RepoConnect mode="extra" agentId={agentId} canWrite={canWrite} onDone={() => setAdding(false)} />}
       {(git.missingPermissions.length > 0 || git.missingForMerge.length > 0) && git.permissionsSeen && (
         <div className="space-y-1.5 rounded border border-status-warning/40 bg-status-warning/10 p-2 text-[11px] text-status-warning" role="status">
           <p>
@@ -236,12 +268,12 @@ function GitPanel({ agentId, canWrite }: { agentId: string; canWrite: boolean })
             size="sm"
             variant="secondary"
             disabled={!hasWork || publish.isPending || git.missingPermissions.length > 0}
-            onClick={() => publish.mutate({ agentId }, { onSuccess: (r) => toast.success(`PR #${r.pullRequest.number} aberto.`), onError: (e) => toast.error(e.message) })}
+            onClick={() => publish.mutate({ agentId, repo: repoRef }, { onSuccess: (r) => toast.success(`PR #${r.pullRequest.number} aberto.`), onError: (e) => toast.error(e.message) })}
           >
             {publish.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Enviar para o GitHub"}
           </Button>
           {git.workspaceExists && (
-            <Button size="sm" variant="secondary" disabled={cleanup.isPending} onClick={() => cleanup.mutate(agentId, { onSuccess: (r) => (r.removed ? toast.success("Cópia apagada.") : toast.message(r.reason ?? "Cópia mantida.")), onError: (e) => toast.error(e.message) })}>
+            <Button size="sm" variant="secondary" disabled={cleanup.isPending} onClick={() => cleanup.mutate({ agentId, repo: repoRef }, { onSuccess: (r) => (r.removed ? toast.success("Cópia apagada.") : toast.message(r.reason ?? "Cópia mantida.")), onError: (e) => toast.error(e.message) })}>
               Limpar cópia
             </Button>
           )}
@@ -481,7 +513,7 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
               ))}
               {tasks && tasks.length === 0 && <li className="px-4 py-4 text-muted">{tab === "active" ? "Nada em andamento nem na fila." : "Sem histórico ainda."}</li>}
             </ul>
-            <GitPanel agentId={selected.id} canWrite={canWrite} />
+            <GitPanel key={selected.id} agentId={selected.id} canWrite={canWrite} />
             {canWrite && <StoragePanel />}
             {canWrite && (
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs">

@@ -327,6 +327,7 @@ model GitHubRepository {
 
   resourceLinks ResourceRepository[]
   agentLinks    AgentProfile[]
+  agentExtras   AgentRepository[]
 
   @@unique([installationId, externalId])
   @@index([fullName])
@@ -835,6 +836,7 @@ model AgentProfile {
   updatedAt          DateTime           @updatedAt
   tasks              AgentTask[]
   pullRequests       AgentPullRequest[]
+  agentRepositories  AgentRepository[]
 
   @@index([archivedAt, position])
 }
@@ -993,4 +995,21 @@ model AgentAttachment {
 
   @@index([taskId])
   @@index([createdAt])
+}
+
+/// Repositórios EXTRAS de um agente (além do principal em AgentProfile.githubRepositoryId): cada um é clonado em <cwd>.extras/<dir>.
+model AgentRepository {
+  id                 String           @id @default(cuid())
+  agentId            String
+  agent              AgentProfile     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  githubRepositoryId String
+  githubRepository   GitHubRepository @relation(fields: [githubRepositoryId], references: [id], onDelete: Cascade)
+  /// Branch base do PR (vazio = a padrão do repositório).
+  branch             String?
+  /// Nome da subpasta (único por agente).
+  dir                String
+  createdAt          DateTime         @default(now())
+
+  @@unique([agentId, githubRepositoryId])
+  @@unique([agentId, dir])
 }
