@@ -70,10 +70,10 @@ model User {
   /// Permissões extras concedidas além do role (ex.: BILLING_VIEW, BILLING_MANAGE).
   extraPermissions String[] @default([])
 
-  sessions      Session[]
-  auditEvents   AuditEvent[]
-  preference    UserPreference?
-  projectAccess ProjectAccess[]
+  sessions               Session[]
+  auditEvents            AuditEvent[]
+  preference             UserPreference?
+  projectAccess          ProjectAccess[]
   pushSubscriptions      PushSubscription[]
   notificationPreference NotificationPreference?
 }
@@ -326,6 +326,7 @@ model GitHubRepository {
   updatedAt      DateTime           @updatedAt
 
   resourceLinks ResourceRepository[]
+  agentLinks    AgentProfile[]
 
   @@unique([installationId, externalId])
   @@index([fullName])
@@ -801,34 +802,39 @@ model AgentApproval {
 
 /// Funcionário permanente da Sala dos Agentes. Existe independentemente de ter tarefa.
 model AgentProfile {
-  id              String      @id @default(cuid())
-  name            String
-  specialty       String?
+  id                 String             @id @default(cuid())
+  name               String
+  specialty          String?
   /// Diretório de trabalho NO SERVIDOR do Universe (onde o Claude roda).
-  cwd             String
-  projectId       String?
-  model           String?
+  cwd                String
+  projectId          String?
+  /// Repositório GitHub ligado DIRETO ao agente (tem prioridade sobre o repositório do recurso do projeto).
+  githubRepositoryId String?
+  githubRepository   GitHubRepository?  @relation(fields: [githubRepositoryId], references: [id], onDelete: SetNull)
+  /// Branch base do PR (vazio = a padrão do repositório).
+  githubBranch       String?
+  model              String?
   /// default | acceptEdits | plan — "bypassPermissions" nunca é oferecido.
-  permissionMode  String      @default("default")
+  permissionMode     String             @default("default")
   /// low | medium | high | xhigh | max (vazio = padrão do Claude).
-  effort          String?
+  effort             String?
   /// Ferramentas liberadas sem pedir aprovação (ex.: "Read", "Bash(git status:*)").
-  allowedTools    String[]    @default([])
+  allowedTools       String[]           @default([])
   /// Ferramentas bloqueadas para este agente.
-  disallowedTools String[]    @default([])
+  disallowedTools    String[]           @default([])
   /// Pausado: continua na sala, mas não recebe execuções (tarefas ficam na fila).
-  paused          Boolean     @default(false)
+  paused             Boolean            @default(false)
   /// Sessão Claude persistente (resume) — o contexto continua entre tarefas.
-  claudeSessionId String?
-  lastError       String?
-  lastActiveAt    DateTime?
+  claudeSessionId    String?
+  lastError          String?
+  lastActiveAt       DateTime?
   /// Ordem estável das mesas.
-  position        Int         @default(0)
-  archivedAt      DateTime?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  tasks           AgentTask[]
-  pullRequests    AgentPullRequest[]
+  position           Int                @default(0)
+  archivedAt         DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  tasks              AgentTask[]
+  pullRequests       AgentPullRequest[]
 
   @@index([archivedAt, position])
 }
@@ -901,18 +907,18 @@ model OrchestratorSetting {
 
 /// Servidor MCP disponível para os agentes do Universe (segredos cifrados).
 model AgentMcpServer {
-  id        String   @id @default(cuid())
-  name      String   @unique
+  id         String   @id @default(cuid())
+  name       String   @unique
   /// stdio | http | sse
-  type      String
-  command   String?
-  args      String[] @default([])
-  url       String?
+  type       String
+  command    String?
+  args       String[] @default([])
+  url        String?
   /// JSON cifrado: env (stdio) ou headers (http/sse). Nunca volta pela API, só as chaves.
   secretsEnc String?
-  enabled   Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 /// Aparelho/navegador que aceitou receber notificações push (Web Push, VAPID). Um usuário pode ter vários (celular, computador).
@@ -936,17 +942,17 @@ model PushSubscription {
 
 /// Quais tipos de aviso o usuário quer receber (pop-up e push).
 model NotificationPreference {
-  userId    String   @id
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  deploys   Boolean  @default(true)
-  agents    Boolean  @default(true)
-  approvals Boolean  @default(true)
-  servers   Boolean  @default(true)
-  billing   Boolean  @default(true)
+  userId          String   @id
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deploys         Boolean  @default(true)
+  agents          Boolean  @default(true)
+  approvals       Boolean  @default(true)
+  servers         Boolean  @default(true)
+  billing         Boolean  @default(true)
   /// Canal extra: o mesmo aviso por WhatsApp (chega com o app fechado, em qualquer celular). Número só com dígitos, formato internacional.
   whatsappEnabled Boolean  @default(false)
   whatsappNumber  String?
-  updatedAt DateTime @updatedAt
+  updatedAt       DateTime @updatedAt
 }
 
 /// PR aberto por um agente (ou pelo botão do painel): o Universe lembra dele para mergear e limpar a cópia depois.

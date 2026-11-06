@@ -174,8 +174,8 @@ export function useOrchestratorMutations() {
       onSettled: refresh,
     }),
     updateAgent: useMutation({
-      mutationFn: ({ id, ...input }: { id: string; name?: string; specialty?: string; cwd?: string; model?: string; permissionMode?: string; effort?: string | null; allowedTools?: string[]; disallowedTools?: string[]; paused?: boolean }) =>
-        apiFetch(`/api/orchestrator/agents/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+      mutationFn: ({ id, ...input }: { id: string; name?: string; specialty?: string; cwd?: string; model?: string; permissionMode?: string; effort?: string | null; allowedTools?: string[]; disallowedTools?: string[]; paused?: boolean; githubRepositoryId?: string | null; githubBranch?: string | null }) =>
+        apiFetch<{ agent: { prepare?: { ok: boolean; message: string } } }>(`/api/orchestrator/agents/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
       onSettled: refresh,
     }),
     archiveAgent: useMutation({ mutationFn: (id: string) => apiFetch(`/api/orchestrator/agents/${id}`, { method: "DELETE" }), onSettled: refresh }),
@@ -220,5 +220,25 @@ export function useCleanStorage() {
   return useMutation({
     mutationFn: () => apiFetch<{ result: { freedBytes: number; actions: string[] }; report: StorageReportView }>("/api/orchestrator/storage", { method: "POST" }),
     onSuccess: (data) => queryClient.setQueryData([...KEY, "storage"], { report: data.report }),
+  });
+}
+
+export interface GithubRepoOption {
+  id: string;
+  fullName: string;
+  defaultBranch: string | null;
+  isPrivate: boolean;
+}
+
+/** Repositórios disponíveis (os que o GitHub App enxerga). */
+export function useGithubRepos(enabled: boolean) {
+  return useQuery({ queryKey: [...KEY, "github-repos"], queryFn: () => apiFetch<{ repositories: GithubRepoOption[]; installations: number }>("/api/orchestrator/github-repos"), enabled, staleTime: 30_000 });
+}
+
+export function useRefreshGithubRepos() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<{ repositories: GithubRepoOption[]; installations: number }>("/api/orchestrator/github-repos", { method: "POST" }),
+    onSuccess: (data) => queryClient.setQueryData([...KEY, "github-repos"], data),
   });
 }

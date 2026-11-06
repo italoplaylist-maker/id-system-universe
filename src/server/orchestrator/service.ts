@@ -4,6 +4,7 @@ import { prisma } from "@/server/db/client";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { consumeRateLimit } from "@/server/security/rate-limit";
 import { recordAuditEvent } from "@/server/audit/audit-log";
+import { prepareAfterLink } from "./workspace";
 import { redactSecrets } from "@/server/claude/agent-service";
 import { orchestratorBus } from "./bus";
 import { linkToTask, listForTask, purgeAttachments, validateForTask, type AttachmentView } from "./attachments";
@@ -51,6 +52,8 @@ const profileSchema = z.object({
   effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional().nullable(),
   allowedTools: z.array(toolRule).max(60).optional(),
   disallowedTools: z.array(toolRule).max(60).optional(),
+  githubRepositoryId: z.string().max(40).optional().nullable(),
+  githubBranch: z.string().trim().max(120).regex(/^[A-Za-z0-9._\/-]*$/, "Branch inválida.").optional().nullable(),
 });
 
 export async function createAgent(input: unknown, actor: Actor) {
@@ -71,15 +74,26 @@ export async function updateAgent(id: string, input: unknown, actor: Actor) {
   const existing = await prisma.agentProfile.findUnique({ where: { id } });
   if (!existing || existing.archivedAt) throw new NotFoundError("Agente não encontrado.");
   const data = parsed.data;
+  if (data.githubRepositoryId) {
+    const repo = await prisma.gitHubRepository.findUnique({ where: { id: data.githubRepositoryId }, include: { installation: true } });
+    if (!repo || repo.archived || repo.installation.status !== "ACTIVE") throw new ValidationError("Repositório não encontrado ou sem acesso do GitHub App.");
+  }
   // Trocar o diretório invalida a sessão (ela pertence ao projeto anterior).
   const resetSession = data.cwd !== undefined && data.cwd !== existing.cwd;
   const agent = await prisma.agentProfile.update({
     where: { id },
-    data: { ...data, ...(data.specialty !== undefined ? { specialty: data.specialty || null } : {}), ...(data.model !== undefined ? { model: data.model || null } : {}), ...(data.effort !== undefined ? { effort: data.effort || null } : {}), ...(resetSession ? { claudeSessionId: null } : {}) },
+    data: { ...data, ...(data.specialty !== undefined ? { specialty: data.specialty || null } : {}), ...(data.model !== undefined ? { model: data.model || null } : {}), ...(data.effort !== undefined ? { effort: data.effort || null } : {}), ...(data.githubRepositoryId !== undefined ? { githubRepositoryId: data.githubRepositoryId || null } : {}), ...(data.githubBranch !== undefined ? { githubBranch: data.githubBranch || null } : {}), ...(resetSession ? { claudeSessionId: null } : {}) },
   });
   await recordAuditEvent({ userId: actor.userId, action: "AGENT_PROFILE_UPDATED", status: "SUCCESS", entityType: "AgentProfile", entityId: id, ipAddress: actor.ip, userAgent: actor.userAgent });
   orchestratorBus.emit({ type: "agent", agentId: id });
-  return agent;
+  // Repositório conectado/trocado: já prepara a cópia (clone) para o agente poder publicar sem esperar a próxima tarefa.
+  let prepare: { ok: boolean; message: string } | undefined;
+  if (data.githubRepositoryId && data.githubRepositoryId !== existing.githubRepositoryId) {
+    const work = prepareAfterLink(id);
+    prepare = await Promise.race([work, new Promise<{ ok: boolean; message: string }>((r) => setTimeout(() => r({ ok: true, message: "Baixando o repositório em segundo plano…" }), 90_000))]);
+    orchestratorBus.emit({ type: "agent", agentId: id });
+  }
+  return Object.assign(agent, { prepare });
 }
 
 /** "Remover" arquiva: o histórico de tarefas fica. */

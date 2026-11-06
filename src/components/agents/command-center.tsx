@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ToolsPanel } from "./tools-panel";
 import { StoragePanel } from "./storage-panel";
+import { RepoConnect } from "./repo-connect";
 import { AttachButton, AttachmentStrip, MicButton, useComposerAttachments, useDictation } from "./composer-attachments";
 import { cn } from "@/lib/cn";
 import {
@@ -167,15 +168,26 @@ const MERGE_RULE = "mcp__universe__merge_pull_request";
 function GitPanel({ agentId, canWrite }: { agentId: string; canWrite: boolean }) {
   const { data: git, refetch, isFetching } = useAgentGit(agentId);
   const { publish, mergePr, cleanup } = useOrchestratorMutations();
+  const [changing, setChanging] = useState(false);
   if (!git) return null;
   if (!git.hasRepo) {
-    return <p className="border-t border-border px-4 py-2 text-[11px] text-muted">GitHub: este agente não tem repositório vinculado (ligue um recurso do projeto a um repositório para ele abrir PR).</p>;
+    return (
+      <div className="space-y-2 border-t border-border px-4 py-2.5 text-xs">
+        <p className="font-semibold text-foreground">GitHub · conectar repositório</p>
+        <p className="text-[11px] text-muted">Este agente ainda não tem repositório. Escolha um para ele baixar o código e abrir PR/merge.</p>
+        <RepoConnect agentId={agentId} canWrite={canWrite} />
+      </div>
+    );
   }
   const open = git.pullRequests.filter((p) => p.status === "OPEN");
   const hasWork = git.changedFiles > 0 || git.unpushedCommits > 0;
   return (
     <div className="space-y-2 border-t border-border px-4 py-2.5 text-xs">
-      <p className="font-semibold text-foreground">GitHub · {git.repo}</p>
+      <p className="flex items-center justify-between gap-2 font-semibold text-foreground">
+        <span>GitHub · {git.repo}</span>
+        {canWrite && <button className="text-[11px] font-normal text-muted hover:text-foreground" onClick={() => setChanging((v) => !v)}>{changing ? "Fechar" : "Trocar repositório"}</button>}
+      </p>
+      {changing && <RepoConnect agentId={agentId} canWrite={canWrite} current={git.repo} onDone={() => setChanging(false)} />}
       {(git.missingPermissions.length > 0 || git.missingForMerge.length > 0) && git.permissionsSeen && (
         <div className="space-y-1.5 rounded border border-status-warning/40 bg-status-warning/10 p-2 text-[11px] text-status-warning" role="status">
           <p>

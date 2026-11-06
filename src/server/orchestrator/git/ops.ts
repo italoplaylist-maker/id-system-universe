@@ -7,6 +7,7 @@ import { redactSecrets } from "@/server/claude/agent-service";
 import { recordAuditEvent } from "@/server/audit/audit-log";
 import { notify } from "@/server/notifications/notify";
 import { orchestratorBus } from "../bus";
+import { pickAgentRepository } from "../repo-link";
 import { freshInstallationToken, getInstallationInfo, ghFetch, missingMergePermissions, missingWritePermissions } from "./github-client";
 import { cleanOut, gitEnv, isInsideWorkspaceRoot, runGit } from "./git";
 
@@ -41,16 +42,10 @@ export interface AgentRepo {
 export async function resolveAgentRepo(agentId: string): Promise<AgentRepo> {
   const agent = await prisma.agentProfile.findUnique({ where: { id: agentId } });
   if (!agent || agent.archivedAt) throw new NotFoundError("Agente não encontrado.");
-  const link = agent.projectId
-    ? await prisma.resourceRepository.findFirst({
-        where: { application: { projectId: agent.projectId }, githubRepositoryId: { not: null } },
-        include: { githubRepository: { include: { installation: true } } },
-        orderBy: { createdAt: "asc" },
-      })
-    : null;
-  const gh = link?.githubRepository;
-  if (!gh || gh.archived) throw new ValidationError("Este agente não tem um repositório GitHub vinculado (o projeto precisa ter um recurso ligado a um repositório).");
-  return { agent: { id: agent.id, name: agent.name, cwd: agent.cwd, projectId: agent.projectId }, fullName: gh.fullName, baseBranch: link?.branch || gh.defaultBranch || "main", installationId: gh.installation.installationId, accountLogin: gh.installation.accountLogin, accountType: gh.installation.accountType };
+  const picked = await pickAgentRepository(agent);
+  const gh = picked?.gh;
+  if (!gh || gh.archived) throw new ValidationError("Este agente ainda não tem um repositório GitHub conectado. Escolha um no próprio agente (Central de Agentes → GitHub → Conectar repositório).");
+  return { agent: { id: agent.id, name: agent.name, cwd: agent.cwd, projectId: agent.projectId }, fullName: gh.fullName, baseBranch: picked.branch || gh.defaultBranch || "main", installationId: gh.installation.installationId, accountLogin: gh.installation.accountLogin, accountType: gh.installation.accountType };
 }
 
 const slug = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "agente";
