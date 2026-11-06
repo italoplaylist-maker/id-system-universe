@@ -125,6 +125,7 @@ export function ServerDetail({ server }: { server: ServerOverview }) {
               <thead className="text-xs text-muted">
                 <tr className="border-b border-border">
                   <th className="px-4 py-2 text-left font-normal">Container</th>
+                  <th className="px-4 py-2 text-left font-normal">Repositório</th>
                   <th className="px-4 py-2 text-right font-normal">CPU</th>
                   <th className="px-4 py-2 text-right font-normal">Memória</th>
                   <th className="px-4 py-2 text-right font-normal">% mem.</th>
@@ -133,7 +134,10 @@ export function ServerDetail({ server }: { server: ServerOverview }) {
               <tbody>
                 {server.containers.map((c) => (
                   <tr key={c.name} className="border-b border-border last:border-0">
-                    <td className="max-w-[260px] truncate px-4 py-2 text-foreground" title={c.name}>{c.name}</td>
+                    <td className="max-w-[260px] truncate px-4 py-2 text-foreground" title={c.name}>{c.appName ? <span className="block truncate">{c.appName}</span> : null}<span className={c.appName ? "block truncate text-[11px] text-muted" : ""}>{c.name}</span></td>
+                    <td className="max-w-[260px] truncate px-4 py-2" title={c.repository ?? undefined}>
+                      {c.repository ? <>{c.repository}{c.branch ? <span className="text-muted"> · {c.branch}</span> : null}</> : <span className="text-muted">não identificado</span>}
+                    </td>
                     <td className="px-4 py-2 text-right">{c.cpuPercent.toFixed(1)}%</td>
                     <td className="px-4 py-2 text-right">{formatMb(c.memMb)}</td>
                     <td className="px-4 py-2 text-right">{c.memPercent.toFixed(1)}%</td>

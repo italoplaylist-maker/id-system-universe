@@ -64,6 +64,10 @@ export async function findServerByToken(token: string) {
 
 export interface ContainerSnapshot {
   name: string;
+  /** Aplicação do Coolify a que o contêiner pertence (casada pelo UUID no nome) e o repositório dela. */
+  appName?: string | null;
+  repository?: string | null;
+  branch?: string | null;
   cpuPercent: number;
   memMb: number;
   memPercent: number;
@@ -131,6 +135,15 @@ export async function listServers(now: Date = new Date()): Promise<ServerOvervie
   const servers = await prisma.monitoredServer.findMany({ orderBy: { createdAt: "asc" } });
   const since = new Date(now.getTime() - 60 * 60_000);
   const result: ServerOverview[] = [];
+  const apps = await prisma.application.findMany({
+    select: { externalId: true, name: true, repository: true, branch: true, repositoryLink: { select: { repositoryFullName: true, branch: true } } },
+  });
+  const attachRepo = (c: { name: string; cpuPercent: number; memMb: number; memPercent: number }): ContainerSnapshot => {
+    // Coolify nomeia o contêiner com o UUID do recurso (apps: "<uuid>-<id do deploy>").
+    const app = apps.find((a) => a.externalId.length >= 8 && c.name.startsWith(a.externalId));
+    if (!app) return { ...c, appName: null, repository: null, branch: null };
+    return { ...c, appName: app.name, repository: app.repositoryLink?.repositoryFullName ?? app.repository ?? null, branch: app.repositoryLink?.branch ?? app.branch ?? null };
+  };
 
   for (const server of servers) {
     const [latest, recent] = await Promise.all([
@@ -156,7 +169,7 @@ export async function listServers(now: Date = new Date()): Promise<ServerOvervie
       levels: latestView
         ? { cpu: levelFor("cpu", latestView.cpuPercent), mem: levelFor("mem", latestView.mem.percent), disk: levelFor("disk", latestView.disk.percent) }
         : { cpu: "ok", mem: "ok", disk: "ok" },
-      containers: containers.success ? containers.data : [],
+      containers: containers.success ? containers.data.map(attachRepo) : [],
       spark: { cpu: sampled.map((r) => r.cpuPercent), mem: sampled.map((r) => percentOf(r.memUsedMb, r.memTotalMb)) },
     });
   }
