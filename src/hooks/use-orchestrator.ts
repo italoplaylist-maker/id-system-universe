@@ -95,7 +95,7 @@ export function useAvailableModels(enabled = true) {
 export function useOrchestratorSettings(enabled = true) {
   return useQuery({
     queryKey: [...KEY, "settings"],
-    queryFn: () => apiFetch<{ settings: { maxConcurrent: number } }>("/api/orchestrator/settings"),
+    queryFn: () => apiFetch<{ settings: { maxConcurrent: number; autoApprove: boolean } }>("/api/orchestrator/settings"),
     select: (d) => d.settings,
     enabled,
   });
@@ -200,7 +200,7 @@ export function useOrchestratorMutations() {
       onSettled: refresh,
     }),
     setConcurrency: useMutation({
-      mutationFn: (maxConcurrent: number) => apiFetch("/api/orchestrator/settings", { method: "PATCH", body: JSON.stringify({ maxConcurrent }) }),
+      mutationFn: (patch: number | { maxConcurrent?: number; autoApprove?: boolean }) => apiFetch("/api/orchestrator/settings", { method: "PATCH", body: JSON.stringify(typeof patch === "number" ? { maxConcurrent: patch } : patch) }),
       onSettled: refresh,
     }),
   };

@@ -904,6 +904,8 @@ model AgentTaskApproval {
 model OrchestratorSetting {
   id            String   @id @default("default")
   maxConcurrent Int      @default(2)
+  /// Agentes executam comandos/edições (e o merge, com CI verde) sem pedir aprovação a cada passo.
+  autoApprove   Boolean  @default(true)
   updatedAt     DateTime @updatedAt
 }
 

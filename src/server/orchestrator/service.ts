@@ -262,14 +262,15 @@ export async function decideTaskApproval(approvalId: string, input: unknown, act
 
 export async function getSettings() {
   const row = await prisma.orchestratorSetting.upsert({ where: { id: "default" }, create: { id: "default" }, update: {} });
-  return { maxConcurrent: row.maxConcurrent };
+  return { maxConcurrent: row.maxConcurrent, autoApprove: row.autoApprove };
 }
 
 export async function updateSettings(input: unknown, actor: Actor) {
-  const parsed = z.object({ maxConcurrent: z.number().int().min(1).max(16) }).safeParse(input);
-  if (!parsed.success) throw new ValidationError("O limite de execuções simultâneas deve estar entre 1 e 16.");
-  await prisma.orchestratorSetting.upsert({ where: { id: "default" }, create: { id: "default", maxConcurrent: parsed.data.maxConcurrent }, update: { maxConcurrent: parsed.data.maxConcurrent } });
-  await recordAuditEvent({ userId: actor.userId, action: "ORCHESTRATOR_SETTINGS_UPDATED", status: "SUCCESS", entityType: "OrchestratorSetting", entityId: "default", metadata: { maxConcurrent: parsed.data.maxConcurrent }, ipAddress: actor.ip, userAgent: actor.userAgent });
+  const parsed = z.object({ maxConcurrent: z.number().int().min(1).max(16).optional(), autoApprove: z.boolean().optional() }).safeParse(input);
+  if (!parsed.success || (parsed.data.maxConcurrent === undefined && parsed.data.autoApprove === undefined)) throw new ValidationError("O limite de execuções simultâneas deve estar entre 1 e 16.");
+  const data = parsed.data;
+  await prisma.orchestratorSetting.upsert({ where: { id: "default" }, create: { id: "default", ...data }, update: data });
+  await recordAuditEvent({ userId: actor.userId, action: "ORCHESTRATOR_SETTINGS_UPDATED", status: "SUCCESS", entityType: "OrchestratorSetting", entityId: "default", metadata: data, ipAddress: actor.ip, userAgent: actor.userAgent });
   orchestratorBus.emit({ type: "settings" });
   return getSettings();
 }

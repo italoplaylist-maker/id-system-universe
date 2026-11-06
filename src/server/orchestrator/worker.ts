@@ -10,6 +10,7 @@ import { buildUniverseMcp, UNIVERSE_AUTO_ALLOWED, UNIVERSE_MERGE_TOOL } from "./
 import { notifyApprovalRequested, notifyTaskFinished } from "./notify";
 import { loadMcpServersForRun } from "./tools-config";
 import { seedDefaultPacks } from "./skill-packs";
+import { seedGlobalClaudeMd } from "./tools-config";
 import { cleanupStorage } from "./storage";
 import { getWorkspacePreparer, loadExtraRepos, syncProjectAgents } from "./workspace";
 import { ACTIVE, appendEvent, getSettings, purgeOldTasks, setTaskRegisteredHook } from "./service";
@@ -21,6 +22,11 @@ import { ACTIVE, appendEvent, getSettings, purgeOldTasks, setTaskRegisteredHook 
  */
 
 const HEARTBEAT_MS = 10_000;
+
+/** Com "sem pedir permissão" ligado: comandos, edições e web liberados. O merge continua passando pelas travas (CI verde, sem conflito, squash). */
+const AUTO_APPROVE_TOOLS = ["Bash", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "WebFetch", "WebSearch", "Task", "TodoWrite"];
+/** Mesmo liberado, nunca: apagar a raiz, sudo, push forçado (o agente também não tem credencial de Git). */
+const AUTO_APPROVE_DENY = ["Bash(sudo:*)", "Bash(rm -rf /:*)", "Bash(rm -rf /*)", "Bash(rm -rf ~:*)", "Bash(git push --force:*)", "Bash(git push -f:*)"];
 /** Sem batida por este tempo = o worker que a executava caiu. */
 export const STALE_AFTER_MS = 45_000;
 const APPROVAL_TIMEOUT_MS = 10 * 60_000;
@@ -167,6 +173,7 @@ async function runTask(taskId: string): Promise<void> {
   // Ferramentas do Universe (PR/merge/limpeza): o agente não tem credencial de Git, só estas ferramentas.
   const universe = await buildUniverseMcp(agent.id, taskId).catch(() => null);
   const mcpServers: Record<string, unknown> = { ...configured, ...(universe ? { universe } : {}) };
+  const { autoApprove } = await getSettings();
   // Repositórios extras já clonados (preenchido depois que o workspace é preparado, logo abaixo).
   let extraRepos: Array<{ dir: string; fullName: string; name: string }> = [];
   const input = (resume: string | null | undefined) => ({
@@ -174,15 +181,15 @@ async function runTask(taskId: string): Promise<void> {
     prompt: task.prompt,
     cwd: agent.cwd,
     model: agent.model,
-    permissionMode: (agent.permissionMode === "acceptEdits" || agent.permissionMode === "plan" ? agent.permissionMode : "default") as "default" | "acceptEdits" | "plan",
+    permissionMode: (agent.permissionMode === "plan" ? "plan" : agent.permissionMode === "acceptEdits" || autoApprove ? "acceptEdits" : "default") as "default" | "acceptEdits" | "plan",
     agentName: agent.name,
     specialty: agent.specialty,
     effort: agent.effort,
     attachments: prepared.attachments,
     attachmentsDir: prepared.dir,
     extraRepos,
-    allowedTools: [...new Set([...agent.allowedTools, ...(universe ? UNIVERSE_AUTO_ALLOWED : [])])],
-    disallowedTools: agent.disallowedTools,
+    allowedTools: [...new Set([...agent.allowedTools, ...(universe ? UNIVERSE_AUTO_ALLOWED : []), ...(autoApprove ? [...AUTO_APPROVE_TOOLS, ...(universe ? [UNIVERSE_MERGE_TOOL] : [])] : [])])],
+    disallowedTools: [...new Set([...agent.disallowedTools, ...(autoApprove ? AUTO_APPROVE_DENY : [])])],
     mcpServers,
     resumeSessionId: resume,
     signal: abort.signal,
@@ -329,6 +336,7 @@ export function startOrchestratorWorker(): void {
   setTimeout(syncAgents, 4_000);
   // Kits de skills embutidos (ex.: Motion) entram no ~/.claude do servidor na primeira subida: valem para todos os agentes.
   setTimeout(() => void seedDefaultPacks(), 5_000);
+  setTimeout(() => void seedGlobalClaudeMd().then((done) => done && logger.info("global_claude_md_seeded")).catch(() => undefined), 6_000);
   setInterval(syncAgents, 60_000);
   setInterval(() => void purgeOldTasks().catch(() => undefined), 6 * 3_600_000);
   // Faxina de disco: dependências/builds regeneráveis de agentes parados, transcrições velhas, caches e eventos antigos.

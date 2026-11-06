@@ -589,6 +589,10 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
                           {[1, 2, 3, 4, 6, 8].map((n) => <option key={n} value={n}>{n}</option>)}
                         </select>
                       </label>
+                      <label className="ml-4 flex items-center gap-1.5 text-muted" title="Comandos, edições e pesquisas sem pedir permissão. O merge continua só com verificações verdes. Desligue para voltar a aprovar passo a passo.">
+                        <input type="checkbox" checked={settings?.autoApprove ?? true} onChange={(e) => setConcurrency.mutate({ autoApprove: e.target.checked })} />
+                        Executar sem pedir permissão
+                      </label>
                     </div>
                   )}
                 </>

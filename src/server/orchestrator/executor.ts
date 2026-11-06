@@ -155,7 +155,9 @@ export class ClaudeSdkExecutor implements TaskExecutor {
 function extraNote(extras?: Array<{ dir: string; fullName: string; name: string }>): string {
   if (!extras?.length) return "";
   const list = extras.map((e) => `${e.fullName} em ${e.dir} (nome: ${e.name})`).join("; ");
-  return ` Além do repositório principal (a pasta atual), você também tem acesso a: ${list}. Cada repositório tem o seu Git: ao usar git_status, publish_changes, merge_pull_request ou cleanup_workspace para um deles, informe o parâmetro repo (o nome ou "dono/nome"). Sem repo, a ferramenta atua no principal.`;
+  const brain = extras.find((e) => /cerebro|brain/i.test(e.name) || /cerebro|brain/i.test(e.fullName));
+  const brainNote = brain ? ` O repositório ${brain.fullName} (${brain.dir}) é o CÉREBRO: consulte-o SEMPRE antes de executar a tarefa (leia o CLAUDE.md dele) e registre o que valer a pena depois.` : "";
+  return `${brainNote} Além do repositório principal (a pasta atual), você também tem acesso a: ${list}. Cada repositório tem o seu Git: ao usar git_status, publish_changes, merge_pull_request ou cleanup_workspace para um deles, informe o parâmetro repo (o nome ou "dono/nome"). Sem repo, a ferramenta atua no principal.`;
 }
 
 /** Monta o prompt do Claude. Imagens ≤ 4,5 MB seguem como imagem; o resto (PDF, planilha, imagem grande…) como caminho para a ferramenta Read. */
