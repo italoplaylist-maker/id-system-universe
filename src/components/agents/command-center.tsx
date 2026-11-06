@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { AlertTriangle, Ban, CheckCircle2, Clock, Loader2, PauseCircle, Plus, Send, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -364,147 +364,197 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
     );
   };
 
-  const btn = "rounded px-2 py-1 text-xs font-medium";
-  return (
-    <aside className="absolute inset-y-0 right-0 z-20 flex w-full max-w-md flex-col overflow-y-auto overscroll-contain border-l border-border bg-surface-raised/95 shadow-2xl backdrop-blur" aria-label="Central de Agentes">
-      <div className="flex items-start justify-between gap-3 border-b border-border p-4">
-        <div className="min-w-0">
-          <p className="text-[11px] uppercase tracking-wider text-muted">Central de Agentes</p>
-          <h2 className="truncate text-base font-semibold text-foreground">{selected ? selected.name : "Nenhum agente"}</h2>
-          {selected && <p className="truncate text-xs text-muted">{selected.specialty ?? "—"} · {selected.cwd}</p>}
-          {selected && <p className={cn("mt-1 text-xs font-medium", ROOM_LABEL[selected.state].cls)}>{ROOM_LABEL[selected.state].label}{selected.activity ? ` — ${selected.activity}` : ""}{selected.queued > 0 ? ` · ${selected.queued} na fila` : ""}</p>}
-        </div>
-        <button onClick={onClose} className="rounded p-1 text-muted hover:bg-surface hover:text-foreground" aria-label="Fechar"><X className="h-4 w-4" /></button>
-      </div>
-
-      <ClaudeLogin canWrite={canWrite} />
-
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-4 py-2">
-        {agents?.map((a) => (
-          <button key={a.id} onClick={() => { setAgentId(a.id); setOpenTask(null); }} className={cn(btn, "border", a.id === selected?.id ? "border-accent bg-accent/15 text-foreground" : "border-border text-muted hover:text-foreground")}>
-            {a.name}
+  const btn = "rounded-lg px-2.5 py-1.5 text-xs font-medium";
+  // Paleta quente do Claude, aplicada só a esta tela (as variáveis valem para todos os subcomponentes).
+  const theme = {
+    "--background": "#262624", "--surface": "#30302e", "--surface-raised": "#1f1e1d", "--border": "#3d3d3a",
+    "--foreground": "#faf9f5", "--muted": "#a6a39a", "--accent": "#d97757",
+  } as CSSProperties;
+  const composer = canWrite && selected && !toolsOpen && !openTask && (
+    <div className="shrink-0 px-4 pb-4 pt-2">
+      <div className="mx-auto w-full max-w-3xl">
+        {last && (
+          <button onClick={() => setOpenTask(last.task.id)} className="mb-2 w-full rounded-xl border border-border bg-surface p-2.5 text-left text-xs" aria-live="polite">
+            <span className="block font-semibold text-foreground">{last.task.queuePosition ? "COMANDO NA FILA" : "COMANDO RECEBIDO"}</span>
+            <span className="block text-muted">Agente: {last.task.agentName} · Execução #{shortId(last.task.id)}</span>
+            <span className={cn("block font-semibold", taskTone(last.task.status))}>
+              Status: {TASK_LABEL[last.task.status]}{last.task.queuePosition ? ` (posição ${last.task.queuePosition})` : ""}
+            </span>
           </button>
-        ))}
-        <button onClick={() => setToolsOpen(true)} className={cn(btn, "ml-auto border border-border text-muted hover:text-foreground")}>Ferramentas</button>
-        {canWrite && <button onClick={() => setCreating((v) => !v)} className={cn(btn, "border border-dashed border-border text-muted hover:text-foreground")}><Plus className="inline h-3 w-3" /> Novo</button>}
-      </div>
-
-      {creating && <AgentForm onDone={() => setCreating(false)} />}
-      {editing && selected && <AgentForm initial={selected} onDone={() => setEditing(false)} />}
-
-      {agents && agents.length === 0 && !creating && (
-        <p className="p-4 text-sm text-muted">Nenhum funcionário ainda. {canWrite ? "Crie o primeiro em “Novo”: informe o diretório do projeto no servidor do Universe." : "Peça a um administrador para criar."}</p>
-      )}
-
-      {toolsOpen ? (
-        <ToolsPanel canWrite={canWrite} onBack={() => setToolsOpen(false)} />
-      ) : selected && openTask ? (
-        <TaskDetail taskId={openTask} canWrite={canWrite} onBack={() => setOpenTask(null)} />
-      ) : (
-        selected && (
-          <>
-            {canWrite && (
-              <div className="space-y-2 border-b border-border p-4">
-                <label htmlFor="cc-command" className="text-xs font-medium text-foreground">Comando para {selected.name}</label>
-                <div
-                  className="space-y-2"
-                  onDragOver={(e) => {
-                    if (e.dataTransfer.types.includes("Files")) e.preventDefault();
-                  }}
-                  onDrop={(e) => {
-                    if (e.dataTransfer.files.length) {
-                      e.preventDefault();
-                      void att.addFiles(Array.from(e.dataTransfer.files));
-                    }
-                  }}
-                >
-                  <textarea
-                    id="cc-command"
-                    value={dictation.listening && dictation.interim ? `${text}${text && !/\s$/.test(text) ? " " : ""}${dictation.interim}` : text}
-                    onChange={(e) => setText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
-                    }}
-                    onPaste={(e) => {
-                      // colar imagem/arquivo (Ctrl+V) anexa, como no Claude
-                      const files = Array.from(e.clipboardData.files);
-                      if (files.length) {
-                        e.preventDefault();
-                        void att.addFiles(files);
-                      }
-                    }}
-                    rows={3}
-                    maxLength={20000}
-                    disabled={selected.paused}
-                    placeholder={selected.paused ? "Agente pausado" : "Ex.: rode os testes e me diga o resultado — ou arraste/cole uma imagem aqui"}
-                    className="w-full resize-none rounded-md border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none disabled:opacity-60"
-                  />
-                  <AttachmentStrip items={att.items} onRemove={att.remove} />
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5">
-                    <AttachButton onFiles={(f) => void att.addFiles(f)} disabled={selected.paused} />
-                    <MicButton listening={dictation.listening} supported={dictation.supported} onClick={dictation.toggle} />
-                    <p className="hidden text-[11px] text-muted sm:block">{dictation.listening ? "Ouvindo… fale o comando" : "Ctrl+Enter envia."}</p>
-                  </div>
-                  <Button size="sm" variant="primary" disabled={!canSend || submit.isPending || selected.paused} onClick={send}>
-                    {submit.isPending || att.uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}{att.uploading ? "Enviando anexo…" : "Enviar"}
-                  </Button>
-                </div>
-                {last && (
-                  <button onClick={() => setOpenTask(last.task.id)} className="w-full rounded-md border border-border bg-surface p-2 text-left text-xs" aria-live="polite">
-                    <span className="block font-semibold text-foreground">{last.task.queuePosition ? "COMANDO NA FILA" : "COMANDO RECEBIDO"}</span>
-                    <span className="block text-muted">Agente: {last.task.agentName} · Execução #{shortId(last.task.id)}</span>
-                    <span className={cn("block font-semibold", taskTone(last.task.status))}>
-                      Status: {TASK_LABEL[last.task.status]}{last.task.queuePosition ? ` (posição ${last.task.queuePosition})` : ""}
-                    </span>
-                  </button>
-                )}
-              </div>
-            )}
-
-            <div className="flex items-center gap-1 border-b border-border px-4 py-1.5 text-xs">
-              <button className={cn(btn, tab === "active" ? "bg-surface text-foreground" : "text-muted")} onClick={() => setTab("active")}>Ativas e fila</button>
-              <button className={cn(btn, tab === "history" ? "bg-surface text-foreground" : "text-muted")} onClick={() => setTab("history")}>Histórico</button>
+        )}
+        <div
+          className="rounded-2xl border border-border bg-surface p-3 shadow-lg focus-within:border-accent/60"
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            if (e.dataTransfer.files.length) {
+              e.preventDefault();
+              void att.addFiles(Array.from(e.dataTransfer.files));
+            }
+          }}
+        >
+          <label htmlFor="cc-command" className="sr-only">Comando para {selected.name}</label>
+          <textarea
+            id="cc-command"
+            value={dictation.listening && dictation.interim ? `${text}${text && !/\s$/.test(text) ? " " : ""}${dictation.interim}` : text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
+            }}
+            onPaste={(e) => {
+              // colar imagem/arquivo (Ctrl+V) anexa, como no Claude
+              const files = Array.from(e.clipboardData.files);
+              if (files.length) {
+                e.preventDefault();
+                void att.addFiles(files);
+              }
+            }}
+            rows={3}
+            maxLength={20000}
+            disabled={selected.paused}
+            placeholder={selected.paused ? "Agente pausado" : `Como posso ajudar, ${selected.name}? Arraste ou cole uma imagem aqui`}
+            className="max-h-60 min-h-[4.5rem] w-full resize-none bg-transparent px-1 text-[15px] leading-relaxed text-foreground placeholder:text-muted focus:outline-none disabled:opacity-60"
+          />
+          <AttachmentStrip items={att.items} onRemove={att.remove} />
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <AttachButton onFiles={(f) => void att.addFiles(f)} disabled={selected.paused} />
+              <MicButton listening={dictation.listening} supported={dictation.supported} onClick={dictation.toggle} />
+              <p className="hidden text-[11px] text-muted sm:block">{dictation.listening ? "Ouvindo… fale o comando" : "Ctrl+Enter envia"}</p>
             </div>
-            <ul className="max-h-72 min-h-[8rem] shrink-0 divide-y divide-border overflow-y-auto text-xs">
-              {tasks?.map((t) => (
-                <li key={t.id}>
-                  <button className="flex w-full items-start gap-2 px-4 py-2.5 text-left hover:bg-surface" onClick={() => setOpenTask(t.id)}>
-                    {t.status === "COMPLETED" ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-running" /> : t.status === "FAILED" || t.status === "INTERRUPTED" ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-error" /> : t.status === "CANCELLED" ? <Ban className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted" /> : t.status === "QUEUED" ? <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning" /> : <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-status-deploying" />}
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-foreground">{t.prompt}</span>
-                      <span className={cn("block font-semibold", taskTone(t.status))}>#{shortId(t.id)} · {TASK_LABEL[t.status]}{t.queuePosition ? ` · posição ${t.queuePosition}` : ""} <span className="font-normal text-muted">{hms(t.createdAt)}</span></span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-              {tasks && tasks.length === 0 && <li className="px-4 py-4 text-muted">{tab === "active" ? "Nada em andamento nem na fila." : "Sem histórico ainda."}</li>}
-            </ul>
-            <GitPanel agentId={selected.id} canWrite={canWrite} />
-            {canWrite && <StoragePanel />}
-            {canWrite && (
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs">
-                <label className="flex items-center gap-1.5 text-muted">
-                  Simultâneas
-                  <select className="rounded border border-border bg-surface px-1 py-0.5" value={settings?.maxConcurrent ?? 2} onChange={(e) => setConcurrency.mutate(Number(e.target.value))}>
-                    {[1, 2, 3, 4, 6, 8].map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </label>
-                <span className="flex gap-2">
-                  <button className="flex items-center gap-1 text-muted hover:text-foreground" onClick={() => updateAgent.mutate({ id: selected.id, paused: !selected.paused })}>
-                    <PauseCircle className="h-3.5 w-3.5" />{selected.paused ? "Retomar" : "Pausar"}
-                  </button>
-                  <button className="flex items-center gap-1 text-muted hover:text-foreground" onClick={() => setEditing((v) => !v)}>Editar</button>
-                  <button className="flex items-center gap-1 text-muted hover:text-status-error" onClick={() => { if (window.confirm(`Remover ${selected.name}? O histórico é mantido.`)) archiveAgent.mutate(selected.id, { onError: (e) => toast.error(e.message) }); }}>
-                    <Trash2 className="h-3.5 w-3.5" />Remover
-                  </button>
-                </span>
-              </div>
+            <button
+              onClick={send}
+              disabled={!canSend || submit.isPending || selected.paused}
+              aria-label="Enviar"
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+            >
+              {submit.isPending || att.uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <section style={theme} className="absolute inset-0 z-20 flex bg-background text-foreground" aria-label="Central de Agentes">
+      {/* Barra lateral: agentes, como a lista de conversas do Claude */}
+      <aside className="hidden w-72 shrink-0 flex-col border-r border-border bg-surface-raised md:flex">
+        <div className="flex items-center justify-between px-4 py-3.5">
+          <p className="font-serif text-lg font-medium tracking-tight text-foreground">Central de Agentes</p>
+        </div>
+        {canWrite && (
+          <button onClick={() => { setCreating((v) => !v); setEditing(false); setToolsOpen(false); setOpenTask(null); }} className="mx-3 mb-2 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-accent hover:bg-surface">
+            <Plus className="h-4 w-4" />Novo agente
+          </button>
+        )}
+        <p className="px-4 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">Agentes</p>
+        <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2" aria-label="Agentes">
+          {agents?.map((a) => (
+            <button
+              key={a.id}
+              onClick={() => { setAgentId(a.id); setOpenTask(null); setToolsOpen(false); setCreating(false); setEditing(false); }}
+              className={cn("flex w-full flex-col rounded-lg px-3 py-2 text-left", a.id === selected?.id && !toolsOpen ? "bg-surface text-foreground" : "text-muted hover:bg-surface/60 hover:text-foreground")}
+            >
+              <span className="truncate text-sm font-medium">{a.name}</span>
+              <span className={cn("truncate text-[11px]", ROOM_LABEL[a.state].cls)}>{ROOM_LABEL[a.state].label}{a.queued > 0 ? ` · ${a.queued} na fila` : ""}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="space-y-1 border-t border-border p-2">
+          <button onClick={() => { setToolsOpen(true); setCreating(false); setEditing(false); }} className={cn("w-full rounded-lg px-3 py-2 text-left text-sm", toolsOpen ? "bg-surface text-foreground" : "text-muted hover:bg-surface/60 hover:text-foreground")}>Ferramentas</button>
+        </div>
+        <ClaudeLogin canWrite={canWrite} />
+      </aside>
+
+      {/* Área principal */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-medium text-foreground">{selected ? selected.name : "Nenhum agente"}</h2>
+            {selected && <p className="truncate text-xs text-muted">{selected.specialty ?? "—"} · {selected.cwd}</p>}
+            {selected && <p className={cn("text-xs font-medium", ROOM_LABEL[selected.state].cls)}>{ROOM_LABEL[selected.state].label}{selected.activity ? ` — ${selected.activity}` : ""}{selected.queued > 0 ? ` · ${selected.queued} na fila` : ""}</p>}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {canWrite && selected && (
+              <>
+                <button className={cn(btn, "flex items-center gap-1 text-muted hover:bg-surface hover:text-foreground")} onClick={() => updateAgent.mutate({ id: selected.id, paused: !selected.paused })}>
+                  <PauseCircle className="h-3.5 w-3.5" />{selected.paused ? "Retomar" : "Pausar"}
+                </button>
+                <button className={cn(btn, "text-muted hover:bg-surface hover:text-foreground")} onClick={() => { setEditing((v) => !v); setCreating(false); }}>Editar</button>
+                <button className={cn(btn, "flex items-center gap-1 text-muted hover:bg-surface hover:text-status-error")} onClick={() => { if (window.confirm(`Remover ${selected.name}? O histórico é mantido.`)) archiveAgent.mutate(selected.id, { onError: (e) => toast.error(e.message) }); }}>
+                  <Trash2 className="h-3.5 w-3.5" />Remover
+                </button>
+              </>
             )}
-          </>
-        )
-      )}
-    </aside>
+            <button onClick={onClose} className="rounded-lg p-2 text-muted hover:bg-surface hover:text-foreground" aria-label="Fechar"><X className="h-4 w-4" /></button>
+          </div>
+        </header>
+
+        {/* No celular a barra lateral some: agentes viram abas no topo */}
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border px-4 py-2 md:hidden">
+          {agents?.map((a) => (
+            <button key={a.id} onClick={() => { setAgentId(a.id); setOpenTask(null); setToolsOpen(false); }} className={cn(btn, "border", a.id === selected?.id ? "border-accent bg-accent/15 text-foreground" : "border-border text-muted")}>{a.name}</button>
+          ))}
+          <button onClick={() => setToolsOpen(true)} className={cn(btn, "ml-auto border border-border text-muted")}>Ferramentas</button>
+          {canWrite && <button onClick={() => setCreating((v) => !v)} className={cn(btn, "border border-dashed border-border text-muted")}><Plus className="inline h-3 w-3" /> Novo</button>}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div className="mx-auto w-full max-w-3xl">
+            <div className="md:hidden"><ClaudeLogin canWrite={canWrite} /></div>
+            {creating && <AgentForm onDone={() => setCreating(false)} />}
+            {editing && selected && <AgentForm initial={selected} onDone={() => setEditing(false)} />}
+
+            {agents && agents.length === 0 && !creating && (
+              <p className="p-6 text-sm text-muted">Nenhum funcionário ainda. {canWrite ? "Crie o primeiro em “Novo agente”: informe o diretório do projeto no servidor do Universe." : "Peça a um administrador para criar."}</p>
+            )}
+
+            {toolsOpen ? (
+              <ToolsPanel canWrite={canWrite} onBack={() => setToolsOpen(false)} />
+            ) : selected && openTask ? (
+              <TaskDetail taskId={openTask} canWrite={canWrite} onBack={() => setOpenTask(null)} />
+            ) : (
+              selected && (
+                <>
+                  <div className="flex items-center gap-1 px-4 pb-1 pt-4 text-xs">
+                    <button className={cn(btn, tab === "active" ? "bg-surface text-foreground" : "text-muted")} onClick={() => setTab("active")}>Ativas e fila</button>
+                    <button className={cn(btn, tab === "history" ? "bg-surface text-foreground" : "text-muted")} onClick={() => setTab("history")}>Histórico</button>
+                  </div>
+                  <ul className="mx-2 min-h-[8rem] divide-y divide-border text-sm">
+                    {tasks?.map((t) => (
+                      <li key={t.id}>
+                        <button className="flex w-full items-start gap-2 rounded-lg px-3 py-3 text-left hover:bg-surface" onClick={() => setOpenTask(t.id)}>
+                          {t.status === "COMPLETED" ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-status-running" /> : t.status === "FAILED" || t.status === "INTERRUPTED" ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-status-error" /> : t.status === "CANCELLED" ? <Ban className="mt-0.5 h-4 w-4 shrink-0 text-muted" /> : t.status === "QUEUED" ? <Clock className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" /> : <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-status-deploying" />}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-foreground">{t.prompt}</span>
+                            <span className={cn("block text-xs font-semibold", taskTone(t.status))}>#{shortId(t.id)} · {TASK_LABEL[t.status]}{t.queuePosition ? ` · posição ${t.queuePosition}` : ""} <span className="font-normal text-muted">{hms(t.createdAt)}</span></span>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                    {tasks && tasks.length === 0 && <li className="px-4 py-6 text-muted">{tab === "active" ? "Nada em andamento nem na fila." : "Sem histórico ainda."}</li>}
+                  </ul>
+                  <GitPanel agentId={selected.id} canWrite={canWrite} />
+                  {canWrite && <StoragePanel />}
+                  {canWrite && (
+                    <div className="flex items-center gap-2 border-t border-border px-4 py-3 text-xs">
+                      <label className="flex items-center gap-1.5 text-muted">
+                        Execuções simultâneas
+                        <select className="rounded border border-border bg-surface px-1 py-0.5 text-foreground" value={settings?.maxConcurrent ?? 2} onChange={(e) => setConcurrency.mutate(Number(e.target.value))}>
+                          {[1, 2, 3, 4, 6, 8].map((n) => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                  )}
+                </>
+              )
+            )}
+          </div>
+        </div>
+        {composer}
+      </div>
+    </section>
   );
 }
