@@ -24,6 +24,7 @@ import { FeedsDialog } from "@/components/agents/feed-dialogs";
 import { NotificationsDialog } from "@/components/notifications/notifications-dialog";
 import { CommandCenter } from "@/components/agents/command-center";
 import { useAgentSessions } from "@/hooks/use-agents";
+import { useRoomAgents } from "@/hooks/use-orchestrator";
 import { useSession } from "@/hooks/use-session";
 import { canUser } from "@/server/auth/rbac";
 import { motion } from "motion/react";
@@ -42,6 +43,7 @@ export function HqView() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [centerOpen, setCenterOpen] = useState(false);
   const { data: sessionUser } = useSession();
+  const roomAgentsQuery = useRoomAgents(sessionUser ? canUser(sessionUser, "provider:read") : false);
   const { data: observedSessions } = useAgentSessions(sessionUser ? canUser(sessionUser, "provider:read") : false);
   const canManageAgents = sessionUser ? canUser(sessionUser, "provider:write") : false;
   const router = useRouter();
@@ -202,6 +204,12 @@ export function HqView() {
           </div>
         )}
 
+        {roomAgentsQuery.isError && !demoMode && (
+          <div role="alert" className="flex max-w-md items-center gap-2 rounded-full border border-status-error/50 bg-status-error/10 px-3 py-1.5 text-xs text-status-error">
+            <span className="truncate">Os agentes não carregaram: {roomAgentsQuery.error instanceof Error ? roomAgentsQuery.error.message : "erro desconhecido"}</span>
+            <button className="shrink-0 underline" onClick={() => void roomAgentsQuery.refetch()}>Tentar de novo</button>
+          </div>
+        )}
         {demoMode && (
           <div className="flex items-center gap-2 rounded-full border border-status-warning/40 bg-status-warning/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-status-warning">
             Demo Mode
