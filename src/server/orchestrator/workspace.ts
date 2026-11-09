@@ -9,7 +9,7 @@ import { getInstallationToken } from "@/server/github/github-api";
 import { redactSecrets } from "@/server/claude/agent-service";
 import { orchestratorBus } from "./bus";
 import { gitEnv, remoteUrl } from "./git/git";
-import { pickAgentRepository } from "./repo-link";
+import { extraDir, listExtraRepos, pickAgentRepository } from "./repo-link";
 
 /** Onde ficam as cópias de trabalho dos agentes no servidor do Universe. */
 export function workspaceRoot(): string {
@@ -54,7 +54,7 @@ function git(args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number | n
 }
 
 /** Garante que o diretório do agente exista: clona o repositório GitHub vinculado ao projeto (via GitHub App) ou cria a pasta vazia. */
-const defaultPreparer: WorkspacePreparer = async (agent, log) => {
+const preparePrimary: WorkspacePreparer = async (agent, log) => {
   const profile = await prisma.agentProfile.findUnique({ where: { id: agent.id }, select: { githubRepositoryId: true, githubBranch: true, projectId: true } });
   const picked = profile ? await pickAgentRepository(profile) : null;
   if (existsSync(agent.cwd)) {
@@ -83,6 +83,54 @@ const defaultPreparer: WorkspacePreparer = async (agent, log) => {
   }
   await log(`Workspace pronto (${gh.fullName}).`);
 };
+
+/** Clona (se faltar) cada repositório EXTRA do agente em <cwd>.extras/<dir>. Falha em um extra não impede a tarefa. */
+async function prepareExtras(agent: { id: string; cwd: string }, log: Log): Promise<void> {
+  for (const e of await listExtraRepos(agent.id)) {
+    const dir = extraDir(agent.cwd, e.dir);
+    try {
+      if (existsSync(join(dir, ".git"))) continue;
+      if (existsSync(dir) && (await readdir(dir).catch(() => ["?"])).length > 0) {
+        await log(`Repositório extra ${e.githubRepository.fullName}: a pasta ${dir} já tem arquivos sem Git — não mexi.`);
+        continue;
+      }
+      if (e.githubRepository.archived) continue;
+      await log(`Preparando repositório extra: clonando ${e.githubRepository.fullName}…`);
+      const token = await getInstallationToken(e.githubRepository.installation.installationId);
+      await mkdir(join(dir, ".."), { recursive: true });
+      const branch = e.branch ? ["--branch", e.branch] : [];
+      const r = await git(["clone", "--depth", "50", ...branch, remoteUrl(e.githubRepository.fullName), dir], gitEnv(token));
+      if (r.code !== 0) await log(`Não consegui clonar ${e.githubRepository.fullName}: ${redactSecrets(r.out).slice(-200)}`);
+      else await log(`Repositório extra pronto (${e.githubRepository.fullName}).`);
+    } catch (error) {
+      await log(`Repositório extra ${e.githubRepository.fullName}: ${error instanceof Error ? redactSecrets(error.message) : "falhou"}`);
+    }
+  }
+}
+
+const defaultPreparer: WorkspacePreparer = async (agent, log) => {
+  await preparePrimary(agent, log);
+  await prepareExtras(agent, log);
+};
+
+/** Extras já clonados (com Git), prontos para o Claude enxergar. */
+export async function loadExtraRepos(agentId: string, agentCwd: string): Promise<Array<{ dir: string; fullName: string; name: string }>> {
+  const out: Array<{ dir: string; fullName: string; name: string }> = [];
+  for (const e of await listExtraRepos(agentId)) {
+    const dir = extraDir(agentCwd, e.dir);
+    if (existsSync(join(dir, ".git"))) out.push({ dir, fullName: e.githubRepository.fullName, name: e.dir });
+  }
+  return out;
+}
+
+/** Prepara só os extras (usado logo depois de conectar um novo). */
+export async function prepareExtrasNow(agentId: string): Promise<string> {
+  const agent = await prisma.agentProfile.findUnique({ where: { id: agentId } });
+  if (!agent) return "Agente não encontrado.";
+  const notes: string[] = [];
+  await prepareExtras(agent, async (t) => void notes.push(t));
+  return notes.join(" ");
+}
 
 /**
  * Chamado logo depois de conectar um repositório ao agente: prepara a cópia sem esperar a próxima tarefa.

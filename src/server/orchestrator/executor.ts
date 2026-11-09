@@ -16,6 +16,8 @@ export interface ExecutorRunInput {
   attachments?: RunAttachment[];
   /** Pasta dos anexos desta tarefa: liberada para leitura do agente. */
   attachmentsDir?: string | null;
+  /** Repositórios EXTRAS do agente (pasta + nome no GitHub), já clonados: o Claude os enxerga junto com o principal. */
+  extraRepos?: Array<{ dir: string; fullName: string; name: string }>;
   /** Ferramentas liberadas sem pedir aprovação / bloqueadas (regras do Claude Code, ex.: "Bash(git status:*)"). */
   allowedTools?: string[];
   disallowedTools?: string[];
@@ -74,7 +76,7 @@ export class ClaudeSdkExecutor implements TaskExecutor {
         : { behavior: "deny", message: decision.message ?? "Negado no ID System Universe." };
     };
 
-    const append = `Você é o agente "${input.agentName}" do ID System Universe${input.specialty ? ` (especialidade: ${input.specialty})` : ""}. Responda em português. Você não tem credenciais de Git: para enviar seu trabalho ao GitHub use as ferramentas do Universe (publish_changes para commit + PR; merge_pull_request para o merge). Nunca tente push direto, usar o comando gh ou editar credenciais.`;
+    const append = `Você é o agente "${input.agentName}" do ID System Universe${input.specialty ? ` (especialidade: ${input.specialty})` : ""}. Responda em português. Você não tem credenciais de Git: para enviar seu trabalho ao GitHub use as ferramentas do Universe (publish_changes para commit + PR; merge_pull_request para o merge). Nunca tente push direto, usar o comando gh ou editar credenciais.${extraNote(input.extraRepos)}`;
     const options: Options = {
       cwd: input.cwd,
       abortController,
@@ -85,7 +87,9 @@ export class ClaudeSdkExecutor implements TaskExecutor {
       skills: "all",
       systemPrompt: { type: "preset", preset: "claude_code", append },
       ...(input.model ? { model: input.model } : {}),
-      ...(input.attachmentsDir ? { additionalDirectories: [input.attachmentsDir] } : {}),
+      ...(input.attachmentsDir || input.extraRepos?.length ? { additionalDirectories: [...(input.attachmentsDir ? [input.attachmentsDir] : []), ...(input.extraRepos ?? []).map((r) => r.dir)] } : {}),
+      // CLAUDE.md dos repositórios extras também vale (ex.: as regras do cérebro).
+      ...(input.extraRepos?.length ? { env: { ...process.env, CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: "1" } } : {}),
       ...(input.effort && ["low", "medium", "high", "xhigh", "max"].includes(input.effort) ? { effort: input.effort as "low" | "medium" | "high" | "xhigh" | "max" } : {}),
       ...(input.allowedTools?.length ? { allowedTools: input.allowedTools } : {}),
       ...(input.disallowedTools?.length ? { disallowedTools: input.disallowedTools } : {}),
@@ -145,6 +149,15 @@ export class ClaudeSdkExecutor implements TaskExecutor {
     }
     return { ...result, sessionId: result.sessionId ?? sessionId };
   }
+}
+
+/** Avisa o Claude dos repositórios extras e de como publicar em cada um. */
+function extraNote(extras?: Array<{ dir: string; fullName: string; name: string }>): string {
+  if (!extras?.length) return "";
+  const list = extras.map((e) => `${e.fullName} em ${e.dir} (nome: ${e.name})`).join("; ");
+  const brain = extras.find((e) => /cerebro|brain/i.test(e.name) || /cerebro|brain/i.test(e.fullName));
+  const brainNote = brain ? ` O repositório ${brain.fullName} (${brain.dir}) é o CÉREBRO: consulte-o SEMPRE antes de executar a tarefa (leia o CLAUDE.md dele) e registre o que valer a pena depois.` : "";
+  return `${brainNote} Além do repositório principal (a pasta atual), você também tem acesso a: ${list}. Cada repositório tem o seu Git: ao usar git_status, publish_changes, merge_pull_request ou cleanup_workspace para um deles, informe o parâmetro repo (o nome ou "dono/nome"). Sem repo, a ferramenta atua no principal.`;
 }
 
 /** Monta o prompt do Claude. Imagens ≤ 4,5 MB seguem como imagem; o resto (PDF, planilha, imagem grande…) como caminho para a ferramenta Read. */

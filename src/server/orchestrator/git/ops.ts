@@ -7,7 +7,7 @@ import { redactSecrets } from "@/server/claude/agent-service";
 import { recordAuditEvent } from "@/server/audit/audit-log";
 import { notify } from "@/server/notifications/notify";
 import { orchestratorBus } from "../bus";
-import { pickAgentRepository } from "../repo-link";
+import { extraDir, findAgentRepoRef, listExtraRepos, pickAgentRepository } from "../repo-link";
 import { freshInstallationToken, getInstallationInfo, ghFetch, missingMergePermissions, missingWritePermissions } from "./github-client";
 import { cleanOut, gitEnv, isInsideWorkspaceRoot, runGit } from "./git";
 
@@ -31,6 +31,8 @@ export function diffHasSecret(diff: string): boolean {
 }
 
 export interface AgentRepo {
+  /** "primary" ou o id do repositório extra. */
+  repoRef: string;
   agent: { id: string; name: string; cwd: string; projectId: string | null };
   fullName: string;
   baseBranch: string;
@@ -39,13 +41,31 @@ export interface AgentRepo {
   accountType: string;
 }
 
-export async function resolveAgentRepo(agentId: string): Promise<AgentRepo> {
+/** `ref`: vazio/"primary" = repositório principal; senão o id do extra, a subpasta ou "dono/nome". */
+export async function resolveAgentRepo(agentId: string, ref?: string | null): Promise<AgentRepo> {
   const agent = await prisma.agentProfile.findUnique({ where: { id: agentId } });
   if (!agent || agent.archivedAt) throw new NotFoundError("Agente não encontrado.");
+  const mk = (gh: NonNullable<Awaited<ReturnType<typeof pickAgentRepository>>>["gh"], branch: string | null, cwd: string, repoRef: string): AgentRepo => ({
+    repoRef,
+    agent: { id: agent.id, name: agent.name, cwd, projectId: agent.projectId },
+    fullName: gh.fullName,
+    baseBranch: branch || gh.defaultBranch || "main",
+    installationId: gh.installation.installationId,
+    accountLogin: gh.installation.accountLogin,
+    accountType: gh.installation.accountType,
+  });
+  const target = await findAgentRepoRef(agentId, ref);
+  if (target?.kind === "extra") {
+    const row = (await listExtraRepos(agentId)).find((e) => e.id === target.id)!;
+    if (row.githubRepository.archived) throw new ValidationError("Este repositório foi arquivado no GitHub.");
+    return mk(row.githubRepository, row.branch, extraDir(agent.cwd, row.dir), row.id);
+  }
   const picked = await pickAgentRepository(agent);
   const gh = picked?.gh;
   if (!gh || gh.archived) throw new ValidationError("Este agente ainda não tem um repositório GitHub conectado. Escolha um no próprio agente (Central de Agentes → GitHub → Conectar repositório).");
-  return { agent: { id: agent.id, name: agent.name, cwd: agent.cwd, projectId: agent.projectId }, fullName: gh.fullName, baseBranch: picked.branch || gh.defaultBranch || "main", installationId: gh.installation.installationId, accountLogin: gh.installation.accountLogin, accountType: gh.installation.accountType };
+  // um "dono/nome" que não é extra só vale se for o principal
+  if (!target && ref && ref !== "primary" && gh.fullName.toLowerCase() !== ref.toLowerCase()) throw new ValidationError(`O agente não tem o repositório "${ref}" conectado.`);
+  return mk(gh, picked.branch, agent.cwd, "primary");
 }
 
 const slug = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "agente";
@@ -66,24 +86,30 @@ export interface WorkspaceGitStatus {
   permissionsChecked: boolean;
   /** O que o GitHub informa AGORA para a instalação usada por este repositório (para achar o motivo de "ainda pede permissão"). */
   permissionsSeen: { installationId: string; account: string; contents: string; pullRequests: string; checks: string; statuses: string; settingsUrl: string } | null;
-  pullRequests: Array<{ id: string; number: number; url: string; title: string; status: string; branch: string }>;
+  /** "primary" ou o id do repositório extra a que este estado se refere. */
+  repoRef?: string;
+  pullRequests: Array<{ id: string; number: number; url: string; title: string; status: string; branch: string; repo?: string }>;
 }
 
-export async function getGitStatus(agentId: string, opts: { checkPermissions?: boolean } = {}): Promise<WorkspaceGitStatus> {
+export async function getGitStatus(agentId: string, opts: { checkPermissions?: boolean; repo?: string | null } = {}): Promise<WorkspaceGitStatus> {
   const agent = await prisma.agentProfile.findUnique({ where: { id: agentId } });
   if (!agent || agent.archivedAt) throw new NotFoundError("Agente não encontrado.");
   const prs = await prisma.agentPullRequest.findMany({ where: { agentId }, orderBy: { createdAt: "desc" }, take: 8 });
   const base: WorkspaceGitStatus = {
     hasRepo: false, repo: null, baseBranch: null, workspaceExists: existsSync(agent.cwd), branch: null, changedFiles: 0, unpushedCommits: 0,
     missingPermissions: [], missingForMerge: [], permissionsChecked: false, permissionsSeen: null,
-    pullRequests: prs.map((p) => ({ id: p.id, number: p.number, url: p.url, title: p.title, status: p.status, branch: p.branch })),
+    pullRequests: prs.map((p) => ({ id: p.id, number: p.number, url: p.url, title: p.title, status: p.status, branch: p.branch, repo: p.repo })),
   };
   let repo: AgentRepo;
   try {
-    repo = await resolveAgentRepo(agentId);
+    repo = await resolveAgentRepo(agentId, opts.repo);
   } catch {
     return base;
   }
+  const cwd = repo.agent.cwd;
+  base.workspaceExists = existsSync(cwd);
+  base.repoRef = repo.repoRef;
+  base.pullRequests = base.pullRequests.filter((p) => !p.repo || p.repo === repo.fullName);
   base.hasRepo = true;
   base.repo = repo.fullName;
   base.baseBranch = repo.baseBranch;
@@ -108,12 +134,12 @@ export async function getGitStatus(agentId: string, opts: { checkPermissions?: b
       base.permissionsChecked = false;
     }
   }
-  if (base.workspaceExists && (await isInsideWorkspaceRoot(agent.cwd))) {
-    const br = await runGit(agent.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  if (base.workspaceExists && (await isInsideWorkspaceRoot(cwd))) {
+    const br = await runGit(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
     if (br.code === 0) base.branch = br.out.trim();
-    const st = await runGit(agent.cwd, ["status", "--porcelain"]);
+    const st = await runGit(cwd, ["status", "--porcelain"]);
     if (st.code === 0) base.changedFiles = st.out.split("\n").filter(Boolean).length;
-    base.unpushedCommits = await countUnpushed(agent.cwd, base.branch, repo.baseBranch);
+    base.unpushedCommits = await countUnpushed(cwd, base.branch, repo.baseBranch);
   }
   return base;
 }
@@ -134,6 +160,8 @@ export interface PublishInput {
   taskId?: string | null;
   /** Quem pediu (painel); ausente = o próprio agente. */
   actorUserId?: string | null;
+  /** Qual repositório do agente (vazio = o principal). */
+  repo?: string | null;
 }
 
 export interface PublishResult {
@@ -144,7 +172,7 @@ export interface PublishResult {
 }
 
 export async function publishChanges(agentId: string, input: PublishInput = {}): Promise<PublishResult> {
-  const repo = await resolveAgentRepo(agentId);
+  const repo = await resolveAgentRepo(agentId, input.repo);
   const token = await freshInstallationToken(repo.installationId);
   const missing = missingWritePermissions((await getInstallationInfo(repo.installationId)).permissions);
   if (missing.length > 0) {
@@ -249,7 +277,7 @@ export interface MergeResult {
 export async function mergePullRequest(prId: string, opts: { actorUserId?: string | null } = {}): Promise<MergeResult> {
   const row = await prisma.agentPullRequest.findUnique({ where: { id: prId }, include: { agent: true } });
   if (!row) throw new NotFoundError("PR não encontrado.");
-  const repo = await resolveAgentRepo(row.agentId);
+  const repo = await resolveAgentRepo(row.agentId, row.repo);
   await freshInstallationToken(repo.installationId);
   const perms = (await getInstallationInfo(repo.installationId)).permissions;
   const missing = [...missingWritePermissions(perms), ...missingMergePermissions(perms)];
@@ -266,7 +294,7 @@ export async function mergePullRequest(prId: string, opts: { actorUserId?: strin
   if (!pull) throw new ValidationError("Não consegui ler o PR no GitHub.");
   if (pull.merged) {
     await prisma.agentPullRequest.update({ where: { id: prId }, data: { status: "MERGED", mergedAt: new Date() } });
-    return { merged: true, number: row.number, cleanup: await cleanupWorkspace(row.agentId) };
+    return { merged: true, number: row.number, cleanup: await cleanupWorkspace(row.agentId, { repo: row.repo }) };
   }
   if (pull.state !== "open") {
     await prisma.agentPullRequest.update({ where: { id: prId }, data: { status: "CLOSED" } });
@@ -284,31 +312,33 @@ export async function mergePullRequest(prId: string, opts: { actorUserId?: strin
   void notify({ kind: "agent", level: "success", title: `PR #${row.number} mergeado`, body: `${row.title} — o deploy automático deve começar em instantes.`, url: row.url, tag: `agent-pr:${row.id}`, audience: { permission: "provider:read", requireGlobal: true } });
 
   // limpeza: a branch remota (best-effort) e a cópia local (só se tudo estiver enviado)
-  const cleanup = await cleanupWorkspace(row.agentId);
+  const cleanup = await cleanupWorkspace(row.agentId, { repo: row.repo });
   await ghFetch(repo.installationId, "DELETE", `/repos/${row.repo}/git/refs/heads/${row.branch}`).catch(() => undefined);
   orchestratorBus.emit({ type: "agent", agentId: row.agentId });
   return { merged: true, number: row.number, cleanup };
 }
 
 /** Apaga a cópia de trabalho do agente. Só com tudo enviado, sem tarefa em andamento/na fila e dentro da pasta dos agentes. */
-export async function cleanupWorkspace(agentId: string, opts: { actorUserId?: string | null } = {}): Promise<{ removed: boolean; reason?: string }> {
+export async function cleanupWorkspace(agentId: string, opts: { actorUserId?: string | null; repo?: string | null } = {}): Promise<{ removed: boolean; reason?: string }> {
   const agent = await prisma.agentProfile.findUnique({ where: { id: agentId } });
   if (!agent) throw new NotFoundError("Agente não encontrado.");
-  if (!existsSync(agent.cwd)) return { removed: false, reason: "A cópia já não existe." };
-  if (!(await isInsideWorkspaceRoot(agent.cwd))) return { removed: false, reason: "O diretório deste agente está fora da pasta de trabalhos dos agentes: não vou apagá-lo." };
+  const target = await resolveAgentRepo(agentId, opts.repo).catch(() => null);
+  const cwd = target?.agent.cwd ?? agent.cwd;
+  if (!existsSync(cwd)) return { removed: false, reason: "A cópia já não existe." };
+  if (!(await isInsideWorkspaceRoot(cwd))) return { removed: false, reason: "O diretório deste agente está fora da pasta de trabalhos dos agentes: não vou apagá-lo." };
   const busy = await prisma.agentTask.count({ where: { agentId, status: { in: ["QUEUED", "STARTING", "RUNNING", "WAITING_APPROVAL"] } } });
   if (busy > 0) return { removed: false, reason: "O agente tem tarefa em andamento ou na fila: mantive a cópia." };
 
-  const st = await runGit(agent.cwd, ["status", "--porcelain"]);
+  const st = await runGit(cwd, ["status", "--porcelain"]);
   if (st.code !== 0) return { removed: false, reason: "Não consegui verificar o estado do Git: mantive a cópia." };
   if (st.out.trim()) return { removed: false, reason: "Há alterações sem commit: mantive a cópia para não perder trabalho." };
-  const br = (await runGit(agent.cwd, ["rev-parse", "--abbrev-ref", "HEAD"])).out.trim();
-  const repoInfo = await resolveAgentRepo(agentId).catch(() => null);
-  const unpushed = await countUnpushed(agent.cwd, br, repoInfo?.baseBranch ?? "main");
+  const br = (await runGit(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])).out.trim();
+  const repoInfo = target;
+  const unpushed = await countUnpushed(cwd, br, repoInfo?.baseBranch ?? "main");
   if (unpushed > 0) return { removed: false, reason: `Há ${unpushed} commit(s) que não foram para o GitHub: mantive a cópia.` };
 
-  await rm(agent.cwd, { recursive: true, force: true });
-  await recordAuditEvent({ userId: opts.actorUserId ?? undefined, action: "AGENT_WORKSPACE_CLEANED", status: "SUCCESS", entityType: "AgentProfile", entityId: agentId, metadata: { agentId } });
+  await rm(cwd, { recursive: true, force: true });
+  await recordAuditEvent({ userId: opts.actorUserId ?? undefined, action: "AGENT_WORKSPACE_CLEANED", status: "SUCCESS", entityType: "AgentProfile", entityId: agentId, metadata: { agentId, repo: target?.fullName ?? null } });
   logger.info("agent_workspace_cleaned", { agentId });
   orchestratorBus.emit({ type: "agent", agentId });
   return { removed: true };

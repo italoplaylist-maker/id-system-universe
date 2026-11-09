@@ -12,7 +12,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const user = await guard(true);
     consumeRateLimit(`agent-publish:${user.id}`, 10, 60_000);
     const { id } = await params;
-    const parsed = z.object({ title: z.string().trim().max(200).optional(), body: z.string().max(5000).optional() }).safeParse(await readJson(request));
+    const parsed = z.object({ title: z.string().trim().max(200).optional(), body: z.string().max(5000).optional(), repo: z.string().max(120).optional() }).safeParse(await readJson(request));
     if (!parsed.success) throw new ValidationError("Título ou descrição inválidos.");
     return NextResponse.json(await publishChanges(id, { ...parsed.data, actorUserId: user.id }));
   } catch (error) {

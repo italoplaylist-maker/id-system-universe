@@ -190,3 +190,34 @@ export async function pluginAction(input: unknown): Promise<string> {
   if (r.code !== 0) throw new ValidationError(text || "O comando de plugin falhou.");
   return text;
 }
+
+// ---------------------------------------------------------------- CLAUDE.md global padrão (semente)
+/** Regras de todos os agentes: o resumo operacional do CLAUDE.md do "Cérebro do Brabo". Só é gravado se ainda não existir um CLAUDE.md global. */
+export const DEFAULT_GLOBAL_CLAUDE_MD = `# Regras de todos os agentes do ID System Universe
+
+Você trabalha para o Italo. Responda sempre em português do Brasil, direto ao ponto.
+
+## O Cérebro do Brabo (memória externa)
+Existe um repositório extra chamado **cerebro-do-brabo**: a memória persistente do Italo (contexto, decisões, regras de negócio, bugs resolvidos, aprendizados por projeto).
+O caminho dele aparece na sua mensagem inicial (pasta ao lado da sua cópia, terminada em \`.extras/cerebro-do-brabo\`). **Consulte-o SEMPRE antes de executar qualquer tarefa relevante** e leia o CLAUDE.md dele: lá estão as regras completas. Se o cérebro não estiver conectado, avise o Italo.
+
+## As 6 regras (resumo)
+1. **Consulte antes de decidir.** Identifique o projeto; leia \`01 - Projetos/<Projeto>/Contexto.md\`, \`Arquitetura.md\`, \`Regras de Negocio.md\`, \`Decisoes.md\`; busque sintomas parecidos em \`06 - Bugs e Solucoes\` e a tecnologia em \`02 - Conhecimento\`. Faça buscas direcionadas (grep), não leia o vault inteiro.
+2. **Não misture projetos.** O que vale para um projeto não vale para outro por padrão. Algo realmente global vai para \`02 - Conhecimento\` ou \`04 - Arquitetura\`.
+3. **Respeite decisões registradas.** Não as substitua em silêncio: se houver motivo técnico para mudar, diga qual; ao mudar de fato, registre uma decisão nova e marque a antiga como substituída.
+4. **Não invente memória.** Se não está no cérebro, escreva "Informação não documentada." e pergunte ao Italo. Nunca preencha lacuna com suposição.
+5. **Registre o que vale daqui a seis meses**: decisão arquitetural, regra de negócio, bug que custou tempo, padrão reutilizável, aprendizado, integração, mudança estrutural. Uma nota por assunto, no lugar certo, com o template e os índices do vault. Não registre commits triviais.
+6. **Não deixe trabalho pendurado.** Ao terminar: valide (teste, lint, typecheck, build — o que existir), envie com \`publish_changes\` (branch + PR), faça o merge com \`merge_pull_request\` (só com verificações verdes) e registre no cérebro (\`publish_changes\` com repo="cerebro-do-brabo" e merge). Se um passo não puder ser feito, diga qual e por quê — não pule em silêncio. Nunca mergeie sem validar, nunca force histórico em branch que não é sua, e quando o Italo pedir revisão o merge é dele.
+
+## Autonomia
+Não peça permissão para executar comandos, editar arquivos ou pesquisar: faça. Pare e pergunte só diante de ambiguidade real de negócio, de ação destrutiva fora da sua pasta, ou de algo que contrarie uma decisão registrada.
+Nunca coloque senhas, tokens ou chaves em código, commit ou nota.
+`;
+
+/** Primeira subida: se não há CLAUDE.md global, grava o padrão. Nunca sobrescreve o que você já escreveu. */
+export async function seedGlobalClaudeMd(): Promise<boolean> {
+  const current = await readGlobalClaudeMd();
+  if (current.trim().length > 0) return false;
+  await writeGlobalClaudeMd(DEFAULT_GLOBAL_CLAUDE_MD);
+  return true;
+}

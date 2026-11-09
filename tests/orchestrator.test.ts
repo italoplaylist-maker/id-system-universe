@@ -102,6 +102,29 @@ describe("Orquestrador de agentes Claude", () => {
     assert.ok(done.claudeSessionId);
   });
 
+  it("sem pedir permissão (padrão): libera comandos/edições e o merge, bloqueia o perigoso e roda em acceptEdits; desligado, volta a pedir", async () => {
+    const t1 = await submitTask(agentId, { prompt: "a", idempotencyKey: key() }, actor);
+    await dispatch();
+    await waitFor(async () => exec.runs.length === 1);
+    const run = exec.runs[0];
+    assert.equal(run.permissionMode, "acceptEdits");
+    for (const t of ["Bash", "Edit", "Write", "WebFetch", "mcp__universe__merge_pull_request", "mcp__universe__publish_changes"]) assert.ok(run.allowedTools?.includes(t), `${t} liberado`);
+    for (const d of ["Bash(sudo:*)", "Bash(git push --force:*)"]) assert.ok(run.disallowedTools?.includes(d), `${d} bloqueado`);
+    exec.release(t1.task.id);
+    await idle();
+
+    await updateSettings({ autoApprove: false }, actor);
+    const t2 = await submitTask(agentId, { prompt: "b", idempotencyKey: key() }, actor);
+    await dispatch();
+    await waitFor(async () => exec.runs.length === 2);
+    const manual = exec.runs[1];
+    assert.equal(manual.permissionMode, "default");
+    assert.ok(!manual.allowedTools?.includes("Bash"));
+    assert.ok(!manual.allowedTools?.includes("mcp__universe__merge_pull_request"), "merge volta a pedir aprovação");
+    exec.release(t2.task.id);
+    await idle();
+  });
+
   it("não executa nada enquanto o executor não confirmou o início (STARTING)", async () => {
     let confirm: (() => void) | undefined;
     const slow: TaskExecutor = {

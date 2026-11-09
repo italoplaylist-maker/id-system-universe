@@ -95,7 +95,7 @@ export function useAvailableModels(enabled = true) {
 export function useOrchestratorSettings(enabled = true) {
   return useQuery({
     queryKey: [...KEY, "settings"],
-    queryFn: () => apiFetch<{ settings: { maxConcurrent: number } }>("/api/orchestrator/settings"),
+    queryFn: () => apiFetch<{ settings: { maxConcurrent: number; autoApprove: boolean } }>("/api/orchestrator/settings"),
     select: (d) => d.settings,
     enabled,
   });
@@ -141,13 +141,14 @@ export interface GitStatusView {
   missingForMerge: string[];
   permissionsChecked: boolean;
   permissionsSeen: { installationId: string; account: string; contents: string; pullRequests: string; checks: string; statuses: string; settingsUrl: string } | null;
-  pullRequests: Array<{ id: string; number: number; url: string; title: string; status: string; branch: string }>;
+  repoRef?: string;
+  pullRequests: Array<{ id: string; number: number; url: string; title: string; status: string; branch: string; repo?: string }>;
 }
 
-export function useAgentGit(agentId: string | null) {
+export function useAgentGit(agentId: string | null, repo: string = "primary") {
   return useQuery({
-    queryKey: [...KEY, "git", agentId],
-    queryFn: () => apiFetch<GitStatusView>(`/api/orchestrator/agents/${agentId}/git?permissions=1`),
+    queryKey: [...KEY, "git", agentId, repo],
+    queryFn: () => apiFetch<GitStatusView>(`/api/orchestrator/agents/${agentId}/git?permissions=1&repo=${encodeURIComponent(repo)}`),
     enabled: !!agentId,
     refetchInterval: 15_000,
   });
@@ -183,7 +184,7 @@ export function useOrchestratorMutations() {
     submitLoginCode: useMutation({ mutationFn: (code: string) => apiFetch("/api/orchestrator/auth/code", { method: "POST", body: JSON.stringify({ code }) }), onSettled: refresh }),
     logout: useMutation({ mutationFn: () => apiFetch("/api/orchestrator/auth/logout", { method: "POST" }), onSettled: refresh }),
     publish: useMutation({
-      mutationFn: (v: { agentId: string; title?: string }) => apiFetch<{ branch: string; pullRequest: { number: number; url: string }; committed: boolean }>(`/api/orchestrator/agents/${v.agentId}/git/publish`, { method: "POST", body: JSON.stringify({ title: v.title }) }),
+      mutationFn: (v: { agentId: string; title?: string; repo?: string }) => apiFetch<{ branch: string; pullRequest: { number: number; url: string }; committed: boolean }>(`/api/orchestrator/agents/${v.agentId}/git/publish`, { method: "POST", body: JSON.stringify({ title: v.title, repo: v.repo && v.repo !== "primary" ? v.repo : undefined }) }),
       onSettled: refresh,
     }),
     mergePr: useMutation({
@@ -191,11 +192,15 @@ export function useOrchestratorMutations() {
       onSettled: refresh,
     }),
     cleanup: useMutation({
-      mutationFn: (agentId: string) => apiFetch<{ removed: boolean; reason?: string }>(`/api/orchestrator/agents/${agentId}/git/cleanup`, { method: "POST" }),
+      mutationFn: (v: string | { agentId: string; repo?: string }) => {
+        const agentId = typeof v === "string" ? v : v.agentId;
+        const repo = typeof v === "string" ? undefined : v.repo;
+        return apiFetch<{ removed: boolean; reason?: string }>(`/api/orchestrator/agents/${agentId}/git/cleanup${repo && repo !== "primary" ? `?repo=${encodeURIComponent(repo)}` : ""}`, { method: "POST" });
+      },
       onSettled: refresh,
     }),
     setConcurrency: useMutation({
-      mutationFn: (maxConcurrent: number) => apiFetch("/api/orchestrator/settings", { method: "PATCH", body: JSON.stringify({ maxConcurrent }) }),
+      mutationFn: (patch: number | { maxConcurrent?: number; autoApprove?: boolean }) => apiFetch("/api/orchestrator/settings", { method: "PATCH", body: JSON.stringify(typeof patch === "number" ? { maxConcurrent: patch } : patch) }),
       onSettled: refresh,
     }),
   };
@@ -241,4 +246,28 @@ export function useRefreshGithubRepos() {
     mutationFn: () => apiFetch<{ repositories: GithubRepoOption[]; installations: number }>("/api/orchestrator/github-repos", { method: "POST" }),
     onSuccess: (data) => queryClient.setQueryData([...KEY, "github-repos"], data),
   });
+}
+
+export interface AgentReposView {
+  primary: { fullName: string; branch: string | null; source: "agent" | "project" } | null;
+  extras: Array<{ id: string; fullName: string; dir: string; branch: string | null }>;
+}
+
+export function useAgentRepos(agentId: string | null) {
+  return useQuery({ queryKey: [...KEY, "repos", agentId], queryFn: () => apiFetch<AgentReposView>(`/api/orchestrator/agents/${agentId}/repos`), enabled: !!agentId });
+}
+
+export function useExtraRepoMutations() {
+  const queryClient = useQueryClient();
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: KEY });
+  return {
+    add: useMutation({
+      mutationFn: (v: { agentId: string; githubRepositoryId: string; branch?: string | null; applyToAll?: boolean }) => apiFetch<{ added: number; message: string }>(`/api/orchestrator/agents/${v.agentId}/repos`, { method: "POST", body: JSON.stringify({ githubRepositoryId: v.githubRepositoryId, branch: v.branch || null, applyToAll: v.applyToAll }) }),
+      onSettled: refresh,
+    }),
+    remove: useMutation({
+      mutationFn: (v: { agentId: string; extraId: string }) => apiFetch<{ cleanup: { removed: boolean; reason?: string } }>(`/api/orchestrator/agents/${v.agentId}/repos?extraId=${encodeURIComponent(v.extraId)}`, { method: "DELETE" }),
+      onSettled: refresh,
+    }),
+  };
 }

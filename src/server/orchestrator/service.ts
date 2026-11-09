@@ -4,7 +4,8 @@ import { prisma } from "@/server/db/client";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { consumeRateLimit } from "@/server/security/rate-limit";
 import { recordAuditEvent } from "@/server/audit/audit-log";
-import { prepareAfterLink } from "./workspace";
+import { prepareAfterLink, prepareExtrasNow } from "./workspace";
+import { freeExtraDir, listExtraRepos } from "./repo-link";
 import { redactSecrets } from "@/server/claude/agent-service";
 import { orchestratorBus } from "./bus";
 import { linkToTask, listForTask, purgeAttachments, validateForTask, type AttachmentView } from "./attachments";
@@ -261,14 +262,15 @@ export async function decideTaskApproval(approvalId: string, input: unknown, act
 
 export async function getSettings() {
   const row = await prisma.orchestratorSetting.upsert({ where: { id: "default" }, create: { id: "default" }, update: {} });
-  return { maxConcurrent: row.maxConcurrent };
+  return { maxConcurrent: row.maxConcurrent, autoApprove: row.autoApprove };
 }
 
 export async function updateSettings(input: unknown, actor: Actor) {
-  const parsed = z.object({ maxConcurrent: z.number().int().min(1).max(16) }).safeParse(input);
-  if (!parsed.success) throw new ValidationError("O limite de execuções simultâneas deve estar entre 1 e 16.");
-  await prisma.orchestratorSetting.upsert({ where: { id: "default" }, create: { id: "default", maxConcurrent: parsed.data.maxConcurrent }, update: { maxConcurrent: parsed.data.maxConcurrent } });
-  await recordAuditEvent({ userId: actor.userId, action: "ORCHESTRATOR_SETTINGS_UPDATED", status: "SUCCESS", entityType: "OrchestratorSetting", entityId: "default", metadata: { maxConcurrent: parsed.data.maxConcurrent }, ipAddress: actor.ip, userAgent: actor.userAgent });
+  const parsed = z.object({ maxConcurrent: z.number().int().min(1).max(16).optional(), autoApprove: z.boolean().optional() }).safeParse(input);
+  if (!parsed.success || (parsed.data.maxConcurrent === undefined && parsed.data.autoApprove === undefined)) throw new ValidationError("O limite de execuções simultâneas deve estar entre 1 e 16.");
+  const data = parsed.data;
+  await prisma.orchestratorSetting.upsert({ where: { id: "default" }, create: { id: "default", ...data }, update: data });
+  await recordAuditEvent({ userId: actor.userId, action: "ORCHESTRATOR_SETTINGS_UPDATED", status: "SUCCESS", entityType: "OrchestratorSetting", entityId: "default", metadata: data, ipAddress: actor.ip, userAgent: actor.userAgent });
   orchestratorBus.emit({ type: "settings" });
   return getSettings();
 }
@@ -363,4 +365,77 @@ export async function purgeOldTasks(now: Date = new Date(), days = 60): Promise<
   const r = await prisma.agentTask.deleteMany({ where: { status: { in: [...TERMINAL] }, finishedAt: { lt: cutoff } } });
   await purgeAttachments().catch(() => undefined); // uploads que nunca viraram comando (>24 h)
   return r.count;
+}
+
+// ---------------------------------------------------------------------------
+// Repositórios extras do agente
+// ---------------------------------------------------------------------------
+
+const MAX_EXTRA_REPOS = 6;
+
+export interface AgentReposView {
+  primary: { fullName: string; branch: string | null; source: "agent" | "project" } | null;
+  extras: Array<{ id: string; fullName: string; dir: string; branch: string | null }>;
+}
+
+export async function getAgentRepos(agentId: string): Promise<AgentReposView> {
+  const agent = await prisma.agentProfile.findUnique({ where: { id: agentId } });
+  if (!agent || agent.archivedAt) throw new NotFoundError("Agente não encontrado.");
+  const { pickAgentRepository } = await import("./repo-link");
+  const picked = await pickAgentRepository(agent);
+  const extras = await listExtraRepos(agentId);
+  return {
+    primary: picked ? { fullName: picked.gh.fullName, branch: picked.branch ?? picked.gh.defaultBranch, source: picked.source } : null,
+    extras: extras.map((e) => ({ id: e.id, fullName: e.githubRepository.fullName, dir: e.dir, branch: e.branch })),
+  };
+}
+
+/** Liga um repositório EXTRA ao agente (ele passa a enxergar vários). `applyToAll` repete para todos os agentes ativos (ex.: o cérebro). */
+export async function addExtraRepo(agentId: string, input: unknown, actor: Actor): Promise<{ added: number; message: string }> {
+  const parsed = z.object({ githubRepositoryId: z.string().min(1).max(40), branch: z.string().trim().max(120).regex(/^[A-Za-z0-9._\/-]*$/, "Branch inválida.").optional().nullable(), applyToAll: z.boolean().optional() }).safeParse(input);
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Dados inválidos.");
+  const repo = await prisma.gitHubRepository.findUnique({ where: { id: parsed.data.githubRepositoryId }, include: { installation: true } });
+  if (!repo || repo.archived || repo.installation.status !== "ACTIVE") throw new ValidationError("Repositório não encontrado ou sem acesso do GitHub App.");
+  const targets = parsed.data.applyToAll ? await prisma.agentProfile.findMany({ where: { archivedAt: null } }) : [await prisma.agentProfile.findUnique({ where: { id: agentId } })];
+  let added = 0;
+  const notes: string[] = [];
+  for (const agent of targets) {
+    if (!agent || agent.archivedAt) {
+      if (!parsed.data.applyToAll) throw new NotFoundError("Agente não encontrado.");
+      continue;
+    }
+    if (agent.githubRepositoryId === repo.id) {
+      if (!parsed.data.applyToAll) throw new ValidationError("Este já é o repositório principal do agente.");
+      continue;
+    }
+    const exists = await prisma.agentRepository.findUnique({ where: { agentId_githubRepositoryId: { agentId: agent.id, githubRepositoryId: repo.id } } });
+    if (exists) {
+      if (!parsed.data.applyToAll) throw new ValidationError("Este repositório já está conectado ao agente.");
+      continue;
+    }
+    if ((await prisma.agentRepository.count({ where: { agentId: agent.id } })) >= MAX_EXTRA_REPOS) {
+      if (!parsed.data.applyToAll) throw new ValidationError(`Limite de ${MAX_EXTRA_REPOS} repositórios extras por agente.`);
+      continue;
+    }
+    await prisma.agentRepository.create({ data: { agentId: agent.id, githubRepositoryId: repo.id, branch: parsed.data.branch || null, dir: await freeExtraDir(agent.id, repo.name) } });
+    await recordAuditEvent({ userId: actor.userId, action: "AGENT_PROFILE_UPDATED", status: "SUCCESS", entityType: "AgentProfile", entityId: agent.id, metadata: { addExtraRepo: repo.fullName }, ipAddress: actor.ip, userAgent: actor.userAgent });
+    added += 1;
+    // Clona já (só o do agente pedido, para não segurar a resposta com N clones).
+    if (agent.id === agentId) notes.push((await Promise.race([prepareExtrasNow(agent.id), new Promise<string>((r) => setTimeout(() => r("Baixando em segundo plano…"), 90_000))])) || "Pronto.");
+    else void prepareExtrasNow(agent.id).catch(() => undefined);
+    orchestratorBus.emit({ type: "agent", agentId: agent.id });
+  }
+  return { added, message: notes.join(" ") || (added > 0 ? "Conectado. O código é baixado antes da próxima tarefa." : "Nada novo para conectar.") };
+}
+
+export async function removeExtraRepo(agentId: string, extraId: string, actor: Actor): Promise<{ cleanup: { removed: boolean; reason?: string } }> {
+  const row = await prisma.agentRepository.findFirst({ where: { id: extraId, agentId }, include: { githubRepository: true } });
+  if (!row) throw new NotFoundError("Repositório não encontrado neste agente.");
+  // Apaga a cópia só se estiver tudo enviado (cleanupWorkspace confere); o vínculo sai de qualquer jeito.
+  const { cleanupWorkspace } = await import("./git/ops");
+  const cleanup = await cleanupWorkspace(agentId, { actorUserId: actor.userId, repo: row.id }).catch((e) => ({ removed: false, reason: e instanceof Error ? e.message : "Não consegui limpar a cópia." }));
+  await prisma.agentRepository.delete({ where: { id: row.id } });
+  await recordAuditEvent({ userId: actor.userId, action: "AGENT_PROFILE_UPDATED", status: "SUCCESS", entityType: "AgentProfile", entityId: agentId, metadata: { removeExtraRepo: row.githubRepository.fullName }, ipAddress: actor.ip, userAgent: actor.userAgent });
+  orchestratorBus.emit({ type: "agent", agentId });
+  return { cleanup };
 }

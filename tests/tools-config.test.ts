@@ -1,10 +1,10 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { prisma, resetDb } from "./helpers";
-import { createMcp, deleteSkill, listMcp, listSkills, loadMcpServersForRun, readGlobalClaudeMd, saveSkill, writeGlobalClaudeMd } from "@/server/orchestrator/tools-config";
+import { createMcp, deleteSkill, listMcp, listSkills, loadMcpServersForRun, readGlobalClaudeMd, saveSkill, seedGlobalClaudeMd, writeGlobalClaudeMd } from "@/server/orchestrator/tools-config";
 
 const realHome = process.env.HOME;
 const SKILL = "---\nname: revisar\ndescription: Revisa código antes do commit\n---\n\nPasso a passo.\n";
@@ -34,6 +34,16 @@ describe("ferramentas dos agentes (skills, CLAUDE.md, MCP)", () => {
     assert.equal(await readGlobalClaudeMd(), "");
     await writeGlobalClaudeMd("Sempre responda em português.");
     assert.equal(await readGlobalClaudeMd(), "Sempre responda em português.");
+  });
+
+  it("CLAUDE.md global padrão: semeia as regras do cérebro só quando não existe nada, e nunca sobrescreve", async () => {
+    rmSync(join(process.env.HOME!, ".claude", "CLAUDE.md"), { force: true });
+    assert.equal(await seedGlobalClaudeMd(), true);
+    const md = await readGlobalClaudeMd();
+    for (const s of ["cerebro-do-brabo", "Consulte antes de decidir", "Não invente memória", "publish_changes", "Não peça permissão"]) assert.ok(md.includes(s), `contém: ${s}`);
+    await writeGlobalClaudeMd("Meu texto próprio.");
+    assert.equal(await seedGlobalClaudeMd(), false);
+    assert.equal(await readGlobalClaudeMd(), "Meu texto próprio.");
   });
 
   it("MCP: segredos cifrados no banco, nunca voltam pela listagem e chegam ao SDK decifrados", async () => {
