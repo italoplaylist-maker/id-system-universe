@@ -58,6 +58,8 @@ export function useApplicationDeployments(id: string | null) {
     queryKey: ["applications", "deployments", id],
     queryFn: () => apiFetch<{ deployments: UniverseDeployment[] }>(`/api/applications/${id}/deployments`),
     enabled: Boolean(id),
+    // Enquanto algum deploy roda, a lista acompanha; em repouso só de vez em quando.
+    refetchInterval: (query) => (query.state.data?.deployments.some((d) => d.status === "RUNNING" || d.status === "QUEUED") ? 4_000 : 30_000),
   });
 }
 
@@ -96,5 +98,23 @@ export function useSyncAll() {
   return useMutation({
     mutationFn: () => apiFetch("/api/sync", { method: "POST" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["applications"] }),
+  });
+}
+
+export interface DeploymentLogsView {
+  lines: Array<{ raw: string; level: "INFO" | "WARN" | "ERROR"; timestamp?: string }>;
+  status: UniverseDeployment["status"];
+  /** "history" = guardado no Universe; "live" = lido agora do Coolify; "none" = sem log. */
+  source: "history" | "live" | "none";
+}
+
+/** Log de um deploy. Enquanto o deploy roda, atualiza a cada 3 s; depois de terminado, não precisa mais. */
+export function useDeploymentLogs(applicationId: string, deploymentId: string | null) {
+  return useQuery({
+    queryKey: ["applications", "deployment-logs", applicationId, deploymentId],
+    queryFn: () => apiFetch<DeploymentLogsView>(`/api/applications/${applicationId}/deployments/${deploymentId}/logs`),
+    enabled: Boolean(deploymentId),
+    refetchInterval: (query) => (query.state.data && (query.state.data.status === "RUNNING" || query.state.data.status === "QUEUED") ? 3_000 : false),
+    retry: false,
   });
 }

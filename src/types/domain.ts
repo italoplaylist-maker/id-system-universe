@@ -70,6 +70,8 @@ export interface UniverseDeployment {
   commitMessage: string | null;
   startedAt: string | null;
   finishedAt: string | null;
+  /** Há log para abrir (guardado no histórico ou ainda no Coolify). */
+  hasLogs: boolean;
 }
 
 export interface UniverseLogLine {

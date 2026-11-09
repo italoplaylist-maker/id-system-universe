@@ -220,6 +220,9 @@ model DeploymentCache {
   startedAt     DateTime?
   finishedAt    DateTime?
   createdAt     DateTime    @default(now())
+  /// Histórico: log do deploy guardado quando ele termina (o Coolify apaga deploys antigos). Segredos já mascarados.
+  logs          String?
+  logsSavedAt   DateTime?
 
   @@unique([applicationId, externalId])
   @@index([applicationId])

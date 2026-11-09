@@ -96,6 +96,8 @@ export interface DeploymentProvider {
   /** Applications only — services/databases don't have a git-based deploy history. */
   listDeployments(applicationExternalId: string): Promise<ProviderDeployment[]>;
   getDeployment(deploymentExternalId: string): Promise<ProviderDeployment>;
+  /** Log completo de UM deploy (build + subida), inclusive de deploys já terminados. */
+  getDeploymentLogs(deploymentExternalId: string): Promise<LogLine[]>;
   startApplication(externalId: string, resourceType: ProviderResourceType): Promise<ActionResult>;
   stopApplication(externalId: string, resourceType: ProviderResourceType): Promise<ActionResult>;
   restartApplication(externalId: string, resourceType: ProviderResourceType): Promise<ActionResult>;

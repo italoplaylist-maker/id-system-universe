@@ -3,6 +3,7 @@ import type {
   ConnectionResult,
   DeploymentProvider,
   LogOptions,
+  LogLine,
   LogResult,
   NormalizedApplicationStatus,
   ProviderApplication,
@@ -12,7 +13,7 @@ import type {
 } from "../types";
 import { CoolifyClient } from "./coolify-client";
 import type { CoolifyProjectDetailRaw } from "./coolify-types";
-import { mapApplication, mapApplicationStatus, mapDatabase, mapDeployment, mapLogs, mapService } from "./coolify-mapper";
+import { mapApplication, mapApplicationStatus, mapDatabase, mapDeployment, mapDeploymentLogs, mapLogs, mapService } from "./coolify-mapper";
 import { ProviderError } from "@/lib/errors";
 
 export class CoolifyProvider implements DeploymentProvider {
@@ -112,6 +113,11 @@ export class CoolifyProvider implements DeploymentProvider {
   async getDeployment(deploymentExternalId: string): Promise<ProviderDeployment> {
     const raw = await this.client.getDeployment(deploymentExternalId);
     return mapDeployment(raw);
+  }
+
+  async getDeploymentLogs(deploymentExternalId: string): Promise<LogLine[]> {
+    const raw = await this.client.getDeployment(deploymentExternalId);
+    return mapDeploymentLogs(raw.logs);
   }
 
   async startApplication(externalId: string, resourceType: ProviderResourceType): Promise<ActionResult> {
