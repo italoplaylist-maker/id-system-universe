@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { RoundedBox } from "@react-three/drei";
 import { PALETTE } from "../palette";
 import { SCREEN_CANVAS, type OfficeLayout } from "./office-layout";
+import { fmtReset, fmtTokens, type ClaudeUsageView } from "@/lib/claude-usage";
 
 export interface CommandCenterStats {
   projectCount: number;
@@ -15,12 +16,24 @@ export interface CommandCenterStats {
   employeeCount: number;
   /** Só contagens agregadas, e só para quem tem permissão financeira. */
   billing?: { pending: number; overdue: number; dueToday: number } | null;
+  /** Uso do plano do Claude e tokens dos agentes (null = ainda carregando / sem permissão). */
+  claude?: ClaudeUsageView | null;
 }
 
 export const COMMAND_CANVAS = SCREEN_CANVAS;
-const { width: CW, height: CH } = SCREEN_CANVAS;
+/** Painéis do núcleo do átrio: mesma largura, mais altos, para caber o bloco de uso do Claude. */
+export const CORE_CANVAS = { width: SCREEN_CANVAS.width, height: 560 } as const;
+const { width: CW } = SCREEN_CANVAS;
+
+/** Chave de repintura: só muda quando algum número exibido muda (o tempo até o reset é recalculado a cada minuto pelo chamador). */
+export function statsKey(stats: CommandCenterStats, minute = 0): string {
+  const c = stats.claude;
+  const claude = c ? `${c.plan}|${c.fiveHour?.percent}|${c.sevenDay?.percent}|${c.tokens.day}|${c.tokens.week}|${c.error ? 1 : 0}|${minute}` : "-";
+  return `${stats.projectCount}|${stats.resourceCount}|${stats.onlineCount}|${stats.deployingCount}|${stats.incidentCount}|${stats.employeeCount}|${stats.billing ? `${stats.billing.pending},${stats.billing.overdue},${stats.billing.dueToday}` : "-"}|${claude}`;
+}
 
 export function paintScreen(ctx: CanvasRenderingContext2D, stats: CommandCenterStats) {
+  const CH = ctx.canvas.height;
   const g = ctx.createLinearGradient(0, 0, 0, CH);
   g.addColorStop(0, "#0b101b");
   g.addColorStop(1, "#070a11");
@@ -78,6 +91,57 @@ export function paintScreen(ctx: CanvasRenderingContext2D, stats: CommandCenterS
       366,
     );
   }
+
+  // undefined = sem permissão / erro de acesso: não desenha o bloco. null = carregando.
+  if (CH >= 540 && stats.claude !== undefined) paintClaude(ctx, stats.claude);
+}
+
+function bar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, label: string, win: { percent: number | null; resetsAt: string | null } | null) {
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#8b96ad";
+  ctx.font = "600 24px ui-sans-serif, system-ui";
+  ctx.fillText(label, x, y);
+  const pct = win?.percent ?? null;
+  ctx.fillStyle = "#1c2433";
+  ctx.fillRect(x, y + 14, w, 24);
+  if (pct !== null) {
+    ctx.fillStyle = pct >= 90 ? "#f87171" : pct >= 70 ? "#fbbf24" : "#34d399";
+    ctx.fillRect(x, y + 14, Math.max(4, (w * pct) / 100), 24);
+  }
+  ctx.fillStyle = "#e6e9f0";
+  ctx.font = "700 28px ui-sans-serif, system-ui";
+  const text = pct === null ? "indisponível" : `${pct}% usado · ${100 - pct}% restante · reseta em ${fmtReset(win?.resetsAt ?? null)}`;
+  ctx.fillText(text, x, y + 74);
+}
+
+function paintClaude(ctx: CanvasRenderingContext2D, c: ClaudeUsageView | null) {
+  const y0 = 404;
+  ctx.fillStyle = "#1c2433";
+  ctx.fillRect(64, y0, CW - 128, 2);
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#e8a27c";
+  ctx.font = "700 28px ui-sans-serif, system-ui";
+  ctx.fillText(`CLAUDE${c?.plan ? ` · PLANO ${c.plan.toUpperCase()}` : ""}`, 64, y0 + 44);
+  if (!c) {
+    ctx.fillStyle = "#6f7a90";
+    ctx.font = "600 26px ui-sans-serif, system-ui";
+    ctx.fillText("carregando uso do plano…", 64, y0 + 100);
+    return;
+  }
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#e6e9f0";
+  ctx.font = "700 28px ui-sans-serif, system-ui";
+  ctx.fillText(`TOKENS DOS AGENTES  ·  24 H: ${fmtTokens(c.tokens.day)}  ·  7 DIAS: ${fmtTokens(c.tokens.week)}`, CW - 64, y0 + 44);
+  if (c.planLimitsAvailable && (c.fiveHour || c.sevenDay)) {
+    const half = (CW - 128 - 64) / 2;
+    bar(ctx, 64, y0 + 82, half, "SESSÃO DE 5 HORAS", c.fiveHour);
+    bar(ctx, 64 + half + 64, y0 + 82, half, "SEMANA (7 DIAS)", c.sevenDay);
+  } else {
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#6f7a90";
+    ctx.font = "600 26px ui-sans-serif, system-ui";
+    ctx.fillText(c.error ? "Uso do plano indisponível agora (o Claude não respondeu)." : "Conta por chave de API: não há limite de plano para mostrar.", 64, y0 + 110);
+  }
 }
 
 /**
@@ -93,7 +157,7 @@ export function CommandScreen({ layout, stats, onOpen }: { layout: OfficeLayout;
   useEffect(() => {
     const canvas = document.createElement("canvas");
     canvas.width = CW;
-    canvas.height = CH;
+    canvas.height = SCREEN_CANVAS.height;
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = 8;
@@ -105,7 +169,7 @@ export function CommandScreen({ layout, stats, onOpen }: { layout: OfficeLayout;
     return () => texture.dispose();
   }, []);
 
-  const key = `${stats.projectCount}|${stats.resourceCount}|${stats.onlineCount}|${stats.deployingCount}|${stats.incidentCount}|${stats.employeeCount}|${stats.billing ? `${stats.billing.pending},${stats.billing.overdue},${stats.billing.dueToday}` : "-"}`;
+  const key = statsKey(stats);
   useEffect(() => {
     const texture = textureRef.current;
     if (!texture) return;

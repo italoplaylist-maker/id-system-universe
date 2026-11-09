@@ -4,7 +4,7 @@ import type { Obstacle } from "../life/geometry";
 export const CORE = { radius: 3.5, platformH: 0.22, ringY: 3.7, screenR: 3.05, screenY: 1.75 };
 
 export const PLANTER_ANGLES = [40, 78, 178, 292, 322].map((d) => (d * Math.PI) / 180);
-export const PLANTER_RADIUS = 7.0;
+export const PLANTER_RADIUS = 5.9;
 
 /** Móveis fixos do átrio (mundo): o núcleo e os jardins. O sim os trata como obstáculos. */
 export function atriumObstacles(): Obstacle[] {
