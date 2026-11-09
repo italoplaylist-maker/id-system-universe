@@ -18,7 +18,7 @@ export const HQ = {
   /** Cota de referência: o terreno externo fica em −0,065 m, então todas as alas sobem 0,30 m (as diferenças entre níveis são as pedidas: átrio +0,40, tecnológica +0,20, operacional 0, social −0,20). */
   BASE: 0.3,
   ATRIUM_LEVEL: 0.7,
-  /** Distância do centro do átrio à parede de cada ala (a parede fica logo dentro do polígono). */
+  /** Distância do centro do átrio à parede de cada ala (a parede fica logo dentro do polígono). Compacta desde 2026-11-09 (era 9,3 com átrio de 9,6): o limite é o núcleo central (r 3,5 + anel) e a sobreposição entre alas vizinhas. */
   DOOR_DIST: 7.6,
   DOOR_WIDTH: 2.4,
   RAMP_LENGTH: 2.8,
