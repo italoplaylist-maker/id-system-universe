@@ -14,12 +14,12 @@ import { inOrect, inPolygon, toWorld, type Rigid, type Vec2 } from "../life/geom
  * A porta de cada ala fica no meio da parede leste LOCAL, voltada para o átrio.
  */
 export const HQ = {
-  ATRIUM_RADIUS: 9.6,
+  ATRIUM_RADIUS: 7.9,
   /** Cota de referência: o terreno externo fica em −0,065 m, então todas as alas sobem 0,30 m (as diferenças entre níveis são as pedidas: átrio +0,40, tecnológica +0,20, operacional 0, social −0,20). */
   BASE: 0.3,
   ATRIUM_LEVEL: 0.7,
   /** Distância do centro do átrio à parede de cada ala (a parede fica logo dentro do polígono). */
-  DOOR_DIST: 9.3,
+  DOOR_DIST: 7.6,
   DOOR_WIDTH: 2.4,
   RAMP_LENGTH: 2.8,
   LEVEL: { tech: 0.5, agents: 0.3, lounge: 0.1 },
