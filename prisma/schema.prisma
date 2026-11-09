@@ -861,6 +861,10 @@ model AgentTask {
   claudeSessionId String?
   costUsd         Float?
   turns           Int?
+  /// Tokens da execução (resultado do Claude): entrada, saída e cache (leitura + criação). Nulos em tarefas antigas.
+  inputTokens     Int?
+  outputTokens    Int?
+  cacheTokens     Int?
   cancelRequested Boolean             @default(false)
   nextSeq         Int                 @default(1)
   events          AgentTaskEvent[]

@@ -220,7 +220,7 @@ async function runTask(taskId: string): Promise<void> {
       await finish(taskId, agent.id, "CANCELLED", { error: "Cancelada." });
       await appendEvent(taskId, "cancelled", "Execução cancelada");
     } else {
-      await finish(taskId, agent.id, "COMPLETED", { result: outcome.result?.slice(0, 20000) ?? null, costUsd: outcome.costUsd ?? null, turns: outcome.turns ?? null, claudeSessionId: outcome.sessionId });
+      await finish(taskId, agent.id, "COMPLETED", { result: outcome.result?.slice(0, 20000) ?? null, costUsd: outcome.costUsd ?? null, turns: outcome.turns ?? null, inputTokens: outcome.inputTokens ?? null, outputTokens: outcome.outputTokens ?? null, cacheTokens: outcome.cacheTokens ?? null, claudeSessionId: outcome.sessionId });
       await appendEvent(taskId, "completed", outcome.result?.slice(0, 1500) ?? "Concluída");
     }
   } catch (error) {
@@ -243,10 +243,10 @@ async function runTask(taskId: string): Promise<void> {
   }
 }
 
-async function finish(taskId: string, agentId: string, status: "COMPLETED" | "FAILED" | "CANCELLED", data: { result?: string | null; error?: string | null; costUsd?: number | null; turns?: number | null; claudeSessionId?: string }) {
+async function finish(taskId: string, agentId: string, status: "COMPLETED" | "FAILED" | "CANCELLED", data: { result?: string | null; error?: string | null; costUsd?: number | null; turns?: number | null; inputTokens?: number | null; outputTokens?: number | null; cacheTokens?: number | null; claudeSessionId?: string }) {
   const won = await prisma.agentTask.updateMany({
     where: { id: taskId, status: { in: [...ACTIVE] } },
-    data: { status, finishedAt: new Date(), result: data.result ?? undefined, error: data.error ?? undefined, costUsd: data.costUsd ?? undefined, turns: data.turns ?? undefined, claudeSessionId: data.claudeSessionId ?? undefined },
+    data: { status, finishedAt: new Date(), result: data.result ?? undefined, error: data.error ?? undefined, costUsd: data.costUsd ?? undefined, turns: data.turns ?? undefined, inputTokens: data.inputTokens ?? undefined, outputTokens: data.outputTokens ?? undefined, cacheTokens: data.cacheTokens ?? undefined, claudeSessionId: data.claudeSessionId ?? undefined },
   });
   if (won.count === 1 && status !== "CANCELLED") void notifyTaskFinished(taskId, status).catch(() => undefined);
   await prisma.agentProfile.update({ where: { id: agentId }, data: { lastActiveAt: new Date(), ...(status === "COMPLETED" ? { lastError: null } : {}), ...(data.claudeSessionId ? { claudeSessionId: data.claudeSessionId } : {}) } }).catch(() => undefined);

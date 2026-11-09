@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import { PALETTE } from "../palette";
 import { MergeStatic } from "../render/merge-static";
 import { useUiStore } from "@/store/ui-store";
 import { TallPlant } from "./office-props";
-import { COMMAND_CANVAS, paintScreen, type CommandCenterStats } from "./command-screen";
+import { CORE_CANVAS, paintScreen, statsKey, type CommandCenterStats } from "./command-screen";
 import { HQ, type HqPlan, type Ramp as RampData } from "../plan/hq-plan";
 
 import { CORE, PLANTER_ANGLES, PLANTER_RADIUS } from "../plan/atrium-layout";
@@ -89,8 +89,8 @@ function CommandCore({ level, stats, onOpen, reduced }: { level: number; stats: 
   const quality = useUiStore((st) => st.quality);
   const { screenMat, texture } = useMemo(() => {
     const canvas = document.createElement("canvas");
-    canvas.width = COMMAND_CANVAS.width;
-    canvas.height = COMMAND_CANVAS.height;
+    canvas.width = CORE_CANVAS.width;
+    canvas.height = CORE_CANVAS.height;
     const t = new THREE.CanvasTexture(canvas);
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 8;
@@ -129,7 +129,13 @@ function CommandCore({ level, stats, onOpen, reduced }: { level: number; stats: 
     [signMat],
   );
 
-  const key = `${stats.projectCount}|${stats.resourceCount}|${stats.onlineCount}|${stats.deployingCount}|${stats.incidentCount}|${stats.employeeCount}|${stats.billing ? `${stats.billing.pending},${stats.billing.overdue},${stats.billing.dueToday}` : "-"}`;
+  // o tempo até o reset do plano muda a cada minuto: repinta junto
+  const [minute, setMinute] = useState(() => Math.floor(Date.now() / 60_000));
+  useEffect(() => {
+    const id = setInterval(() => setMinute(Math.floor(Date.now() / 60_000)), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const key = statsKey(stats, minute);
   useEffect(() => {
     const ctx = (texture.image as HTMLCanvasElement).getContext("2d");
     if (!ctx) return;
@@ -148,7 +154,7 @@ function CommandCore({ level, stats, onOpen, reduced }: { level: number; stats: 
   // 4 painéis curvos de ~75° em volta do núcleo; entre eles, pilares de aço que sustentam o anel suspenso.
   const arcs = [0, 1, 2, 3].map((i) => i * (Math.PI / 2) + Math.PI / 4);
   const arcLen = (Math.PI * 75) / 180;
-  const h = ((CORE.screenR * arcLen) * COMMAND_CANVAS.height) / COMMAND_CANVAS.width;
+  const h = ((CORE.screenR * arcLen) * CORE_CANVAS.height) / CORE_CANVAS.width;
   return (
     <group position={[0, level, 0]}>
       {/* plataforma elevada do núcleo, em dois degraus */}
