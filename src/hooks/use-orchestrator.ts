@@ -271,3 +271,14 @@ export function useExtraRepoMutations() {
     }),
   };
 }
+
+/** Uso do plano do Claude + tokens dos agentes (mostrado na tela do núcleo do escritório). */
+export function useClaudeUsage(enabled = true) {
+  return useQuery({
+    queryKey: [...KEY, "usage"],
+    queryFn: () => apiFetch<import("@/lib/claude-usage").ClaudeUsageView>("/api/orchestrator/usage"),
+    enabled,
+    staleTime: 60_000,
+    refetchInterval: 90_000,
+  });
+}

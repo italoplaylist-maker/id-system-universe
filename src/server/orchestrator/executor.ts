@@ -38,6 +38,9 @@ export interface ExecutorResult {
   result?: string;
   costUsd?: number;
   turns?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheTokens?: number;
 }
 
 export interface TaskExecutor {
@@ -134,8 +137,16 @@ export class ClaudeSdkExecutor implements TaskExecutor {
             }
           }
         } else if (m.type === "result") {
-          const r = m as unknown as { subtype: string; is_error?: boolean; result?: string; total_cost_usd?: number; num_turns?: number; errors?: string[] };
-          result = { sessionId, result: r.result, costUsd: r.total_cost_usd, turns: r.num_turns };
+          const r = m as unknown as { subtype: string; is_error?: boolean; result?: string; total_cost_usd?: number; num_turns?: number; errors?: string[]; usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } };
+          result = {
+            sessionId,
+            result: r.result,
+            costUsd: r.total_cost_usd,
+            turns: r.num_turns,
+            inputTokens: r.usage?.input_tokens,
+            outputTokens: r.usage?.output_tokens,
+            cacheTokens: (r.usage?.cache_read_input_tokens ?? 0) + (r.usage?.cache_creation_input_tokens ?? 0) || undefined,
+          };
           if (r.subtype !== "success" || r.is_error) {
             throw new Error(r.errors?.join("; ") || r.result || `Execução terminou com erro (${r.subtype}).`);
           }

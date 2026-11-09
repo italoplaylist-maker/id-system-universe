@@ -22,7 +22,7 @@ import type { PlanWorldInput } from "./life/world";
 import { computeLoungeLayout, LOUNGE_MIN_DEPTH, LOUNGE_WIDTH } from "./life/lounge-layout";
 import { useAgentSessions } from "@/hooks/use-agents";
 import { agentAccent, orderAgentSessions } from "@/lib/agent-order";
-import { roomAgentToSession, useRoomAgents } from "@/hooks/use-orchestrator";
+import { roomAgentToSession, useClaudeUsage, useRoomAgents } from "@/hooks/use-orchestrator";
 import { OfficeProps, officePropObstacles } from "./office/office-props";
 import { NocWall } from "./office/noc-wall";
 import { ServerRoom } from "./office/server-room";
@@ -241,6 +241,9 @@ export function HqScene({
   // A parede do NOC só existe para quem pode ler servidores (a API exige escopo global).
   const { data: monitoredServers } = useServers(sessionUser ? canUser(sessionUser, "provider:read") : false);
   const nocEnabled = monitoredServers !== undefined;
+  // Uso do plano do Claude no núcleo: só para quem pode ler a central (provider:read); em erro de acesso o bloco some.
+  const canSeeClaude = sessionUser ? canUser(sessionUser, "provider:read") : false;
+  const { data: claudeUsage, isError: claudeError } = useClaudeUsage(canSeeClaude);
 
   const stats: CommandCenterStats = useMemo(
     () => ({
@@ -252,8 +255,9 @@ export function HqScene({
       // Real headcount: one employee per project desk, and none at a desk that's shut down.
       employeeCount: layout.desks.filter((d) => deskStates.get(d.projectId) !== "OFF").length,
       billing: canSeeBilling ? (billingCounts ?? null) : null,
+      claude: canSeeClaude && !claudeError ? (claudeUsage ?? null) : undefined,
     }),
-    [applications, activeProjects, layout.desks, deskStates, canSeeBilling, billingCounts],
+    [applications, activeProjects, layout.desks, deskStates, canSeeBilling, billingCounts, canSeeClaude, claudeError, claudeUsage],
   );
 
   // Com agentes + lounge, os personagens são movidos pela simulação; sem isso, as mesas funcionam como antes.
