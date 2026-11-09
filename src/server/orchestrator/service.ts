@@ -55,6 +55,8 @@ const profileSchema = z.object({
   disallowedTools: z.array(toolRule).max(60).optional(),
   githubRepositoryId: z.string().max(40).optional().nullable(),
   githubBranch: z.string().trim().max(120).regex(/^[A-Za-z0-9._\/-]*$/, "Branch inválida.").optional().nullable(),
+  dailyTokenLimit: z.number().int().min(1000).max(2_000_000_000).optional().nullable(),
+  monthlyTokenLimit: z.number().int().min(1000).max(2_000_000_000).optional().nullable(),
 });
 
 export async function createAgent(input: unknown, actor: Actor) {
@@ -291,6 +293,13 @@ export interface RoomAgentView {
   allowedTools: string[];
   disallowedTools: string[];
   paused: boolean;
+  /** Equipe ("CLT") e cargo, quando o agente faz parte de uma. */
+  team: string | null;
+  slug: string | null;
+  roleTitle: string | null;
+  description: string | null;
+  dailyTokenLimit: number | null;
+  monthlyTokenLimit: number | null;
   hasSession: boolean;
   /** Estado real derivado das tarefas — a animação 3D só representa isto. */
   state: AgentState;
@@ -342,6 +351,12 @@ export async function listRoomAgents(now: Date = new Date()): Promise<RoomAgentV
       model: a.model,
       permissionMode: a.permissionMode,
       effort: a.effort,
+      team: a.team,
+      slug: a.slug,
+      roleTitle: a.roleTitle,
+      description: a.description,
+      dailyTokenLimit: a.dailyTokenLimit,
+      monthlyTokenLimit: a.monthlyTokenLimit,
       allowedTools: a.allowedTools,
       disallowedTools: a.disallowedTools,
       paused: a.paused,
