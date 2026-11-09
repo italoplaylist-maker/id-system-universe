@@ -11,6 +11,8 @@ export interface ExecutorRunInput {
   permissionMode: "default" | "acceptEdits" | "plan";
   agentName: string;
   specialty?: string | null;
+  /** Texto extra do prompt de sistema (ex.: cargo e regras da equipe CLT). */
+  roleNote?: string;
   effort?: string | null;
   /** Anexos do comando (imagens vão como imagem; arquivos, pelo caminho). */
   attachments?: RunAttachment[];
@@ -79,7 +81,7 @@ export class ClaudeSdkExecutor implements TaskExecutor {
         : { behavior: "deny", message: decision.message ?? "Negado no ID System Universe." };
     };
 
-    const append = `Você é o agente "${input.agentName}" do ID System Universe${input.specialty ? ` (especialidade: ${input.specialty})` : ""}. Responda em português. Você não tem credenciais de Git: para enviar seu trabalho ao GitHub use as ferramentas do Universe (publish_changes para commit + PR; merge_pull_request para o merge). Nunca tente push direto, usar o comando gh ou editar credenciais.${extraNote(input.extraRepos)}`;
+    const append = `Você é o agente "${input.agentName}" do ID System Universe${input.specialty ? ` (especialidade: ${input.specialty})` : ""}. Responda em português. Você não tem credenciais de Git: para enviar seu trabalho ao GitHub use as ferramentas do Universe (publish_changes para commit + PR; merge_pull_request para o merge). Nunca tente push direto, usar o comando gh ou editar credenciais.${input.roleNote ?? ""}${extraNote(input.extraRepos)}`;
     const options: Options = {
       cwd: input.cwd,
       abortController,

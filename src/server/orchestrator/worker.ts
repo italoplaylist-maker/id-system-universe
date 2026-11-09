@@ -13,6 +13,8 @@ import { seedDefaultPacks } from "./skill-packs";
 import { seedGlobalClaudeMd } from "./tools-config";
 import { cleanupStorage } from "./storage";
 import { getWorkspacePreparer, loadExtraRepos, syncProjectAgents } from "./workspace";
+import { cltDef, cltRoleNote } from "@/lib/clt-team";
+import { agentBudget } from "./budget";
 import { ACTIVE, appendEvent, getSettings, purgeOldTasks, setTaskRegisteredHook } from "./service";
 
 /**
@@ -118,6 +120,14 @@ async function runTask(taskId: string): Promise<void> {
   const task = await prisma.agentTask.findUnique({ where: { id: taskId }, include: { agent: true } });
   if (!task) return;
   const agent = task.agent;
+  // Orçamento de tokens: estourou o limite diário/mensal deste agente, a execução nem começa (nenhum token é gasto).
+  const budget = await agentBudget(agent.id, { dailyTokenLimit: agent.dailyTokenLimit, monthlyTokenLimit: agent.monthlyTokenLimit });
+  if (budget.blocked) {
+    const reason = `${budget.reason} Ajuste o limite do agente ou espere a janela renovar.`;
+    await finish(taskId, agent.id, "FAILED", { error: reason });
+    await appendEvent(taskId, "failed", reason);
+    return;
+  }
   const abort = new AbortController();
   live.set(taskId, { abort });
   const beat = setInterval(() => {
@@ -184,6 +194,7 @@ async function runTask(taskId: string): Promise<void> {
     permissionMode: (agent.permissionMode === "plan" ? "plan" : agent.permissionMode === "acceptEdits" || autoApprove ? "acceptEdits" : "default") as "default" | "acceptEdits" | "plan",
     agentName: agent.name,
     specialty: agent.specialty,
+    roleNote: agent.team === "CLT" && agent.slug && cltDef(agent.slug) ? cltRoleNote(cltDef(agent.slug)!) : undefined,
     effort: agent.effort,
     attachments: prepared.attachments,
     attachmentsDir: prepared.dir,

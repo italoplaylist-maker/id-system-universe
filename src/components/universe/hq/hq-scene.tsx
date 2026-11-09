@@ -132,7 +132,7 @@ export function HqScene({
   // Funcionários permanentes (perfis) primeiro, em ordem estável; depois as sessões externas observadas pelo hook.
   // Os perfis existem independentemente de haver tarefa: terminar, atualizar a página ou sincronizar não os remove.
   const agentSessions = useMemo(
-    () => (observedSessions === undefined && roomAgents === undefined ? undefined : orderAgentSessions((roomAgents ?? []).map(roomAgentToSession), observedSessions ?? [])),
+    () => (observedSessions === undefined && roomAgents === undefined ? undefined : orderAgentSessions((roomAgents ?? []).filter((a) => a.team !== "CLT").map(roomAgentToSession), observedSessions ?? [])),
     [observedSessions, roomAgents],
   );
   const agentsEnabled = agentSessions !== undefined;

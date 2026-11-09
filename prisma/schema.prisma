@@ -825,6 +825,15 @@ model AgentProfile {
   disallowedTools    String[]           @default([])
   /// Pausado: continua na sala, mas não recebe execuções (tarefas ficam na fila).
   paused             Boolean            @default(false)
+  /// Equipe a que o agente pertence ("CLT" = AGENTES CLT). Nulo = agente avulso da Ala Operacional.
+  team               String?
+  /// Identificador estável do cargo dentro da equipe (ex.: "id-guardian"). Único.
+  slug               String?            @unique
+  roleTitle          String?
+  description        String?
+  /// Limites de tokens (entrada + saída + cache). Nulo = sem limite. O worker recusa novas execuções ao estourar.
+  dailyTokenLimit    Int?
+  monthlyTokenLimit  Int?
   /// Sessão Claude persistente (resume) — o contexto continua entre tarefas.
   claudeSessionId    String?
   lastError          String?
