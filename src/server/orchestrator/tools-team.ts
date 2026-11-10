@@ -84,10 +84,11 @@ export async function teamTools(tool: ToolFn, agentId: string): Promise<unknown[
           try {
             const hours = args.horas ?? 24;
             const since = new Date(Date.now() - hours * 3600_000);
-            const [overview, recent, routines] = await Promise.all([
+            const [overview, recent, routines, errors] = await Promise.all([
               cltOverview(),
               prisma.agentTask.findMany({ where: { agent: { team: "CLT" }, finishedAt: { gte: since } }, orderBy: { finishedAt: "desc" }, take: 15, include: { agent: { select: { name: true } } } }),
               prisma.agentRoutine.findMany({ where: { agent: { team: "CLT", archivedAt: null } }, include: { agent: { select: { name: true } } }, orderBy: { time: "asc" } }),
+              listErrorGroups({ hours, limit: 5 }),
             ]);
             const pct = (p: number | null) => (p === null ? "sem limite" : `${p}%`);
             const agents = overview.agents.map((a) => `• ${a.name} (${a.roleTitle ?? "—"}): ${a.state}${a.activity ? ` — ${a.activity}` : ""} · tarefas: ${a.tasks.running} rodando, ${a.tasks.pending} na fila, ${a.tasks.completed} concluídas, ${a.tasks.failed} falhas · tokens hoje ${a.usage.usedDay} (${pct(a.usage.dayPercent)}), mês ${a.usage.usedMonth} (${pct(a.usage.monthPercent)})${a.paused ? " · PAUSADO" : ""}`).join("\n");
@@ -95,7 +96,10 @@ export async function teamTools(tool: ToolFn, agentId: string): Promise<unknown[
               ? recent.map((t) => `• ${t.finishedAt ? hhmm(t.finishedAt) : "?"} ${t.agent.name} [${t.status}] ${t.prompt.replace(/\s+/g, " ").slice(0, 100)}\n    → ${(t.result ?? t.error ?? "(sem resultado)").replace(/\s+/g, " ").slice(0, 300)}`).join("\n")
               : `(nenhuma tarefa terminou nas últimas ${hours} h)`;
             const routs = routines.map((r) => `• ${r.agent.name} — ${r.name} (${describeSchedule(r)}, ${r.enabled ? "ligada" : "desligada"}): ${r.lastRunAt ? `${hhmm(r.lastRunAt)} — ` : ""}${r.lastOutcome ?? "ainda não rodou"}`).join("\n");
-            return text(cap(`EQUIPE (${overview.totals.working} trabalhando, ${overview.totals.available} disponíveis, ${overview.totals.waiting} aguardando aprovação, ${overview.totals.errored} com erro) · tokens hoje ${overview.totals.tokensDay}, mês ${overview.totals.tokensMonth}\n\n${agents}\n\nRESULTADOS (${hours} h):\n${results}\n\nROTINAS:\n${routs}`));
+            const sysErrors = errors.length
+              ? errors.map((g) => `• ${g.application} — ${g.count}× · ${g.sample.split("\n")[0].slice(0, 160)}`).join("\n")
+              : `(nenhum erro novo nos logs nas últimas ${hours} h)`;
+            return text(cap(`EQUIPE (${overview.totals.working} trabalhando, ${overview.totals.available} disponíveis, ${overview.totals.waiting} aguardando aprovação, ${overview.totals.errored} com erro) · tokens hoje ${overview.totals.tokensDay}, mês ${overview.totals.tokensMonth}\n\n${agents}\n\nRESULTADOS (${hours} h):\n${results}\n\nROTINAS:\n${routs}\n\nERROS DOS SISTEMAS (${hours} h, mais recentes):\n${sysErrors}`));
           } catch (e) {
             return fail(e);
           }
