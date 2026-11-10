@@ -171,6 +171,7 @@ export function CltWing({ plan, shellLayout, layout, entries, selectedAgentId, o
             if (entries.length === 0) onCreateTeam?.();
           }}
           style={pill(approvals > 0)}
+          title={entries.length === 0 && onCreateTeam ? "Cria os 7 funcionários da equipe AGENTES CLT (ID Manager, Guardian, Doctor, QA, Optimizer, DevOps e Architect)" : undefined}
         >
           AGENTES CLT · {entries.length === 0 ? (onCreateTeam ? "clique para criar a equipe" : "equipe não criada") : approvals > 0 ? `${approvals} aguardando aprovação` : working > 0 ? `${working} trabalhando` : `${entries.length} disponíve${entries.length === 1 ? "l" : "is"}`}
         </button>
