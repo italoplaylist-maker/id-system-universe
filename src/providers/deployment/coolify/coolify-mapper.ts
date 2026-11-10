@@ -90,6 +90,30 @@ export function mapDeployment(raw: CoolifyDeploymentRaw): ProviderDeployment {
   };
 }
 
+/**
+ * Log de um deploy do Coolify. Vem como JSON (lista de entradas {output, timestamp, hidden}) ou como texto puro;
+ * as entradas "hidden" são comandos internos e ficam de fora. O texto original é preservado, só classificado.
+ */
+export function mapDeploymentLogs(rawLogs: string | null | undefined): LogLine[] {
+  if (!rawLogs) return [];
+  type Entry = { output?: unknown; timestamp?: unknown; hidden?: unknown };
+  let entries: Entry[] | null = null;
+  try {
+    const parsed: unknown = JSON.parse(rawLogs);
+    if (Array.isArray(parsed)) entries = parsed as Entry[];
+  } catch {
+    entries = null;
+  }
+  if (!entries) return rawLogs.split("\n").filter((l) => l.length > 0).map((l) => ({ raw: l, level: classifyLine(l) }));
+  const lines: LogLine[] = [];
+  for (const e of entries) {
+    if (e.hidden === true || typeof e.output !== "string") continue;
+    const timestamp = typeof e.timestamp === "string" ? e.timestamp : undefined;
+    for (const line of e.output.split("\n")) if (line.length > 0) lines.push({ raw: line, level: classifyLine(line), timestamp });
+  }
+  return lines;
+}
+
 const ERROR_PATTERN = /\b(error|panic|fatal|exception|fail(ed|ure)?)\b/i;
 const WARN_PATTERN = /\b(warn(ing)?|deprecat\w*)\b/i;
 

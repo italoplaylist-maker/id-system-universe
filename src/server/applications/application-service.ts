@@ -9,6 +9,7 @@ import { NotFoundError, ProviderError, ValidationError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { toUniverseApplication, type ApplicationWithRelations } from "@/server/applications/application-mapper";
 import { finalizeRunsForDeployment, recordManualRun } from "@/server/deployments/deployment-runs";
+import { getDeploymentLogs as readDeploymentLogs, listDeploymentHistory, saveFinishedDeployment } from "@/server/deployments/deployment-history";
 import { linkUnassignedResourcesFromProviderProjects } from "@/server/projects/project-service";
 import { applicationWhere, type ProjectScope } from "@/server/auth/project-access";
 import type { UniverseApplication, UniverseApplicationStatus } from "@/types/domain";
@@ -203,6 +204,8 @@ async function reconcilePendingDeployment(row: ApplicationWithProvider): Promise
       });
 
       await finalizeRunsForDeployment(row.pendingDeploymentExternalId, deployment);
+      // Histórico: guarda o log do deploy que acabou de terminar (o Coolify apaga deploys antigos).
+      await saveFinishedDeployment(row.id, provider, deployment);
       await recordAuditEvent({
         applicationId: row.id,
         providerId: row.providerId,
@@ -425,6 +428,12 @@ export async function getApplicationLogs(applicationId: string, lines: number) {
 export async function listApplicationDeployments(applicationId: string) {
   const row = await getRowOrThrow(applicationId);
   if (row.resourceType !== "APPLICATION") throw new ValidationError("Only applications have a deployment history.");
-  const provider = createDeploymentProvider(row.provider);
-  return provider.listDeployments(row.externalId);
+  return listDeploymentHistory(row.id, createDeploymentProvider(row.provider), row.externalId);
+}
+
+/** Log de um deploy (do histórico ou ao vivo do Coolify). */
+export async function getApplicationDeploymentLogs(applicationId: string, deploymentExternalId: string) {
+  const row = await getRowOrThrow(applicationId);
+  if (row.resourceType !== "APPLICATION") throw new ValidationError("Only applications have a deployment history.");
+  return readDeploymentLogs(row.id, createDeploymentProvider(row.provider), deploymentExternalId);
 }

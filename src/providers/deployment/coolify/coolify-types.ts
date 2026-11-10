@@ -80,6 +80,8 @@ export interface CoolifyDeploymentRaw {
   status: string; // "queued" | "in_progress" | "finished" | "failed" | "cancelled-by-user" ...
   commit?: string | null;
   commit_message?: string | null;
+  /** Log do deploy: texto ou um JSON (string) com a lista de entradas {output, timestamp, hidden…}. */
+  logs?: string | null;
   created_at?: string;
   updated_at?: string;
 }
