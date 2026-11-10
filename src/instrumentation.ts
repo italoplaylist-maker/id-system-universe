@@ -49,6 +49,11 @@ export async function register() {
   const { pruneAgentData } = await import("@/server/claude/agent-service");
   setInterval(safely("agent_prune", () => pruneAgentData()), 60 * 60_000);
 
+  // Rotinas agendadas dos agentes CLT: a cada minuto vê quais estão no horário (fuso de São Paulo). Idempotente por horário.
+  const { runRoutinesTick } = await import("@/server/orchestrator/routines");
+  setInterval(safely("routines_tick", () => runRoutinesTick()), 60_000);
+  setTimeout(safely("routines_tick", () => runRoutinesTick()), 30_000);
+
   // Orquestrador de agentes Claude: despacha a fila e recupera tarefas interrompidas por reinício.
   const { startOrchestratorWorker } = await import("@/server/orchestrator/worker");
   startOrchestratorWorker();
