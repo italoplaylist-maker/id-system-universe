@@ -349,7 +349,7 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
   useOrchestratorStream(true);
   const { data: agents } = useRoomAgents(true);
   const { data: settings } = useOrchestratorSettings(true);
-  const { submit, updateAgent, archiveAgent, setConcurrency } = useOrchestratorMutations();
+  const { submit, updateAgent, archiveAgent, setConcurrency, createCltTeam } = useOrchestratorMutations();
   const [agentId, setAgentId] = useState<string | null>(initialAgentId);
   const [text, setText] = useState("");
   const [tab, setTab] = useState<"active" | "history">("active");
@@ -491,6 +491,25 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
           <button onClick={() => { setCreating((v) => !v); setEditing(false); setToolsOpen(false); setOpenTask(null); }} className="mx-3 mb-2 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-accent hover:bg-surface">
             <Plus className="h-4 w-4" />Novo agente
           </button>
+        )}
+        {canWrite && agents && !agents.some((a) => a.team === "CLT") && (
+          <div className="mx-3 mb-2 space-y-1.5 rounded-lg border border-accent/40 bg-accent/10 p-3 text-xs">
+            <p className="font-medium text-foreground">A equipe AGENTES CLT ainda não foi criada.</p>
+            <p className="text-muted">Cria os 7 funcionários (ID Manager, Guardian, Doctor, QA, Optimizer, DevOps e Architect) na sala AGENTES CLT.</p>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={createCltTeam.isPending}
+              onClick={() =>
+                createCltTeam.mutate(undefined, {
+                  onSuccess: (r) => toast.success(r.created.length ? `Equipe CLT criada: ${r.created.length} funcionário(s).` : "A equipe CLT já existia."),
+                  onError: (e) => toast.error(e.message),
+                })
+              }
+            >
+              {createCltTeam.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Criar equipe AGENTES CLT"}
+            </Button>
+          </div>
         )}
         <p className="px-4 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">Agentes</p>
         <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2" aria-label="Agentes">

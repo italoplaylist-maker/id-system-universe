@@ -23,7 +23,8 @@ import type { LifeAgent } from "./life/agent-life";
 import type { PlanWorldInput } from "./life/world";
 import { useAgentSessions } from "@/hooks/use-agents";
 import { agentAccent, orderAgentSessions } from "@/lib/agent-order";
-import { roomAgentToSession, useClaudeUsage, useRoomAgents } from "@/hooks/use-orchestrator";
+import { roomAgentToSession, useClaudeUsage, useOrchestratorMutations, useRoomAgents } from "@/hooks/use-orchestrator";
+import { toast } from "sonner";
 import { OfficeProps, officePropObstacles } from "./office/office-props";
 import { NocWall } from "./office/noc-wall";
 import { ServerRoom } from "./office/server-room";
@@ -130,6 +131,8 @@ export function HqScene({
   const canReadAgents = sessionUser ? canUser(sessionUser, "provider:read") : false;
   const { data: observedSessions } = useAgentSessions(canReadAgents);
   const { data: roomAgents } = useRoomAgents(canReadAgents);
+  const { createCltTeam } = useOrchestratorMutations();
+  const canManageTeam = sessionUser ? canUser(sessionUser, "provider:write") : false;
   // Funcionários permanentes (perfis) primeiro, em ordem estável; depois as sessões externas observadas pelo hook.
   // Os perfis existem independentemente de haver tarefa: terminar, atualizar a página ou sincronizar não os remove.
   const agentSessions = useMemo(
@@ -436,6 +439,15 @@ export function HqScene({
                 selectedAgentId={selectedAgentId}
                 onSelectAgent={onSelectAgent}
                 reducedGraphics={reducedGraphics}
+                onCreateTeam={
+                  canManageTeam && !createCltTeam.isPending
+                    ? () =>
+                        createCltTeam.mutate(undefined, {
+                          onSuccess: (r) => toast.success(r.created.length ? `Equipe CLT criada: ${r.created.length} funcionário(s).` : "A equipe CLT já existia."),
+                          onError: (e) => toast.error(e.message),
+                        })
+                    : undefined
+                }
               />
             )}
 

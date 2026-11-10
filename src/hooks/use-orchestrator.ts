@@ -169,6 +169,11 @@ export function useOrchestratorMutations() {
       mutationFn: ({ id, decision }: { id: string; decision: "allow" | "deny" }) => apiFetch(`/api/orchestrator/approvals/${id}`, { method: "POST", body: JSON.stringify({ decision }) }),
       onSettled: refresh,
     }),
+    /** Cria os 7 funcionários da equipe AGENTES CLT que ainda não existem (idempotente). */
+    createCltTeam: useMutation({
+      mutationFn: () => apiFetch<{ created: string[]; existing: string[] }>("/api/orchestrator/clt", { method: "POST" }),
+      onSettled: refresh,
+    }),
     createAgent: useMutation({
       mutationFn: (input: { name: string; specialty?: string; cwd: string; model?: string; permissionMode?: string; effort?: string; allowedTools?: string[]; disallowedTools?: string[] }) =>
         apiFetch<{ agent: { id: string } }>("/api/orchestrator/agents", { method: "POST", body: JSON.stringify(input) }),

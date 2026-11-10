@@ -30,6 +30,8 @@ interface CltWingProps {
   selectedAgentId: string | null;
   onSelectAgent: (id: string) => void;
   reducedGraphics: boolean;
+  /** Quem pode gerenciar agentes pode criar a equipe pela própria sala (clicando na placa). */
+  onCreateTeam?: () => void;
 }
 
 const pill = (hot: boolean): React.CSSProperties => ({
@@ -117,7 +119,7 @@ function RestArea({ x, z, w, d }: { x: number; z: number; w: number; d: number }
  * Sala AGENTES CLT: estações em ferradura voltadas para a mesa de supervisão, sala de reunião de vidro e espaço de
  * descanso. Cada estação é um agente REAL do orquestrador (estado, tarefa e consumo vêm das tarefas); mesa vazia = vaga.
  */
-export function CltWing({ plan, shellLayout, layout, entries, selectedAgentId, onSelectAgent, reducedGraphics }: CltWingProps) {
+export function CltWing({ plan, shellLayout, layout, entries, selectedAgentId, onSelectAgent, reducedGraphics, onCreateTeam }: CltWingProps) {
   const focusProject = useCameraStore((s) => s.focusProject);
   const focusId = useCameraStore((s) => s.focusId);
   const cameraMode = useCameraStore((s) => s.mode);
@@ -164,10 +166,13 @@ export function CltWing({ plan, shellLayout, layout, entries, selectedAgentId, o
       <Html position={[clt.door.x, 3.2, clt.door.z]} center zIndexRange={[20, 0]}>
         <button
           type="button"
-          onClick={() => focusProject("clt-room", [clt.x, 1.0 + clt.level, clt.z], Math.max(clt.width, clt.depth) * 0.45, "AGENTES CLT")}
+          onClick={() => {
+            focusProject("clt-room", [clt.x, 1.0 + clt.level, clt.z], Math.max(clt.width, clt.depth) * 0.45, "AGENTES CLT");
+            if (entries.length === 0) onCreateTeam?.();
+          }}
           style={pill(approvals > 0)}
         >
-          AGENTES CLT · {entries.length === 0 ? "equipe não criada" : approvals > 0 ? `${approvals} aguardando aprovação` : working > 0 ? `${working} trabalhando` : `${entries.length} disponíve${entries.length === 1 ? "l" : "is"}`}
+          AGENTES CLT · {entries.length === 0 ? (onCreateTeam ? "clique para criar a equipe" : "equipe não criada") : approvals > 0 ? `${approvals} aguardando aprovação` : working > 0 ? `${working} trabalhando` : `${entries.length} disponíve${entries.length === 1 ? "l" : "is"}`}
         </button>
       </Html>
     </>
