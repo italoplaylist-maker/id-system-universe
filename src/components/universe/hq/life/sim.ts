@@ -1,41 +1,27 @@
 import { angleDelta, dist, forward, makeRng, type Vec2 } from "./geometry";
-import type { ChatPair, SeatKind, SeatSpot, StandSpot } from "./lounge-layout";
 import type { DeskInfo, LifeWorld } from "./world";
-import { PoolGame, type PoolPlan } from "./pool-game";
 
 /**
  * Simulação VISUAL da vida dos agentes. Lê o estado real (precisa trabalhar? está digitando?)
  * e decide onde cada personagem fica e o que faz — nunca escreve nada de volta no sistema.
- * Peças: fases (desk/rising/walking/sitting/seated/standing), reservas de lugares, A* na malha
- * do mundo, desvio entre personagens e recuperação de travamentos.
+ * Quem tem trabalho fica na mesa; quem está livre descansa sentado e, de tempos em tempos, passeia pelo átrio
+ * e volta. Peças: fases (desk/rising/walking/sitting/standing), reservas de lugares, A* na malha do mundo,
+ * desvio entre personagens e recuperação de travamentos.
  */
 
-export type Phase = "desk" | "rising" | "walking" | "sitting" | "seated" | "standing";
-export type Activity = "working" | "going_to_work" | "resting" | "pool" | "chatting" | "bar" | "walking" | "wandering";
+export type Phase = "desk" | "rising" | "walking" | "sitting" | "standing";
+export type Activity = "working" | "going_to_work" | "resting" | "walking" | "wandering";
 
-export type Intent =
-  | { kind: "work" }
-  | { kind: "seat"; seat: SeatSpot }
-  | { kind: "pool"; spot: StandSpot }
-  | { kind: "chat"; pair: ChatPair; side: "a" | "b" }
-  | { kind: "wander"; point: Vec2; key: string | null };
+export type Intent = { kind: "work" } | { kind: "wander"; point: Vec2; key: string | null };
 
 /** O que o rig do personagem lê a cada frame (valores já suavizados). */
 export interface ActorVisual {
   gait: number;
   walk: number;
   sit: number;
-  seatKind: SeatKind | "desk";
   hipSeat: number;
   backLean: number;
   work: number;
-  talk: number;
-  drink: number;
-  pool: number;
-  stroke: number;
-  glass: boolean;
-  cue: boolean;
-  lookYaw: number;
 }
 
 export interface Actor {
@@ -63,21 +49,13 @@ export interface Actor {
   leaveDelay: number;
   idleFor: number;
   arrived: boolean;
-  /** Sinuca: ponto exato (mundo) de onde o atirador bate; só vale com intent "pool". */
-  poolGoal: { pos: Vec2; yaw: number } | null;
   reservation: string | null;
-  /** Reserva anterior mantida até terminar de levantar (ninguém senta antes de eu sair). */
-  holdKey: string | null;
-  seat: SeatSpot | null;
-  lastKind: string;
   wanderStreak: number;
   stuckT: number;
   stuckRef: Vec2;
   stuckCount: number;
   recoveries: number;
-  drinkT: number;
   waitT: number;
-  leaveAt: number;
   /** Cedeu passagem: espera aqui antes de retomar o caminho. */
   holdT: number;
   retreating: boolean;
@@ -103,24 +81,7 @@ const ease = (t: number) => t * t * (3 - 2 * t);
 const damp = (cur: number, target: number, lambda: number, dt: number) => cur + (target - cur) * (1 - Math.exp(-lambda * dt));
 
 function newVisual(): ActorVisual {
-  return { gait: 0, walk: 0, sit: 1, seatKind: "desk", hipSeat: 0.5, backLean: 0, work: 0, talk: 0, drink: 0, pool: 0, stroke: 0, glass: false, cue: false, lookYaw: 0 };
-}
-
-interface PoolState {
-  shooter: string | null;
-  /** move: o atirador anda até o ponto atrás da bola branca; aim/stroke/follow: mira, tacada e acompanhamento. */
-  stage: "wait" | "move" | "aim" | "stroke" | "follow";
-  t: number;
-  dur: number;
-  lastShot: Map<string, number>;
-  plan: PoolPlan | null;
-  struck: boolean;
-}
-
-interface ChatState {
-  speaker: "a" | "b";
-  t: number;
-  dwell: number | null;
+  return { gait: 0, walk: 0, sit: 1, hipSeat: 0.5, backLean: 0.1, work: 0 };
 }
 
 export class LifeSim {
@@ -128,17 +89,9 @@ export class LifeSim {
   private world: LifeWorld | null = null;
   private rng: () => number;
   private reservations = new Map<string, string>();
-  private pool: PoolState = { shooter: null, stage: "wait", t: 0, dur: 1, lastShot: new Map(), plan: null, struck: false };
-  /** Estado da jogada atual (só leitura; usado em testes e depuração). */
-  get poolTurn(): { shooter: string | null; stage: PoolState["stage"]; plan: PoolPlan | null } {
-    return { shooter: this.pool.shooter, stage: this.pool.stage, plan: this.pool.plan };
-  }
-  /** Bolas da sinuca (dado puro): o desenho 3D só lê. */
-  readonly poolGame = new PoolGame();
-  private chats = new Map<string, ChatState>();
   private visuals = new Map<string, ActorVisual>();
   time = 0;
-  /** Já recebeu o primeiro retrato do estado real? Só nele os ociosos nascem direto no lounge. */
+  /** Já recebeu o primeiro retrato do estado real? Só nele os ociosos já nascem passeando pelo átrio. */
   initialized = false;
 
   constructor(seed = 1) {
@@ -167,12 +120,12 @@ export class LifeSim {
     for (const a of this.actors.values()) {
       const desk = world.desks.get(a.id);
       if (desk) a.desk = desk;
-      // O layout mudou sob os pés: quem está parado em um lugar acompanha o móvel; quem anda replaneja.
+      // O layout mudou sob os pés: quem está parado numa mesa acompanha o móvel; quem anda replaneja.
       if (a.phase === "desk" || (a.phase === "sitting" && a.intent.kind === "work")) {
         a.x = a.desk.seat.x;
         a.z = a.desk.seat.z;
         a.to = a.desk.seat;
-      } else if (a.phase === "seated" || a.phase === "standing") {
+      } else if (a.phase === "standing") {
         const spot = this.spotFor(a);
         if (spot) {
           a.x = spot.x;
@@ -181,7 +134,7 @@ export class LifeSim {
       } else if (a.phase === "walking") {
         this.replan(a);
       }
-      if (a.phase !== "desk" && a.phase !== "walking" && a.phase !== "rising" && a.phase !== "sitting" && !world.grid.isFree(a.x, a.z) && a.phase !== "seated" && a.phase !== "standing") {
+      if (a.phase !== "desk" && a.phase !== "walking" && a.phase !== "rising" && a.phase !== "sitting" && a.phase !== "standing" && !world.grid.isFree(a.x, a.z)) {
         const p = world.grid.nearestFree(a.x, a.z);
         if (p) {
           a.x = p.x;
@@ -203,7 +156,7 @@ export class LifeSim {
       if (!a) {
         a = this.spawn(input, desk);
         this.actors.set(a.id, a);
-        // Primeiro retrato do estado real: quem não está trabalhando já está no lounge (ninguém "finge" trabalhar na mesa).
+        // Primeiro retrato do estado real: quem não está trabalhando já está passeando (ninguém "finge" trabalhar na mesa).
         if (options.instant && !input.mustWork) this.placeInstant(a);
       }
       const wasMustWork = a.mustWork;
@@ -218,38 +171,21 @@ export class LifeSim {
     this.initialized = true;
   }
 
-  /** Coloca o personagem direto na atividade escolhida (sem caminhar): só para o estado inicial da tela. */
+  /** Coloca o personagem direto no ponto do átrio (sem caminhar): só para o estado inicial da tela. */
   private placeInstant(a: Actor) {
-    const intent = this.decide(a);
-    if (!intent) return; // lounge lotado: fica na mesa
+    const intent = this.choose(a);
+    if (intent.kind !== "wander") return; // sem ponto livre: fica na mesa
     a.intent = intent;
     a.activity = this.activityFor(intent);
     a.arrived = true;
     a.path = [];
     a.idleFor = 0;
-    if (intent.kind === "seat") {
-      const s = intent.seat;
-      a.phase = "seated";
-      a.seat = s;
-      a.x = s.pos.x;
-      a.z = s.pos.z;
-      a.yaw = s.yaw;
-      a.vis.seatKind = s.kind;
-      a.vis.hipSeat = s.hipSeat;
-      a.vis.backLean = s.backLean;
-      a.vis.sit = 1;
-      a.dwell = this.dwellFor(a) * (0.3 + this.rng() * 0.7);
-      a.drinkT = 2 + this.rng() * 8;
-      return;
-    }
-    const pos = this.spotFor(a)!;
     a.phase = "standing";
-    a.x = pos.x;
-    a.z = pos.z;
+    a.x = intent.point.x;
+    a.z = intent.point.z;
     a.vis.sit = 0;
-    a.toYaw = intent.kind === "pool" ? (a.poolGoal?.yaw ?? intent.spot.yaw) : intent.kind === "chat" ? intent.pair[intent.side].yaw : a.yaw;
-    a.yaw = a.toYaw;
-    a.dwell = this.dwellFor(a) * (0.3 + this.rng() * 0.7);
+    a.toYaw = a.yaw;
+    a.dwell = this.dwellFor() * (0.3 + this.rng() * 0.7);
     a.waitT = 0;
   }
 
@@ -279,19 +215,13 @@ export class LifeSim {
       leaveDelay: input.mustWork ? 0 : 3 + this.rng() * 40,
       idleFor: 0,
       arrived: true,
-      poolGoal: null,
       reservation: null,
-      holdKey: null,
-      seat: null,
-      lastKind: "work",
       wanderStreak: 0,
       stuckT: 0,
       stuckRef: { x: desk.seat.x, z: desk.seat.z },
       stuckCount: 0,
       recoveries: 0,
-      drinkT: 0,
       waitT: 0,
-      leaveAt: 0,
       holdT: 0,
       retreating: false,
       replanT: 0,
@@ -300,21 +230,19 @@ export class LifeSim {
 
   private remove(id: string) {
     const a = this.actors.get(id);
-    if (a) {
-      this.release(a);
-      this.dropHold(a);
-    }
+    if (a) this.release(a);
     this.actors.delete(id);
     this.visuals.delete(id);
   }
 
   // ---------------------------------------------------------------------------
-  // Reservas (ninguém senta onde outro já está)
+  // Reservas (dois personagens nunca escolhem o mesmo ponto do átrio)
   // ---------------------------------------------------------------------------
 
   private claim(key: string, a: Actor): boolean {
     const holder = this.reservations.get(key);
     if (holder && holder !== a.id && this.actors.has(holder)) return false;
+    if (a.reservation && a.reservation !== key) this.release(a);
     this.reservations.set(key, a.id);
     a.reservation = key;
     return true;
@@ -323,12 +251,6 @@ export class LifeSim {
   private release(a: Actor) {
     if (a.reservation && this.reservations.get(a.reservation) === a.id) this.reservations.delete(a.reservation);
     a.reservation = null;
-    a.seat = null;
-  }
-
-  private dropHold(a: Actor) {
-    if (a.holdKey && this.reservations.get(a.holdKey) === a.id) this.reservations.delete(a.holdKey);
-    a.holdKey = null;
   }
 
   private isTaken(key: string): boolean {
@@ -337,109 +259,30 @@ export class LifeSim {
   }
 
   private spotFor(a: Actor): Vec2 | null {
-    if (a.intent.kind === "seat") return a.intent.seat.pos;
-    if (a.intent.kind === "pool") return a.poolGoal?.pos ?? a.intent.spot.pos;
-    if (a.intent.kind === "chat") return a.intent.pair[a.intent.side].pos;
-    if (a.intent.kind === "wander") return a.intent.point;
-    return null;
+    return a.intent.kind === "wander" ? a.intent.point : null;
   }
 
   // ---------------------------------------------------------------------------
   // Decisão: o que fazer quando está livre
   // ---------------------------------------------------------------------------
 
-  /** Escolhe a próxima atividade livre; null = o lounge está lotado agora (o personagem fica onde está e tenta de novo). */
-  private decide(a: Actor): Intent | null {
-    const world = this.world!;
-    const lounge = world.lounge;
-    const options: Array<{ weight: number; make: () => Intent | null; kind: string }> = [];
-    const freeSeats = (kind: SeatKind) => lounge.seats.filter((s) => s.kind === kind && !this.isTaken(s.id));
-    const pick = <T>(list: T[]): T => list[Math.floor(this.rng() * list.length)];
-    const penalty = (kind: string) => (a.lastKind === kind ? 0.3 : 1);
-
-    const sofas = freeSeats("sofa");
-    if (sofas.length) options.push({ kind: "sofa", weight: 3 * penalty("sofa"), make: () => ({ kind: "seat", seat: pick(sofas) }) });
-    const arms = freeSeats("armchair");
-    if (arms.length) options.push({ kind: "armchair", weight: 1.6 * penalty("armchair"), make: () => ({ kind: "seat", seat: pick(arms) }) });
-    const stools = freeSeats("stool");
-    if (stools.length) options.push({ kind: "stool", weight: 2.6 * penalty("stool"), make: () => ({ kind: "seat", seat: pick(stools) }) });
-
-    const shooterGoal = this.pool.shooter ? this.actors.get(this.pool.shooter)?.poolGoal?.pos : undefined;
-    // não se junta à mesa num lugar colado em quem está para tacar
-    const poolFree = lounge.poolSpots.filter((s) => !this.isTaken(s.id) && !(shooterGoal && dist(s.pos, shooterGoal) < 0.9));
-    if (poolFree.length) {
-      const someonePlays = lounge.poolSpots.some((s) => this.isTaken(s.id));
-      options.push({ kind: "pool", weight: (someonePlays ? 4 : 2.2) * penalty("pool"), make: () => ({ kind: "pool", spot: pick(poolFree) }) });
-    }
-
-    // Conversa: prefere juntar-se a quem já espera um parceiro.
-    const waiting = lounge.chatPairs.find((p) => this.isTaken(`${p.id}-a`) !== this.isTaken(`${p.id}-b`));
-    if (waiting) {
-      const side: "a" | "b" = this.isTaken(`${waiting.id}-a`) ? "b" : "a";
-      options.push({ kind: "chat", weight: 5 * penalty("chat"), make: () => ({ kind: "chat", pair: waiting, side }) });
-    } else {
-      const open = lounge.chatPairs.filter((p) => !this.isTaken(`${p.id}-a`) && !this.isTaken(`${p.id}-b`));
-      if (open.length) options.push({ kind: "chat", weight: 1.2 * penalty("chat"), make: () => ({ kind: "chat", pair: pick(open), side: this.rng() < 0.5 ? "a" : "b" }) });
-    }
-
-    const wanderFree = lounge.wander.map((p, i) => ({ p, key: `wander-${i}` })).filter((w) => !this.isTaken(w.key));
-    if (a.wanderStreak < 2 && wanderFree.length) {
-      options.push({ kind: "wander", weight: 0.9, make: () => { const w = pick(wanderFree); return { kind: "wander", point: w.p, key: w.key }; } });
-    }
-
-    let total = options.reduce((s, o) => s + o.weight, 0);
-    for (let tries = 0; tries < 6 && options.length > 0; tries += 1) {
-      let r = this.rng() * total;
-      let chosen = options[options.length - 1];
-      for (const o of options) {
-        r -= o.weight;
-        if (r <= 0) {
-          chosen = o;
-          break;
-        }
+  /** Livre: passeia até um ponto vago do átrio; depois de dois passeios seguidos (ou sem ponto vago) volta a descansar na mesa. */
+  private choose(a: Actor): Intent {
+    const free = this.world!.wander.map((p, i) => ({ p, key: `wander-${i}` })).filter((w) => !this.isTaken(w.key));
+    if (a.wanderStreak < 2 && free.length) {
+      const w = free[Math.floor(this.rng() * free.length)];
+      if (this.claim(w.key, a)) {
+        a.wanderStreak += 1;
+        return { kind: "wander", point: w.p, key: w.key };
       }
-      const intent = chosen.make();
-      if (!intent) continue;
-      if (this.reserve(a, intent)) {
-        a.lastKind = chosen.kind;
-        a.wanderStreak = intent.kind === "wander" ? a.wanderStreak + 1 : 0;
-        return intent;
-      }
-      options.splice(options.indexOf(chosen), 1);
-      total = options.reduce((s, o) => s + o.weight, 0);
     }
-    return null;
-  }
-
-  private reserve(a: Actor, intent: Intent): boolean {
-    switch (intent.kind) {
-      case "seat":
-        return this.claim(intent.seat.id, a);
-      case "pool":
-        return this.claim(intent.spot.id, a);
-      case "chat":
-        return this.claim(`${intent.pair.id}-${intent.side}`, a);
-      case "wander":
-        return intent.key ? this.claim(intent.key, a) : (a.reservation = null, true);
-      default:
-        a.reservation = null;
-        return true;
-    }
+    this.release(a);
+    a.wanderStreak = 0;
+    return { kind: "work" };
   }
 
   private activityFor(intent: Intent): Activity {
-    switch (intent.kind) {
-      case "seat":
-        return intent.seat.kind === "stool" ? "bar" : "resting";
-      case "pool":
-        return "pool";
-      case "chat":
-        return "chatting";
-      case "wander":
-        return "wandering";
-      default:
-        return "going_to_work";
-    }
+    return intent.kind === "wander" ? "wandering" : "going_to_work";
   }
 
   // ---------------------------------------------------------------------------
@@ -447,27 +290,14 @@ export class LifeSim {
   // ---------------------------------------------------------------------------
 
   private interruptForWork(a: Actor) {
-    const wasSeat = a.seat;
-    const previous = a.intent;
     this.release(a);
-    this.dropHold(a);
     a.intent = { kind: "work" };
     a.activity = a.phase === "desk" ? "working" : "going_to_work";
-    a.lastKind = "work";
     a.wanderStreak = 0;
     switch (a.phase) {
       case "desk":
-        return;
-      case "sitting":
-        // Sentando na mesa: segue. Sentando em outro lugar: desfaz o movimento levantando.
-        if (previous.kind === "work") return;
-        this.startRising(a, wasSeat?.approach ?? this.approachFromHere(a));
-        return;
-      case "seated":
-        this.startRising(a, wasSeat?.approach ?? this.approachFromHere(a));
-        return;
-      case "rising":
-        // já levantando: ao terminar, segue para a mesa
+      case "sitting": // já sentando na mesa: segue
+      case "rising": // já levantando: ao terminar, segue para a mesa
         return;
       case "standing":
       case "walking":
@@ -499,8 +329,6 @@ export class LifeSim {
       const dt = Math.min(left, 1 / 20);
       left -= dt;
       this.time += dt;
-      this.stepPool(dt);
-      this.stepChats(dt);
       for (const a of this.actors.values()) this.stepActor(a, dt);
     }
   }
@@ -519,9 +347,6 @@ export class LifeSim {
       case "sitting":
         this.stepSitting(a, dt);
         break;
-      case "seated":
-        this.stepSeated(a, dt);
-        break;
       case "standing":
         this.stepStanding(a, dt);
         break;
@@ -538,9 +363,9 @@ export class LifeSim {
     a.idleFor += dt;
     if (a.idleFor >= a.leaveDelay) {
       a.idleFor = 0;
-      const next = this.decide(a);
-      if (!next) {
-        a.leaveDelay = 4 + this.rng() * 8; // lounge lotado: tenta de novo daqui a pouco
+      const next = this.choose(a);
+      if (next.kind !== "wander") {
+        a.leaveDelay = 4 + this.rng() * 8; // sem ponto vago no átrio: tenta de novo daqui a pouco
         return;
       }
       a.intent = next;
@@ -579,15 +404,13 @@ export class LifeSim {
     a.vis.sit = 0;
     a.x = a.to.x;
     a.z = a.to.z;
-    this.dropHold(a);
-    a.seat = null;
     if (a.mustWork) {
       a.intent = { kind: "work" };
     } else if (a.intent.kind === "work") {
-      a.intent = this.decide(a) ?? { kind: "wander", point: this.world!.lounge.wander[0], key: null };
-    } else if ((a.intent.kind === "seat" || a.intent.kind === "pool" || a.intent.kind === "chat" || (a.intent.kind === "wander" && a.intent.key)) && !this.reservedBy(a)) {
+      a.intent = this.choose(a);
+    } else if (a.intent.kind === "wander" && !this.reservedBy(a)) {
       // a reserva foi feita antes de levantar; se algo a tomou, escolhe de novo
-      a.intent = this.decide(a) ?? { kind: "wander", point: this.world!.lounge.wander[0], key: null };
+      a.intent = this.choose(a);
     }
     a.activity = this.activityFor(a.intent);
     this.beginWalk(a);
@@ -598,18 +421,7 @@ export class LifeSim {
   }
 
   private goalFor(a: Actor): Vec2 {
-    switch (a.intent.kind) {
-      case "work":
-        return a.desk.approach;
-      case "seat":
-        return a.intent.seat.approach;
-      case "pool":
-        return a.poolGoal?.pos ?? a.intent.spot.pos;
-      case "chat":
-        return a.intent.pair[a.intent.side].pos;
-      case "wander":
-        return a.intent.point;
-    }
+    return a.intent.kind === "wander" ? a.intent.point : a.desk.approach;
   }
 
   private beginWalk(a: Actor) {
@@ -735,7 +547,8 @@ export class LifeSim {
         a.stuckCount += 1;
         if (a.stuckCount >= 2 && !a.retreating && this.yieldPassage(a)) return;
         if (a.stuckCount >= 4) {
-          const p = world.grid.nearestFree(a.x, a.z, 2.5);
+          // Último recurso: sai do aperto para o ponto livre mais folgado perto de onde está (longe dos outros), não para o mesmo lugar.
+          const p = this.roomiestNearby(a) ?? world.grid.nearestFree(a.x, a.z, 2.5);
           if (p) {
             a.x = p.x;
             a.z = p.z;
@@ -748,6 +561,28 @@ export class LifeSim {
         a.stuckCount = 0;
       }
     }
+  }
+
+  /** Ponto livre e folgado a 0,8–2 m de `a` que fica mais longe de todos os outros personagens. */
+  private roomiestNearby(a: Actor): Vec2 | null {
+    const grid = this.world!.grid;
+    let best: Vec2 | null = null;
+    let bestScore = -Infinity;
+    for (const r of [0.8, 1.3, 2.0]) {
+      for (let k = 0; k < 16; k += 1) {
+        const ang = (k / 16) * Math.PI * 2;
+        const p = { x: a.x + Math.cos(ang) * r, z: a.z + Math.sin(ang) * r };
+        if (!grid.isRoomy(p.x, p.z)) continue;
+        let nearest = Infinity;
+        for (const o of this.actors.values()) if (o !== a) nearest = Math.min(nearest, dist(p, o));
+        if (nearest > bestScore) {
+          bestScore = nearest;
+          best = p;
+        }
+      }
+      if (best && bestScore > 0.9) break;
+    }
+    return best;
   }
 
   /** Quem está parado (sentando, levantando, em pé numa atividade) é um corpo: ninguém passa por dentro. */
@@ -804,7 +639,7 @@ export class LifeSim {
     return false;
   }
 
-  /** Alguém parou (conversa, sinuca, sentou) em cima do caminho que eu planejei: contorna. */
+  /** Alguém parou em cima do caminho que eu planejei: contorna. */
   private pathBlockedByBody(a: Actor): boolean {
     const goal = this.goalFor(a);
     let from: Vec2 = a;
@@ -833,61 +668,36 @@ export class LifeSim {
     } else if (ok(a.x + mx, a.z)) a.x += mx;
     else if (ok(a.x, a.z + mz)) a.z += mz;
   }
-
   private arrive(a: Actor) {
     a.speed = 0;
     a.arrived = true;
     a.path = [];
     a.activity = this.activityFor(a.intent);
-    switch (a.intent.kind) {
-      case "work":
-        this.startSitting(a, a.desk.seat, a.desk.yaw, "desk", 0.5, 0.1);
-        return;
-      case "seat": {
-        const s = a.intent.seat;
-        a.seat = s;
-        this.startSitting(a, s.pos, s.yaw, s.kind, s.hipSeat, s.backLean);
-        return;
-      }
-      case "pool":
-      case "chat":
-      case "wander": {
-        a.phase = "standing";
-        a.phaseT = 0;
-        a.toYaw = a.intent.kind === "pool" ? (a.poolGoal?.yaw ?? a.intent.spot.yaw) : a.intent.kind === "chat" ? a.intent.pair[a.intent.side].yaw : a.yaw;
-        a.dwell = this.dwellFor(a);
-        a.waitT = 0;
-        return;
-      }
+    if (a.intent.kind === "work") {
+      this.startSitting(a);
+      return;
     }
+    a.phase = "standing";
+    a.phaseT = 0;
+    a.toYaw = a.yaw;
+    a.dwell = this.dwellFor();
+    a.waitT = 0;
   }
 
-  private dwellFor(a: Actor): number {
-    const r = this.rng();
-    switch (a.intent.kind) {
-      case "pool":
-        return 40 + r * 40;
-      case "chat":
-        return 20 + r * 20;
-      case "wander":
-        return 4 + r * 4;
-      case "seat":
-        return a.intent.seat.kind === "stool" ? 30 + r * 40 : a.intent.seat.kind === "armchair" ? 25 + r * 30 : 25 + r * 35;
-      default:
-        return 10;
-    }
+  /** Quanto tempo fica parado num ponto do átrio antes de ir embora. */
+  private dwellFor(): number {
+    return 14 + this.rng() * 16;
   }
 
-  private startSitting(a: Actor, to: Vec2, yaw: number, kind: SeatKind | "desk", hipSeat: number, backLean: number) {
+  private startSitting(a: Actor) {
     a.phase = "sitting";
     a.phaseT = 0;
     a.phaseDur = SIT_DUR;
     a.from = { x: a.x, z: a.z };
-    a.to = to;
-    a.toYaw = yaw;
-    a.vis.seatKind = kind;
-    a.vis.hipSeat = hipSeat;
-    a.vis.backLean = backLean;
+    a.to = a.desk.seat;
+    a.toYaw = a.desk.yaw;
+    a.vis.hipSeat = 0.5;
+    a.vis.backLean = 0.1;
   }
 
   private stepSitting(a: Actor, dt: number) {
@@ -902,217 +712,28 @@ export class LifeSim {
     a.z = a.to.z;
     a.vis.sit = 1;
     a.yaw = a.toYaw;
-    if (a.intent.kind === "work") {
-      a.phase = "desk";
-      a.idleFor = 0;
-    } else {
-      a.phase = "seated";
-      a.dwell = this.dwellFor(a);
-      a.drinkT = 2 + this.rng() * 8;
-    }
-  }
-
-  private stepSeated(a: Actor, dt: number) {
-    a.dwell -= dt;
-    if (a.seat?.kind === "stool") {
-      a.drinkT -= dt;
-      if (a.drinkT < -3.4) a.drinkT = 8 + this.rng() * 8;
-    }
-    if (a.dwell <= 0) {
-      const approach = a.seat?.approach ?? this.approachFromHere(a);
-      const previousSeat = a.reservation;
-      const next = this.decide(a);
-      if (!next) {
-        a.dwell = 6 + this.rng() * 10; // sem alternativa livre: fica mais um pouco
-        return;
-      }
-      a.intent = next;
-      // `decide` reserva o novo lugar; o antigo fica retido até terminar de levantar.
-      if (previousSeat && a.reservation !== previousSeat) a.holdKey = previousSeat;
-      a.activity = this.activityFor(a.intent);
-      this.startRising(a, approach);
-    }
+    a.phase = "desk";
+    a.idleFor = 0;
+    // voltou da caminhada para descansar na mesa: fica um tempo antes de passear de novo
+    if (!a.mustWork) a.leaveDelay = 10 + this.rng() * 30;
   }
 
   private stepStanding(a: Actor, dt: number) {
     a.yaw += angleDelta(a.yaw, a.toYaw) * (1 - Math.exp(-8 * dt));
     a.phaseT += dt;
     a.dwell -= dt;
-    const leave = () => {
-      const previous = a.reservation;
-      const next = this.decide(a);
-      if (!next) {
-        a.dwell = 6 + this.rng() * 10;
-        a.leaveAt = 0;
-        a.waitT = 0;
-        return;
-      }
-      a.intent = next;
-      if (previous && this.reservations.get(previous) === a.id && a.reservation !== previous) this.reservations.delete(previous);
-      a.activity = this.activityFor(a.intent);
-      this.beginWalk(a);
-    };
-    if (a.intent.kind === "chat") {
-      const pair = a.intent.pair;
-      const partnerKey = `${pair.id}-${a.intent.side === "a" ? "b" : "a"}`;
-      const partner = this.actors.get(this.reservations.get(partnerKey) ?? "");
-      const partnerHere = !!partner && partner.phase === "standing" && partner.arrived;
-      const st = this.chats.get(pair.id) ?? { speaker: "a" as const, t: 0, dwell: null };
-      this.chats.set(pair.id, st);
-      if (partnerHere) {
-        a.waitT = 0;
-        if (st.dwell === null) {
-          st.dwell = 18 + this.rng() * 22;
-          a.leaveAt = this.time + st.dwell + this.rng() * 1.2;
-        } else if (!a.leaveAt) a.leaveAt = this.time + Math.max(0.5, st.dwell - st.t) + this.rng() * 1.2;
-        if (this.time >= a.leaveAt) {
-          a.leaveAt = 0;
-          leave();
-        }
-      } else {
-        const ended = a.leaveAt > 0;
-        a.waitT += dt;
-        a.leaveAt = 0;
-        st.dwell = null;
-        st.t = 0;
-        if (ended || a.waitT > 14) leave();
-      }
-      return;
-    }
-    if (a.dwell <= 0) leave();
+    if (a.dwell > 0) return;
+    // fim da parada: outro ponto do átrio ou de volta à mesa (a reserva antiga é solta pelo `choose`)
+    a.intent = this.choose(a);
+    a.activity = this.activityFor(a.intent);
+    this.beginWalk(a);
   }
 
-  // ---------------------------------------------------------------------------
-  // Sinuca e conversas (estado compartilhado entre os participantes)
-  // ---------------------------------------------------------------------------
-
-  private poolPlayers(): Actor[] {
-    const out: Actor[] = [];
-    for (const a of this.actors.values()) if (a.phase === "standing" && a.arrived && a.intent.kind === "pool") out.push(a);
-    return out;
-  }
-
-  /** Altura do piso onde o personagem pisa (átrio, rampas e alas ficam em níveis diferentes). */
+  /** Altura do piso em (x, z): átrio, rampas e alas têm níveis diferentes. */
   levelAt(x: number, z: number): number {
     return this.world?.levelAt(x, z) ?? 0;
   }
 
-  /** Mesa de sinuca no mundo (o desenho não gira a mesa: espaço da mesa = mundo − centro). */
-  private poolCenter(): Vec2 | null {
-    const f = this.world?.lounge.furniture.pool;
-    return f ? { x: f.x, z: f.z } : null;
-  }
-
-  private releaseShooter() {
-    const p = this.pool;
-    const a = p.shooter ? this.actors.get(p.shooter) : undefined;
-    if (a && a.poolGoal) {
-      a.poolGoal = null;
-      // volta ao ponto fixo dele na mesa
-      if (a.intent.kind === "pool" && a.phase === "standing") this.beginWalk(a);
-    }
-    p.shooter = null;
-    p.plan = null;
-    p.struck = false;
-    p.stage = "wait";
-    p.t = 0;
-  }
-
-  private stepPool(dt: number) {
-    const p = this.pool;
-    this.poolGame.step(dt);
-    const center = this.poolCenter();
-    const players = this.poolPlayers();
-    const shooterActor = p.shooter ? this.actors.get(p.shooter) : undefined;
-    if (p.shooter && (!shooterActor || shooterActor.intent.kind !== "pool")) {
-      if (shooterActor) shooterActor.poolGoal = null;
-      p.shooter = null;
-      p.plan = null;
-      p.struck = false;
-      p.stage = "wait";
-      p.t = 0;
-    }
-    if (!center || (players.length === 0 && !p.shooter)) {
-      p.stage = "wait";
-      p.t = 0;
-      return;
-    }
-    p.t += dt;
-    if (p.stage === "wait" && p.t >= 1.2) {
-      // Quem atirou há mais tempo joga agora; só começa se a mesa estiver parada.
-      if (!this.poolGame.settled) return;
-      const ready = players.filter((x) => !x.poolGoal);
-      ready.sort((x, y) => (p.lastShot.get(x.id) ?? -1) - (p.lastShot.get(y.id) ?? -1));
-      const shooter = ready[0];
-      if (!shooter) return;
-      // Ninguém pode ficar em cima de quem joga: corpos parados E lugares já reservados por outros (mesmo que ainda a caminho).
-      const others = players.filter((x) => x !== shooter).map((x) => ({ x: x.x - center.x, z: x.z - center.z }));
-      for (const spot of this.world!.lounge.poolSpots) {
-        const holder = this.reservations.get(spot.id);
-        if (holder && holder !== shooter.id && this.actors.has(holder)) others.push({ x: spot.pos.x - center.x, z: spot.pos.z - center.z });
-      }
-      const plan = this.poolGame.plan(others, this.rng);
-      if (!plan) {
-        p.t = 0;
-        return;
-      }
-      p.shooter = shooter.id;
-      p.plan = plan;
-      p.struck = false;
-      shooter.poolGoal = { pos: { x: center.x + plan.stand.x, z: center.z + plan.stand.z }, yaw: plan.yaw };
-      shooter.arrived = false;
-      this.beginWalk(shooter);
-      p.stage = "move";
-      p.t = 0;
-    } else if (p.stage === "move") {
-      const a = shooterActor;
-      const goal = a?.poolGoal;
-      if (a && goal && a.phase === "standing" && a.arrived && dist(a, goal.pos) < 0.2) {
-        a.toYaw = goal.yaw;
-        // só mira depois de ter virado o corpo para a bola
-        if (Math.abs(angleDelta(a.yaw, goal.yaw)) > 0.1) return;
-        p.stage = "aim";
-        p.t = 0;
-        p.dur = 1.8 + this.rng() * 0.8;
-      } else if (p.t > 14) {
-        this.releaseShooter(); // não chegou (caminho bloqueado): desiste desta jogada
-      }
-    } else if (p.stage === "aim" && p.t >= p.dur) {
-      p.stage = "stroke";
-      p.t = 0;
-      p.dur = 0.55;
-      if (p.shooter) p.lastShot.set(p.shooter, this.time);
-    } else if (p.stage === "stroke") {
-      // A bola só sai quando o taco encosta (≈60% do movimento).
-      if (!p.struck && p.plan && p.t >= p.dur * 0.6) {
-        p.struck = true;
-        this.poolGame.strike(p.plan);
-      }
-      if (p.t >= p.dur) {
-        p.stage = "follow";
-        p.t = 0;
-        p.dur = 1.2;
-      }
-    } else if (p.stage === "follow" && p.t >= p.dur && this.poolGame.settled) {
-      this.releaseShooter();
-    }
-  }
-
-  private stepChats(dt: number) {
-    for (const [id, st] of this.chats) {
-      const a = this.actors.get(this.reservations.get(`${id}-a`) ?? "");
-      const b = this.actors.get(this.reservations.get(`${id}-b`) ?? "");
-      if (!a && !b) {
-        this.chats.delete(id);
-        continue;
-      }
-      st.t += dt;
-      if (st.t > 2.4 + (st.speaker === "a" ? 2.6 : 1.8)) {
-        st.speaker = st.speaker === "a" ? "b" : "a";
-        st.t = 0;
-      }
-    }
-  }
 
   // ---------------------------------------------------------------------------
   // Visual (suavizado) — é isso que o rig lê
@@ -1129,44 +750,6 @@ export class LifeSim {
       v.work = damp(v.work, 0, 8, dt);
     }
     if (a.phase === "walking" || a.phase === "standing") v.sit = 0;
-    if (a.phase === "seated") v.sit = 1;
-
-    const standingPool = a.phase === "standing" && a.intent.kind === "pool" && a.arrived;
-    const isShooter = standingPool && this.pool.shooter === a.id;
-    let poolTarget = 0;
-    let stroke = 0;
-    if (isShooter) {
-      poolTarget = 1;
-      if (this.pool.stage === "stroke") stroke = clamp01(this.pool.t / this.pool.dur);
-      else if (this.pool.stage === "aim") stroke = 0;
-      else stroke = 1;
-    }
-    v.pool = damp(v.pool, poolTarget, 6, dt);
-    v.stroke = damp(v.stroke, this.pool.stage === "aim" ? Math.sin(this.time * 7) * 0.18 + 0.2 : stroke, 14, dt);
-    v.cue = standingPool;
-
-    // conversa
-    let talk = 0;
-    let look = 0;
-    if (a.phase === "standing" && a.intent.kind === "chat" && a.arrived) {
-      const st = this.chats.get(a.intent.pair.id);
-      const other = this.actors.get(this.reservations.get(`${a.intent.pair.id}-${a.intent.side === "a" ? "b" : "a"}`) ?? "");
-      if (st && other && other.phase === "standing" && other.arrived) {
-        talk = st.speaker === a.intent.side ? 1 : 0.3;
-        look = Math.sin(this.time * 0.9 + a.seed) * 0.15;
-      }
-    }
-    v.talk = damp(v.talk, talk, 5, dt);
-    v.lookYaw = damp(v.lookYaw, look, 4, dt);
-
-    // bebida no bar
-    let drink = 0;
-    if (a.phase === "seated" && a.seat?.kind === "stool" && a.drinkT < 0) {
-      const t = -a.drinkT;
-      drink = t < 1.2 ? ease(t / 1.2) : t < 2.1 ? 1 : ease(clamp01(1 - (t - 2.1) / 1.2));
-    }
-    v.drink = damp(v.drink, drink, 12, dt);
-    v.glass = a.phase === "seated" && a.seat?.kind === "stool";
   }
 
   // ---------------------------------------------------------------------------

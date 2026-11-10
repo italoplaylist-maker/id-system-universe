@@ -18,6 +18,6 @@ export function roomAgentToSession(a: RoomAgentView): AgentSessionView {
     startedAt: a.lastFinishedAt ?? now,
     lastEventAt: a.lastFinishedAt ?? a.currentTask?.startedAt ?? "1970-01-01T00:00:00.000Z",
     approval: a.approval ? { id: a.approval.id, tool: a.approval.tool, detail: a.approval.detail, createdAt: now } : null,
-    profile: { title: a.name, roomState: a.state, queued: a.queued },
+    profile: { title: a.name, team: a.team, roomState: a.state, queued: a.queued },
   };
 }

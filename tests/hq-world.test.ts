@@ -1,41 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeAgentPods, computeOfficeLayout } from "../src/components/universe/hq/office/office-layout";
-import { officePropObstacles } from "../src/components/universe/hq/office/office-props";
-import { computeHqPlan, HQ } from "../src/components/universe/hq/plan/hq-plan";
-import { atriumObstacles } from "../src/components/universe/hq/plan/atrium-layout";
-import { computeLoungeLayout, LOUNGE_MIN_DEPTH, LOUNGE_WIDTH } from "../src/components/universe/hq/life/lounge-layout";
-import { buildLifeWorldFromPlan } from "../src/components/universe/hq/life/world";
-import { partitionDoorZ } from "../src/components/universe/hq/office/office-shell";
+import { hqFixture } from "./hq-fixture";
 
-function world(nProjects: number, nAgents: number) {
-  const projects = Array.from({ length: nProjects }, (_, i) => ({ id: `p${i}`, name: `Projeto ${i}`, accent: "#38bdf8" }));
-  const agents = Array.from({ length: nAgents }, (_, i) => ({ id: `a${i}`, name: `Agente ${i}`, accent: "#e8283f" }));
-  const tech = computeOfficeLayout(projects, [{ id: "r1", name: "VPS", color: "#34d399" }]);
-  const pods = computeAgentPods(agents);
-  const lounge = computeLoungeLayout(HQ.DOOR_DIST, LOUNGE_MIN_DEPTH, 0);
-  const plan = computeHqPlan({
-    tech: { width: tech.width, depth: tech.depth, doorZ: partitionDoorZ(tech.depth) },
-    agents: { width: pods.width, depth: pods.depth, doorZ: pods.aisleZ },
-    lounge: { width: LOUNGE_WIDTH, depth: LOUNGE_MIN_DEPTH },
-  });
-  const w = buildLifeWorldFromPlan({
-    plan,
-    techDesks: tech.desks.map((d) => ({ id: d.projectId, x: d.x, z: d.z })),
-    techObstacles: officePropObstacles(tech),
-    agentDesks: pods.desks.map((d) => ({ id: d.projectId, x: d.x, z: d.z, yaw: d.yaw ?? 0 })),
-    agentObstacles: pods.rooms.map((r) => ({ kind: "rect" as const, minX: r.x - r.w / 2, maxX: r.x + r.w / 2, minZ: r.z - r.d / 2, maxZ: r.z + r.d / 2 })),
-    lounge,
-    atriumObstacles: atriumObstacles(),
-  });
-  return { w, plan, lounge, projects, agents };
-}
-
-for (const [np, na] of [[3, 2], [6, 6], [8, 14]] as const) {
-  test(`mundo em Y (${np} projetos, ${na} agentes): toda mesa e todo assento do lounge se alcançam`, () => {
-    const { w, lounge, projects, agents } = world(np, na);
-    const desks = [...projects, ...agents].map((x) => w.desks.get(x.id)!);
-    assert.equal(desks.length, np + na);
+for (const [np, na, nc] of [[3, 2, 7], [6, 6, 7], [8, 14, 14]] as const) {
+  test(`mundo em Y (${np} projetos, ${na} agentes, ${nc} CLT): toda mesa e todo ponto do átrio se alcançam`, () => {
+    const { world: w, projects, agents, clt } = hqFixture(np, na, nc);
+    const desks = [...projects, ...agents, ...clt].map((x) => w.desks.get(x.id)!);
+    assert.equal(desks.length, np + na + nc);
     const origin = w.desks.get(agents[0].id)!.approach;
     assert.ok(w.grid.isFree(origin.x, origin.z), "ponto de aproximação da primeira mesa deveria ser livre");
     for (const d of desks) {
@@ -43,15 +14,16 @@ for (const [np, na] of [[3, 2], [6, 6], [8, 14]] as const) {
       const path = w.grid.findPath(origin, d.approach);
       assert.ok(path && path.length > 0, `sem caminho até a mesa ${d.id}`);
     }
-    for (const seat of lounge.seats) {
-      const path = w.grid.findPath(origin, seat.approach);
-      assert.ok(path && path.length > 0, `sem caminho até o assento ${seat.id}`);
-    }
+    w.wander.forEach((p, i) => {
+      assert.ok(w.grid.isFree(p.x, p.z), `ponto de passeio ${i} bloqueado`);
+      const path = w.grid.findPath(origin, p);
+      assert.ok(path && path.length > 0, `sem caminho até o ponto de passeio ${i}`);
+    });
   });
 }
 
-test("o assento de cada mesa de agente aponta para a mesa (monitor à frente)", () => {
-  const { w } = world(2, 4);
+test("o assento de cada mesa (inclusive da sala CLT) aponta para a mesa (monitor à frente)", () => {
+  const { world: w } = hqFixture(2, 4, 7);
   for (const d of w.desks.values()) {
     // a aproximação fica ATRÁS da cadeira: a direção assento→aproximação é oposta ao rumo do assento
     const fx = Math.sin(d.yaw);
@@ -61,8 +33,21 @@ test("o assento de cada mesa de agente aponta para a mesa (monitor à frente)", 
   }
 });
 
-test("alturas: personagem na porta do lounge desce a rampa; no átrio fica a +0,40 do nível operacional", () => {
-  const { plan } = world(3, 3);
+test("a sala CLT é alcançável pela porta e as mesas dela ficam no nível da ala", () => {
+  const { world: w, plan, clt } = hqFixture(3, 3, 7);
+  const door = plan.wings.clt.door;
+  const outside = { x: door.x - plan.wings.clt.u.x * 3, z: door.z - plan.wings.clt.u.z * 3 };
+  assert.ok(w.grid.isFree(outside.x, outside.z), "átrio diante da porta da sala CLT deveria ser livre");
+  for (const c of clt) {
+    const d = w.desks.get(c.id)!;
+    const path = w.grid.findPath(outside, d.approach);
+    assert.ok(path && path.length > 0, `sem caminho da porta até ${c.id}`);
+    assert.ok(Math.abs(plan.levelAt(d.seat.x, d.seat.z) - plan.wings.clt.level) < 1e-9, `${c.id} fora do nível da sala`);
+  }
+});
+
+test("alturas: no átrio fica a +0,40 do nível operacional e a sala CLT está 0,20 abaixo dele", () => {
+  const { plan } = hqFixture(3, 3);
   assert.ok(Math.abs(plan.levelAt(0, 0) - plan.wings.agents.level - 0.4) < 1e-9);
-  assert.ok(Math.abs(plan.wings.lounge.level - plan.wings.agents.level + 0.2) < 1e-9);
+  assert.ok(Math.abs(plan.wings.clt.level - plan.wings.agents.level + 0.2) < 1e-9);
 });

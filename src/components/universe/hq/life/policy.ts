@@ -4,7 +4,7 @@ import type { Actor } from "./sim";
 /**
  * Regra que liga o estado REAL do agente à simulação visual (só leitura):
  * - trabalhando, aguardando sua aprovação ou com erro numa ferramenta = tem trabalho: fica na mesa;
- * - ocioso (terminou a resposta / sem sinal) = livre para usar o lounge;
+ * - ocioso (terminou a resposta / sem sinal) = livre: descansa na mesa e passeia pelo átrio;
  * - sessão encerrada/offline nem chega aqui: sai da lista e o personagem some.
  */
 export function agentNeedsDesk(state: AgentState): boolean {

@@ -242,7 +242,7 @@ export const ProjectDesk = memo(function ProjectDesk({ slot, resources, state, s
     b.work = damp(b.work, state === "WORKING" ? 1 : 0, 6, dt);
     b.error = damp(b.error, state === "ERROR" ? 1 : 0, 6, dt);
     b.power = damp(b.power, off ? 0 : 1, 5, dt);
-    // Todo desligado: cadeira para trás. Com a simulação de vida, a cadeira também acompanha o funcionário que saiu para o lounge.
+    // Todo desligado: cadeira para trás. Com a simulação de vida, a cadeira também acompanha o funcionário que saiu para passear.
     b.away = damp(b.away, off ? 1 : deskChairAway(life?.actors.get(slot.projectId)), off ? 4 : 7, dt);
     b.ring = damp(b.ring, selected ? 1 : hovered ? 0.55 : 0, 10, dt);
 

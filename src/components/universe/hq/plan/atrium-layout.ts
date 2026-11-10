@@ -1,4 +1,4 @@
-import type { Obstacle } from "../life/geometry";
+import type { Obstacle, Vec2 } from "../life/geometry";
 
 /** Medidas do núcleo central (ID Command Center). */
 export const CORE = { radius: 3.5, platformH: 0.22, ringY: 3.7, screenR: 3.05, screenY: 1.75 };
@@ -14,3 +14,9 @@ export function atriumObstacles(): Obstacle[] {
   ];
 }
 
+
+/** Pontos do átrio (mundo) onde quem está livre passeia: um anel entre o núcleo e os jardins, um personagem por ponto. */
+export const ATRIUM_WANDER: Vec2[] = Array.from({ length: 10 }, (_, k) => {
+  const a = ((18 + 36 * k) * Math.PI) / 180;
+  return { x: Math.cos(a) * 4.4, z: Math.sin(a) * 4.4 };
+});

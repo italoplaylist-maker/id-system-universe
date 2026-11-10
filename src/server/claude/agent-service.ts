@@ -180,7 +180,7 @@ export interface AgentSessionView {
   /** Pedido de permissão aguardando você decidir (o mais antigo ainda válido). */
   approval: { id: string; tool: string; detail: string; createdAt: string } | null;
   /** Funcionário permanente da Central (perfil do orquestrador): nome próprio e estado de sala detalhado. */
-  profile?: { title: string; roomState: "AVAILABLE" | "RECEIVING" | "RUNNING" | "WAITING" | "DONE" | "ERROR" | "PAUSED"; queued: number };
+  profile?: { title: string; team?: string | null; roomState: "AVAILABLE" | "RECEIVING" | "RUNNING" | "WAITING" | "DONE" | "ERROR" | "PAUSED"; queued: number };
 }
 
 export function deriveAgentState(s: { phase: string; lastToolFailed: boolean; lastEventAt: Date }, now: Date, hasPendingApproval = false): AgentState | "ENDED" {
