@@ -219,6 +219,18 @@ describe("agente: conectar repositório direto (sem recurso do projeto)", () => 
     await assert.rejects(() => addExtraRepo(agentId, { githubRepositoryId: brain.id }, { userId: admin.id }), /já está conectado/);
   });
 
+  it("trava: mudar prisma/schema.prisma sem migração é recusado; com a migração passa", async () => {
+    const admin = await makeUser("ADMIN", "a7@test.dev");
+    await updateAgent(agentId, { githubRepositoryId: repoId }, { userId: admin.id });
+    mkdirSync(join(cwd, "prisma"), { recursive: true });
+    writeFileSync(join(cwd, "prisma", "schema.prisma"), "model X { id String @id }\n");
+    await assert.rejects(() => publishChanges(agentId, { title: "schema sem migração", taskId: "taskschema01" }), /sem criar a migração/);
+    mkdirSync(join(cwd, "prisma", "migrations", "20261109_x"), { recursive: true });
+    writeFileSync(join(cwd, "prisma", "migrations", "20261109_x", "migration.sql"), "-- x\n");
+    const pub = await publishChanges(agentId, { title: "schema com migração", taskId: "taskschema02" });
+    assert.ok(pub.pullRequest.number >= 1);
+  });
+
   it("rejeita repositório inexistente", async () => {
     const admin = await makeUser("ADMIN", "a4@test.dev");
     await assert.rejects(() => updateAgent(agentId, { githubRepositoryId: "nao-existe" }, { userId: admin.id }), /Repositório não encontrado/);

@@ -34,6 +34,16 @@ const PACKS: Pack[] = [
     agents: ["motion-reviewer.md"],
     mcp: [{ name: "motion", url: "https://mcp.motion.dev" }],
   },
+  {
+    id: "find-skills",
+    name: "Find Skills (descobrir skills)",
+    description: "Ensina o agente a procurar e sugerir skills instaláveis quando você pede algo especializado (vercel-labs/skills).",
+    version: "1.7.6",
+    license: "MIT — Vercel, Inc. (vercel-labs/skills)",
+    skills: ["find-skills"],
+    agents: [],
+    mcp: [],
+  },
 ];
 
 const packDir = (id: string) => join(process.cwd(), "skill-packs", id);

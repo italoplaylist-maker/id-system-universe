@@ -190,6 +190,14 @@ export async function publishChanges(agentId: string, input: PublishInput = {}):
   const ahead = await countUnpushed(cwd, branch, repo.baseBranch);
   if (!dirty && ahead === 0) throw new ValidationError("Não há nada para enviar: nenhuma alteração nem commit novo.");
 
+  // Trava: mudar o schema do Prisma sem migração derruba as telas em produção (já aconteceu duas vezes). Vale para agentes e para o botão.
+  const changedVsBase = (await runGit(cwd, ["diff", "--name-only", `origin/${repo.baseBranch}...HEAD`])).out.split("\n").filter(Boolean);
+  const changedWorking = (await runGit(cwd, ["status", "--porcelain", "-uall"])).out.split("\n").filter(Boolean).map((l) => l.slice(3).trim().replace(/^.* -> /, ""));
+  const touched = [...new Set([...changedVsBase, ...changedWorking])];
+  if (touched.some((f) => f.endsWith("prisma/schema.prisma")) && !touched.some((f) => /(^|\/)prisma\/migrations\/.+/.test(f))) {
+    throw new ValidationError("Recusado: você mudou prisma/schema.prisma sem criar a migração. Rode `npx prisma migrate dev --name <o_que_mudou>`, commite a pasta nova em prisma/migrations/ e envie de novo (sem ela o banco de produção fica sem as colunas e as telas quebram).");
+  }
+
   const onProtected = PROTECTED.has(branch) || branch === repo.baseBranch || branch === "HEAD";
   if (onProtected) {
     branch = `agente/${slug(repo.agent.name)}/${(input.taskId ?? Date.now().toString(36)).slice(-8)}`;
