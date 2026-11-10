@@ -56,6 +56,12 @@ export interface LogResult {
   supportsStreaming: boolean;
 }
 
+/** Log de um deploy. `note` explica POR QUE não há linhas (permissão do token, log vazio…); nulo quando há linhas. */
+export interface DeploymentLogs {
+  lines: LogLine[];
+  note: string | null;
+}
+
 export type DeploymentStatus = "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED" | "CANCELLED";
 
 export interface ProviderDeployment {
@@ -97,7 +103,7 @@ export interface DeploymentProvider {
   listDeployments(applicationExternalId: string): Promise<ProviderDeployment[]>;
   getDeployment(deploymentExternalId: string): Promise<ProviderDeployment>;
   /** Log completo de UM deploy (build + subida), inclusive de deploys já terminados. */
-  getDeploymentLogs(deploymentExternalId: string): Promise<LogLine[]>;
+  getDeploymentLogs(deploymentExternalId: string): Promise<DeploymentLogs>;
   startApplication(externalId: string, resourceType: ProviderResourceType): Promise<ActionResult>;
   stopApplication(externalId: string, resourceType: ProviderResourceType): Promise<ActionResult>;
   restartApplication(externalId: string, resourceType: ProviderResourceType): Promise<ActionResult>;

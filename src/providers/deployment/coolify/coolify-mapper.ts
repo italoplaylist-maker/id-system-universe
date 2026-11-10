@@ -115,6 +115,19 @@ export function mapDeploymentLogs(rawLogs: string | null | undefined): LogLine[]
   return lines;
 }
 
+export const HIDDEN_LOGS_NOTE =
+  "O Coolify não enviou o log deste deploy. Quase sempre é porque o token de API do Universe não tem a permissão de ver dados sensíveis (read:sensitive). No Coolify: Keys & Tokens → API tokens → crie um token com a permissão read:sensitive e troque o token em Configurações → Infraestrutura do Universe.";
+export const EMPTY_LOGS_NOTE = "O Coolify devolveu o log deste deploy vazio (ele pode não ter gerado saída ainda, ou já foi limpo).";
+export const ONLY_INTERNAL_LOGS_NOTE = "O Coolify enviou o log, mas só com comandos internos, sem saída visível.";
+
+/** Log do deploy + o MOTIVO quando não há linhas: campo `logs` ausente (token sem permissão), vazio, ou só comandos internos. */
+export function parseDeploymentLogs(raw: Pick<CoolifyDeploymentRaw, "logs">): { lines: LogLine[]; note: string | null } {
+  if (raw.logs === undefined) return { lines: [], note: HIDDEN_LOGS_NOTE };
+  if (raw.logs === null || raw.logs === "") return { lines: [], note: EMPTY_LOGS_NOTE };
+  const lines = mapDeploymentLogs(raw.logs);
+  return { lines, note: lines.length === 0 ? ONLY_INTERNAL_LOGS_NOTE : null };
+}
+
 /**
  * Coolify returns logs as one opaque string. We only classify lines for
  * visual differentiation (INFO/WARN/ERROR) — the original text is preserved
