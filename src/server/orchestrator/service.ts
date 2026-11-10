@@ -209,16 +209,16 @@ export async function submitTask(agentId: string, input: unknown, actor: Actor):
  * Tarefa criada pelo SISTEMA (rotina agendada), sem usuário logado. Idempotente: a mesma `idempotencyKey`
  * devolve a mesma tarefa — reinício do servidor ou duas réplicas nunca duplicam uma rotina.
  */
-export async function submitSystemTask(input: { agentId: string; prompt: string; idempotencyKey: string; priority?: number; routineId?: string }): Promise<{ task: TaskView; duplicate: boolean }> {
+export async function submitSystemTask(input: { agentId: string; prompt: string; idempotencyKey: string; priority?: number; routineId?: string; parentTaskId?: string }): Promise<{ task: TaskView; duplicate: boolean }> {
   const existing = await prisma.agentTask.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { agent: { select: { name: true } } } });
   if (existing) return { task: toTaskView(existing), duplicate: true };
   try {
     const created = await prisma.agentTask.create({
-      data: { agentId: input.agentId, prompt: input.prompt, idempotencyKey: input.idempotencyKey, createdById: null, priority: input.priority ?? 0, routineId: input.routineId ?? null },
+      data: { agentId: input.agentId, prompt: input.prompt, idempotencyKey: input.idempotencyKey, createdById: null, priority: input.priority ?? 0, routineId: input.routineId ?? null, parentTaskId: input.parentTaskId ?? null },
       include: { agent: { select: { name: true } } },
     });
-    await appendEvent(created.id, "message_sent", `[Rotina agendada] ${input.prompt}`);
-    await recordAuditEvent({ action: "AGENT_TASK_SUBMITTED", status: "SUCCESS", entityType: "AgentTask", entityId: created.id, metadata: { agentId: input.agentId, routineId: input.routineId, source: "routine" } });
+    await appendEvent(created.id, "message_sent", `${input.parentTaskId ? "[Delegada" : "[Rotina agendada"}] ${input.prompt}`);
+    await recordAuditEvent({ action: "AGENT_TASK_SUBMITTED", status: "SUCCESS", entityType: "AgentTask", entityId: created.id, metadata: { agentId: input.agentId, routineId: input.routineId, parentTaskId: input.parentTaskId, source: input.parentTaskId ? "delegation" : "routine" } });
     orchestratorBus.emit({ type: "task", taskId: created.id, agentId: input.agentId });
     hookHolder.__isuTaskHook?.();
     return { task: toTaskView(created), duplicate: false };

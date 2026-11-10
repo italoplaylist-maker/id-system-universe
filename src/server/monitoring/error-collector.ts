@@ -2,6 +2,7 @@ import { prisma } from "@/server/db/client";
 import { logger } from "@/lib/logger";
 import { createDeploymentProvider } from "@/server/providers/provider-registry";
 import { redactSecrets } from "@/server/claude/agent-service";
+import { dayKey } from "@/lib/clt-dashboard";
 import { extractErrorEvents, groupEvents, MAX_SAMPLE_CHARS, onlyNew } from "@/lib/error-logs";
 
 /** Os erros agrupados ficam 30 dias; depois somem (o log do sistema continua sendo a fonte original). */
@@ -42,6 +43,11 @@ export async function collectApplicationErrors(app: AppRow, now: Date): Promise<
       recorded += g.count;
     }
   }
+  if (recorded > 0) {
+    // série por dia (fuso de São Paulo) para os gráficos do painel
+    const day = dayKey(now);
+    await prisma.errorDaily.upsert({ where: { applicationId_day: { applicationId: app.id, day } }, create: { applicationId: app.id, day, count: recorded }, update: { count: { increment: recorded } } });
+  }
   await prisma.errorScanState.upsert({ where: { applicationId: app.id }, create: { applicationId: app.id, seen: seenNow, scannedAt: now }, update: { seen: seenNow, scannedAt: now } });
   return recorded;
 }
@@ -66,6 +72,7 @@ export async function runErrorCollectorTick(now: Date = new Date()): Promise<{ a
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, apps.length) }, worker));
   await prisma.errorGroup.deleteMany({ where: { lastSeenAt: { lt: new Date(now.getTime() - ERROR_RETENTION_DAYS * 24 * 3600_000) } } });
+  await prisma.errorDaily.deleteMany({ where: { day: { lt: dayKey(new Date(now.getTime() - 90 * 24 * 3600_000)) } } });
   if (errors) logger.info("error_collect_done", { apps: apps.length, errors, failed });
   return { apps: apps.length, errors, failed };
 }

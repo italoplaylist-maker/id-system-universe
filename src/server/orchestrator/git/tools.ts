@@ -18,7 +18,7 @@ const fail = (e: unknown) => text(e instanceof Error ? e.message : "Falhou.", tr
 export async function buildUniverseMcp(agentId: string, taskId: string) {
   const { createSdkMcpServer, tool } = await import("@anthropic-ai/claude-agent-sdk");
   // Equipe CLT: erros/logs dos sistemas (e, no Manager, o estado da equipe). Para os demais agentes a lista vem vazia.
-  const extra = await teamTools(tool as never, agentId).catch(() => []);
+  const extra = await teamTools(tool as never, agentId, taskId).catch(() => []);
   return createSdkMcpServer({
     name: "universe",
     version: "1.0.0",

@@ -20,6 +20,7 @@ import { DEMO_APPLICATIONS, DEMO_PROJECTS, DEMO_PROVIDERS } from "@/lib/demo-dat
 import { Button } from "@/components/ui/button";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
 import { TimelinePanel } from "@/components/agents/timeline-panel";
+import { CltAgentPanel } from "./clt-panel/clt-agent-panel";
 import { FeedsDialog } from "@/components/agents/feed-dialogs";
 import { NotificationsDialog } from "@/components/notifications/notifications-dialog";
 import { CommandCenter } from "@/components/agents/command-center";
@@ -46,6 +47,8 @@ export function HqView() {
   const roomAgentsQuery = useRoomAgents(sessionUser ? canUser(sessionUser, "provider:read") : false);
   const { data: observedSessions } = useAgentSessions(sessionUser ? canUser(sessionUser, "provider:read") : false);
   const canManageAgents = sessionUser ? canUser(sessionUser, "provider:write") : false;
+  // Clicou num funcionário da equipe AGENTES CLT: abre o painel dele (os demais agentes seguem com a linha do tempo).
+  const selectedClt = roomAgentsQuery.data?.find((a) => a.id === selectedAgentId && a.team === "CLT") ?? null;
   const router = useRouter();
   const { selectedApplicationId, selectApplication, quality, setQuality, hydrateQuality, reducedGraphics, demoMode, setDemoMode, setViewMode } = useUiStore();
   const cameraMode = useCameraStore((s) => s.mode);
@@ -224,9 +227,11 @@ export function HqView() {
         <WeatherHud timeLabel={timeLabel} />
       </div>
 
-      <MotionPanelSlot panelKey={centerOpen ? "center" : selectedAgentId ? `timeline:${selectedAgentId}` : null}>
+      <MotionPanelSlot panelKey={centerOpen ? "center" : selectedClt ? `clt:${selectedClt.id}` : selectedAgentId ? `timeline:${selectedAgentId}` : null}>
         {centerOpen ? (
           <CommandCenter initialAgentId={selectedAgentId} onClose={() => setCenterOpen(false)} canWrite={canManageAgents} />
+        ) : selectedClt ? (
+          <CltAgentPanel agentId={selectedClt.id} canWrite={canManageAgents} onClose={() => setSelectedAgentId(null)} onSelectAgent={setSelectedAgentId} onOpenCenter={() => setCenterOpen(true)} />
         ) : (
           selectedAgentId && <TimelinePanel sessionId={selectedAgentId} onClose={() => setSelectedAgentId(null)} canSend={canManageAgents} />
         )}

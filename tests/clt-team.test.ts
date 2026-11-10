@@ -100,3 +100,12 @@ test("o Doctor, o DevOps e o Manager sabem usar as ferramentas de erros/logs/est
   assert.match(prompt("id-devops"), /listar_erros/);
   assert.match(prompt("id-manager"), /status_equipe/);
 });
+
+test("o Manager sabe delegar e, como ele e o Architect precisam agir, nenhum agente CLT nasce em modo 'somente planejar'", () => {
+  const manager = CLT_TEAM.find((a) => a.slug === "id-manager")!;
+  assert.match(manager.description, /delegar_tarefa/);
+  assert.match(manager.description, /resultado_delegacoes/);
+  for (const a of CLT_TEAM) assert.equal(a.permissionMode, "default", `${a.name}: modo plan impede de usar ferramentas e editar`);
+  // a trava de segurança continua valendo para quem age: merge/deploy seguem bloqueados
+  assert.ok(CLT_DISALLOWED_TOOLS.includes("mcp__universe__merge_pull_request"));
+});
