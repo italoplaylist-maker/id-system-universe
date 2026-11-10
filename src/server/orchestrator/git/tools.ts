@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { cleanupWorkspace, getGitStatus, mergePullRequest, publishChanges, resolveAgentRepo } from "./ops";
+import { teamTools } from "../tools-team";
 
 export const UNIVERSE_TOOL_PREFIX = "mcp__universe__";
 /** Sem pedir aprovação: abrir PR (seguro), ver estado e limpar a cópia (só apaga o que já foi enviado). Merge pede aprovação, a menos que o agente tenha a regra liberada. */
@@ -16,6 +17,8 @@ const fail = (e: unknown) => text(e instanceof Error ? e.message : "Falhou.", tr
  */
 export async function buildUniverseMcp(agentId: string, taskId: string) {
   const { createSdkMcpServer, tool } = await import("@anthropic-ai/claude-agent-sdk");
+  // Equipe CLT: erros/logs dos sistemas (e, no Manager, o estado da equipe). Para os demais agentes a lista vem vazia.
+  const extra = await teamTools(tool as never, agentId).catch(() => []);
   return createSdkMcpServer({
     name: "universe",
     version: "1.0.0",
@@ -65,6 +68,7 @@ export async function buildUniverseMcp(agentId: string, taskId: string) {
           return fail(e);
         }
       }),
+      ...(extra as never[]),
     ],
   });
 }

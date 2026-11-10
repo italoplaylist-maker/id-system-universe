@@ -100,7 +100,7 @@ export const CLT_ROUTINES: CltRoutineDef[] = [
     priority: 1,
     gate: "alert",
     prompt:
-      "Rotina diária de infraestrutura. O Universe detectou algo anormal (aplicação com erro, deploy falho nas últimas 24 h ou servidor em alerta). Diagnostique: estado dos servidores e contêineres, disco, memória, deploys que falharam e a causa provável de cada um. Entregue a ação recomendada para cada problema. NÃO reinicie, remova nem faça deploy: peça aprovação." +
+      "Rotina diária de infraestrutura. O Universe detectou algo anormal (aplicação com erro, deploy falho nas últimas 24 h ou servidor em alerta). Diagnostique: estado dos servidores e contêineres, disco, memória, deploys que falharam e erros nos logs (use listar_erros e ler_logs), com a causa provável de cada um. Entregue a ação recomendada para cada problema. NÃO reinicie, remova nem faça deploy: peça aprovação." +
       ECONOMIA,
   },
   {
@@ -111,7 +111,7 @@ export const CLT_ROUTINES: CltRoutineDef[] = [
     priority: 1,
     gate: "alert",
     prompt:
-      "Rotina diária de diagnóstico. Há aplicação em erro ou deploy falho recente. Para cada caso, parta do log real, ache a causa raiz e, se for erro de código, prepare a correção mínima com teste em um PR (sem fazer merge). Se a causa for de infraestrutura, apenas descreva-a para o ID DevOps." + ECONOMIA,
+      "Rotina diária de diagnóstico. Há aplicação em erro ou deploy falho recente. Para cada caso, parta do log real (use listar_erros para ver os erros agrupados e ler_logs para o contexto), ache a causa raiz e, se for erro de código, prepare a correção mínima com teste em um PR (sem fazer merge). Se a causa for de infraestrutura, apenas descreva-a para o ID DevOps." + ECONOMIA,
   },
   {
     slug: "id-guardian",
@@ -174,7 +174,7 @@ export const CLT_ROUTINES: CltRoutineDef[] = [
     priority: 0,
     gate: "activity",
     prompt:
-      "Resumo diário. Consolide em até 15 linhas o que a equipe fez nas últimas 24 h: tarefas concluídas, falhas, aprovações pendentes e o consumo de tokens de cada agente frente ao limite. Destaque o que precisa de decisão do Italo. Não crie nem delegue tarefas novas neste resumo." +
+      "Resumo diário. Use a ferramenta status_equipe e consolide em até 15 linhas o que a equipe fez nas últimas 24 h: tarefas concluídas, falhas, aprovações pendentes e o consumo de tokens de cada agente frente ao limite. Destaque o que precisa de decisão do Italo. Não crie nem delegue tarefas novas neste resumo." +
       ECONOMIA,
   },
 ];

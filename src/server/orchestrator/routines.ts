@@ -32,13 +32,14 @@ export async function evaluateGate(gate: string, lastGateKey: string | null, now
     }
     case "alert": {
       const since = new Date(now.getTime() - DAY_MS);
-      const [appsInError, failedRuns, servers] = await Promise.all([
+      const [appsInError, failedRuns, servers, newErrors] = await Promise.all([
         prisma.application.count({ where: { status: "ERROR" } }),
         prisma.deploymentRun.count({ where: { status: "FAILED", finishedAt: { gte: since } } }),
         listServers(now).catch(() => []),
+        prisma.errorGroup.count({ where: { firstSeenAt: { gte: since } } }),
       ]);
       const serverAlerts = servers.filter((s) => s.status === "OFFLINE" || Object.values(s.levels).some((l) => l !== "ok")).length;
-      const parts = [appsInError && `${appsInError} aplicação(ões) com erro`, failedRuns && `${failedRuns} deploy(s) falho(s) em 24 h`, serverAlerts && `${serverAlerts} servidor(es) em alerta`].filter(Boolean);
+      const parts = [appsInError && `${appsInError} aplicação(ões) com erro`, failedRuns && `${failedRuns} deploy(s) falho(s) em 24 h`, serverAlerts && `${serverAlerts} servidor(es) em alerta`, newErrors && `${newErrors} tipo(s) de erro novo(s) nos logs em 24 h`].filter(Boolean);
       return parts.length ? { run: true, key: null, reason: parts.join(", ") } : { run: false, key: null, reason: "sem alertas" };
     }
     case "activity": {

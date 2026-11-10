@@ -316,3 +316,16 @@ export function useRoutineMutations() {
     }),
   };
 }
+
+export type ErrorGroupView = import("@/server/monitoring/error-collector").ErrorGroupView;
+
+/** Erros agrupados dos logs dos sistemas (coletados a cada 15 min). */
+export function useSystemErrors(hours: number, enabled = true) {
+  return useQuery({
+    queryKey: [...KEY, "errors", hours],
+    queryFn: () => apiFetch<{ errors: ErrorGroupView[] }>(`/api/orchestrator/errors?horas=${hours}`),
+    select: (d) => d.errors,
+    enabled,
+    refetchInterval: 60_000,
+  });
+}

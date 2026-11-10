@@ -1,0 +1,111 @@
+import { z } from "zod";
+import { prisma } from "@/server/db/client";
+import { createDeploymentProvider } from "@/server/providers/provider-registry";
+import { redactSecrets } from "@/server/claude/agent-service";
+import { extractErrorEvents } from "@/lib/error-logs";
+import { describeSchedule } from "@/lib/clt-routines";
+import { listErrorGroups } from "@/server/monitoring/error-collector";
+import { cltOverview } from "./clt";
+
+/** Ferramentas SOMENTE-LEITURA da equipe CLT (liberadas sem pedir aprovação: não alteram nada). */
+export const UNIVERSE_TEAM_TOOLS = ["listar_erros", "ler_logs", "status_equipe"].map((n) => `mcp__universe__${n}`);
+
+const text = (t: string, isError = false) => ({ content: [{ type: "text" as const, text: t }], ...(isError ? { isError: true } : {}) });
+const fail = (e: unknown) => text(e instanceof Error ? e.message : "Falhou.", true);
+const hhmm = (d: Date) => d.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+const MAX_REPLY = 14_000;
+const cap = (s: string) => (s.length > MAX_REPLY ? `${s.slice(0, MAX_REPLY)}\n[… resposta cortada …]` : s);
+
+type ToolFn = (name: string, description: string, shape: z.ZodRawShape, handler: (args: never) => Promise<ReturnType<typeof text>>) => unknown;
+
+/**
+ * Erros e logs dos sistemas para os agentes CLT investigarem de verdade (antes eles só viam o que vinha no pedido).
+ * Tudo passa por `redactSecrets`; nenhuma ferramenta escreve nada.
+ */
+export async function teamTools(tool: ToolFn, agentId: string): Promise<unknown[]> {
+  const agent = await prisma.agentProfile.findUnique({ where: { id: agentId }, select: { team: true, slug: true } });
+  if (agent?.team !== "CLT") return [];
+
+  const tools: unknown[] = [
+    tool(
+      "listar_erros",
+      "Lista os erros que os sistemas escreveram nos logs (coletados a cada 15 min e já agrupados: o mesmo erro com horas/números diferentes é um item só), com quantas vezes ocorreu, quando apareceu pela primeira e pela última vez e a última ocorrência com o stack trace. Comece por aqui ao investigar um problema.",
+      {
+        sistema: z.string().max(80).optional().describe("Parte do nome do sistema/aplicação. Vazio = todos."),
+        horas: z.number().int().min(1).max(720).optional().describe("Janela em horas (padrão 24)."),
+        limite: z.number().int().min(1).max(30).optional().describe("Quantos grupos devolver (padrão 15)."),
+      },
+      (async (args: { sistema?: string; horas?: number; limite?: number }) => {
+        try {
+          const hours = args.horas ?? 24;
+          const groups = await listErrorGroups({ hours, system: args.sistema, limit: args.limite ?? 15 });
+          if (groups.length === 0) return text(`Nenhum erro registrado nas últimas ${hours} h${args.sistema ? ` para "${args.sistema}"` : ""}. (A coleta lê os logs a cada 15 min; erros que já estavam no fim do log na primeira leitura de um sistema não entram — use ler_logs para ver o log atual.)`);
+          const body = groups
+            .map((g) => `• ${g.project ? `${g.project} / ` : ""}${g.application} — ${g.count}× · primeira ${hhmm(new Date(g.firstSeenAt))} · última ${hhmm(new Date(g.lastSeenAt))}\n${g.sample.split("\n").map((l) => `    ${l.slice(0, 400)}`).join("\n")}`)
+            .join("\n\n");
+          return text(cap(`${groups.length} tipo(s) de erro nas últimas ${hours} h:\n\n${body}`));
+        } catch (e) {
+          return fail(e);
+        }
+      }) as never,
+    ),
+    tool(
+      "ler_logs",
+      "Lê o log de execução ATUAL de um sistema (últimas linhas, como o Coolify mostra agora). Use para ver o contexto de um erro de listar_erros. Segredos são mascarados.",
+      {
+        sistema: z.string().min(2).max(80).describe("Nome do sistema/aplicação (parte do nome basta se for única)."),
+        linhas: z.number().int().min(20).max(400).optional().describe("Quantas linhas finais (padrão 150)."),
+        somente_erros: z.boolean().optional().describe("Devolver só as linhas de erro com stack trace."),
+      },
+      (async (args: { sistema: string; linhas?: number; somente_erros?: boolean }) => {
+        try {
+          const matches = await prisma.application.findMany({ where: { name: { contains: args.sistema, mode: "insensitive" }, provider: { enabled: true } }, include: { provider: true }, take: 6 });
+          const exact = matches.filter((m) => m.name.toLowerCase() === args.sistema.toLowerCase());
+          const pick = exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : null;
+          if (!pick) return text(matches.length === 0 ? `Nenhum sistema com nome parecido com "${args.sistema}".` : `Mais de um sistema combina com "${args.sistema}": ${matches.map((m) => m.name).join(", ")}. Informe o nome completo.`, true);
+          const logs = await createDeploymentProvider(pick.provider).getApplicationLogs(pick.externalId, pick.resourceType, { lines: args.linhas ?? 150 });
+          const raw = logs.lines.map((l) => l.raw);
+          const out = args.somente_erros ? extractErrorEvents(raw, 10).map((e) => [e.line, ...e.context].join("\n")).join("\n---\n") : raw.join("\n");
+          return text(cap(`Log de ${pick.name} (${args.somente_erros ? "só erros" : `últimas ${raw.length} linhas`}):\n${redactSecrets(out) || "(sem linhas)"}`));
+        } catch (e) {
+          return fail(e);
+        }
+      }) as never,
+    ),
+  ];
+
+  if (agent.slug === "id-manager") {
+    tools.push(
+      tool(
+        "status_equipe",
+        "Estado REAL da equipe AGENTES CLT agora: situação de cada agente, tarefas e tokens (dia/mês contra o limite), os últimos resultados e o que as rotinas fizeram. Use antes de qualquer resumo — nunca invente números.",
+        { horas: z.number().int().min(1).max(168).optional().describe("Janela dos últimos resultados (padrão 24).") },
+        (async (args: { horas?: number }) => {
+          try {
+            const hours = args.horas ?? 24;
+            const since = new Date(Date.now() - hours * 3600_000);
+            const [overview, recent, routines, errors] = await Promise.all([
+              cltOverview(),
+              prisma.agentTask.findMany({ where: { agent: { team: "CLT" }, finishedAt: { gte: since } }, orderBy: { finishedAt: "desc" }, take: 15, include: { agent: { select: { name: true } } } }),
+              prisma.agentRoutine.findMany({ where: { agent: { team: "CLT", archivedAt: null } }, include: { agent: { select: { name: true } } }, orderBy: { time: "asc" } }),
+              listErrorGroups({ hours, limit: 5 }),
+            ]);
+            const pct = (p: number | null) => (p === null ? "sem limite" : `${p}%`);
+            const agents = overview.agents.map((a) => `• ${a.name} (${a.roleTitle ?? "—"}): ${a.state}${a.activity ? ` — ${a.activity}` : ""} · tarefas: ${a.tasks.running} rodando, ${a.tasks.pending} na fila, ${a.tasks.completed} concluídas, ${a.tasks.failed} falhas · tokens hoje ${a.usage.usedDay} (${pct(a.usage.dayPercent)}), mês ${a.usage.usedMonth} (${pct(a.usage.monthPercent)})${a.paused ? " · PAUSADO" : ""}`).join("\n");
+            const results = recent.length
+              ? recent.map((t) => `• ${t.finishedAt ? hhmm(t.finishedAt) : "?"} ${t.agent.name} [${t.status}] ${t.prompt.replace(/\s+/g, " ").slice(0, 100)}\n    → ${(t.result ?? t.error ?? "(sem resultado)").replace(/\s+/g, " ").slice(0, 300)}`).join("\n")
+              : `(nenhuma tarefa terminou nas últimas ${hours} h)`;
+            const routs = routines.map((r) => `• ${r.agent.name} — ${r.name} (${describeSchedule(r)}, ${r.enabled ? "ligada" : "desligada"}): ${r.lastRunAt ? `${hhmm(r.lastRunAt)} — ` : ""}${r.lastOutcome ?? "ainda não rodou"}`).join("\n");
+            const sysErrors = errors.length
+              ? errors.map((g) => `• ${g.application} — ${g.count}× · ${g.sample.split("\n")[0].slice(0, 160)}`).join("\n")
+              : `(nenhum erro novo nos logs nas últimas ${hours} h)`;
+            return text(cap(`EQUIPE (${overview.totals.working} trabalhando, ${overview.totals.available} disponíveis, ${overview.totals.waiting} aguardando aprovação, ${overview.totals.errored} com erro) · tokens hoje ${overview.totals.tokensDay}, mês ${overview.totals.tokensMonth}\n\n${agents}\n\nRESULTADOS (${hours} h):\n${results}\n\nROTINAS:\n${routs}\n\nERROS DOS SISTEMAS (${hours} h, mais recentes):\n${sysErrors}`));
+          } catch (e) {
+            return fail(e);
+          }
+        }) as never,
+      ),
+    );
+  }
+  return tools;
+}

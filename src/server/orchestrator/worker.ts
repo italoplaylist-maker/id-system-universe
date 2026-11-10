@@ -7,6 +7,7 @@ import { orchestratorBus } from "./bus";
 import { ExecutorStartError, getExecutor } from "./executor";
 import { prepareForRun } from "./attachments";
 import { buildUniverseMcp, UNIVERSE_AUTO_ALLOWED, UNIVERSE_MERGE_TOOL } from "./git/tools";
+import { UNIVERSE_TEAM_TOOLS } from "./tools-team";
 import { notifyApprovalRequested, notifyTaskFinished } from "./notify";
 import { loadMcpServersForRun } from "./tools-config";
 import { seedDefaultPacks } from "./skill-packs";
@@ -199,7 +200,7 @@ async function runTask(taskId: string): Promise<void> {
     attachments: prepared.attachments,
     attachmentsDir: prepared.dir,
     extraRepos,
-    allowedTools: [...new Set([...agent.allowedTools, ...(universe ? UNIVERSE_AUTO_ALLOWED : []), ...(autoApprove ? [...AUTO_APPROVE_TOOLS, ...(universe ? [UNIVERSE_MERGE_TOOL] : [])] : [])])],
+    allowedTools: [...new Set([...agent.allowedTools, ...(universe ? UNIVERSE_AUTO_ALLOWED : []), ...(universe && agent.team === "CLT" ? UNIVERSE_TEAM_TOOLS : []), ...(autoApprove ? [...AUTO_APPROVE_TOOLS, ...(universe ? [UNIVERSE_MERGE_TOOL] : [])] : [])])],
     disallowedTools: [...new Set([...agent.disallowedTools, ...(autoApprove ? AUTO_APPROVE_DENY : [])])],
     mcpServers,
     resumeSessionId: resume,

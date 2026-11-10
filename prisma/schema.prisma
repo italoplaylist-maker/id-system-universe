@@ -202,6 +202,8 @@ model Application {
   universeEvents UniverseEvent[]
   repositoryLink ResourceRepository?
   deploymentRuns DeploymentRun[]
+  errorGroups    ErrorGroup[]
+  errorScan      ErrorScanState?
 
   @@unique([providerId, externalId])
   @@index([providerId])
@@ -226,6 +228,31 @@ model DeploymentCache {
 
   @@unique([applicationId, externalId])
   @@index([applicationId])
+}
+
+/// Erros vistos nos logs de runtime dos sistemas, agrupados por "impressão digital" (o mesmo erro com horas e números
+/// diferentes é um item só). Alimentado pelo coletor do servidor; lido pelos agentes CLT e pelo painel. Guardado por 30 dias.
+model ErrorGroup {
+  id            String      @id @default(cuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  fingerprint   String
+  /// Última ocorrência (linha + stack trace), com segredos mascarados.
+  sample        String
+  count         Int         @default(1)
+  firstSeenAt   DateTime
+  lastSeenAt    DateTime
+
+  @@unique([applicationId, fingerprint])
+  @@index([lastSeenAt])
+}
+
+/// Última leitura de logs de um sistema: as linhas de erro já contadas, para não contá-las de novo na leitura seguinte.
+model ErrorScanState {
+  applicationId String      @id
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  seen          String[]
+  scannedAt     DateTime
 }
 
 /// Trilha de auditoria administrativa. Nunca guarda segredos.
