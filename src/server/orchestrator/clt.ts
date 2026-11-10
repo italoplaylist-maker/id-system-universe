@@ -114,9 +114,13 @@ export async function reconcileCltScope(): Promise<{ moved: number; authorized: 
 export interface CltAgentOverview extends RoomAgentView {
   usage: { usedDay: number; usedMonth: number; dayPercent: number | null; monthPercent: number | null; level: "ok" | "warn" | "blocked"; reason: string | null };
   tasks: { running: number; pending: number; completed: number; failed: number };
+  /** Quantos repositórios extras (sistemas) este agente enxerga, além da pasta de trabalho da equipe. */
+  repositories: number;
 }
 
 export interface CltOverview {
+  /** Pasta de trabalho compartilhada da equipe (neutra: não é a de nenhum projeto). */
+  workspace: string;
   agents: CltAgentOverview[];
   totals: {
     agents: number;
@@ -138,13 +142,14 @@ export async function cltOverview(now: Date = new Date()): Promise<CltOverview> 
   const team = (await listRoomAgents(now)).filter((a) => a.team === CLT_TEAM_ID);
   const ids = team.map((a) => a.id);
   const w = windowStarts(now);
-  const [counts, day, month] = ids.length
+  const [counts, day, month, repoCounts] = ids.length
     ? await Promise.all([
         prisma.agentTask.groupBy({ by: ["agentId", "status"], where: { agentId: { in: ids } }, _count: { _all: true } }),
         prisma.agentTask.groupBy({ by: ["agentId"], where: { agentId: { in: ids }, finishedAt: { gte: w.day } }, _sum: { inputTokens: true, outputTokens: true, cacheTokens: true } }),
         prisma.agentTask.groupBy({ by: ["agentId"], where: { agentId: { in: ids }, finishedAt: { gte: w.month } }, _sum: { inputTokens: true, outputTokens: true, cacheTokens: true } }),
+        prisma.agentRepository.groupBy({ by: ["agentId"], where: { agentId: { in: ids } }, _count: { _all: true } }),
       ])
-    : [[], [], []];
+    : [[], [], [], []];
   const sum = (r?: { _sum: { inputTokens: number | null; outputTokens: number | null; cacheTokens: number | null } }) => (r ? (r._sum.inputTokens ?? 0) + (r._sum.outputTokens ?? 0) + (r._sum.cacheTokens ?? 0) : 0);
 
   const agents: CltAgentOverview[] = team.map((a) => {
@@ -155,11 +160,13 @@ export async function cltOverview(now: Date = new Date()): Promise<CltOverview> 
     return {
       ...a,
       usage: { usedDay, usedMonth, dayPercent: b.dayPercent, monthPercent: b.monthPercent, level: b.level, reason: b.reason },
+      repositories: repoCounts.find((r) => r.agentId === a.id)?._count._all ?? 0,
       tasks: { running: c([...ACTIVE]), pending: c(["QUEUED"]), completed: c(["COMPLETED"]), failed: c(["FAILED", "INTERRUPTED"]) },
     };
   });
   const inState = (...s: string[]) => agents.filter((a) => s.includes(a.state)).length;
   return {
+    workspace: cltWorkspace(),
     agents,
     totals: {
       agents: agents.length,
