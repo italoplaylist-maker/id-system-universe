@@ -194,7 +194,7 @@ async function runTask(taskId: string): Promise<void> {
     permissionMode: (agent.permissionMode === "plan" ? "plan" : agent.permissionMode === "acceptEdits" || autoApprove ? "acceptEdits" : "default") as "default" | "acceptEdits" | "plan",
     agentName: agent.name,
     specialty: agent.specialty,
-    roleNote: agent.team === "CLT" && agent.slug && cltDef(agent.slug) ? cltRoleNote(cltDef(agent.slug)!) : undefined,
+    roleNote: agent.team === "CLT" ? cltRoleNote({ name: agent.name, roleTitle: agent.roleTitle || cltDef(agent.slug ?? "")?.roleTitle || "Funcionário", description: agent.description || cltDef(agent.slug ?? "")?.description || "" }) : undefined,
     effort: agent.effort,
     attachments: prepared.attachments,
     attachmentsDir: prepared.dir,
