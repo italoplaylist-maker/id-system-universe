@@ -58,7 +58,12 @@ function DeploymentLog({ applicationId, deployment }: { applicationId: string; d
   if (isLoading) return <p className="px-4 py-3 text-xs text-muted">Carregando log do deploy…</p>;
   if (error) return <p className="px-4 py-3 text-xs text-status-error">Não foi possível carregar o log: {error instanceof Error ? error.message : "erro desconhecido"}.</p>;
   if (!data || data.lines.length === 0) {
-    return <p className="px-4 py-3 text-xs text-muted">{data?.source === "none" ? "Este deploy não tem log guardado (o Coolify já o apagou)." : "Ainda sem linhas de log."}</p>;
+    return (
+      <div className="space-y-1 px-4 py-3 text-xs" role="status">
+        <p className="font-medium text-status-warning">Sem linhas de log para este deploy.</p>
+        <p className="text-muted">{data?.note ?? (data?.source === "none" ? "O Coolify já não tem este deploy e nenhum log foi guardado antes." : "O deploy ainda não gerou saída.")}</p>
+      </div>
+    );
   }
 
   return (

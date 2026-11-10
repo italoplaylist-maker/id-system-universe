@@ -106,6 +106,8 @@ export interface DeploymentLogsView {
   status: UniverseDeployment["status"];
   /** "history" = guardado no Universe; "live" = lido agora do Coolify; "none" = sem log. */
   source: "history" | "live" | "none";
+  /** Motivo de não haver linhas (permissão do token, log vazio…); nulo quando há linhas. */
+  note: string | null;
 }
 
 /** Log de um deploy. Enquanto o deploy roda, atualiza a cada 3 s; depois de terminado, não precisa mais. */

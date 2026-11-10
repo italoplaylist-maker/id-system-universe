@@ -50,7 +50,7 @@ export async function saveFinishedDeployment(applicationId: string, provider: De
   if (!isFinalDeployment(deployment.status)) return;
   let lines: LogLine[] | undefined;
   try {
-    lines = await provider.getDeploymentLogs(deployment.externalId);
+    lines = (await provider.getDeploymentLogs(deployment.externalId)).lines;
   } catch (error) {
     logger.warn("deployment_log_fetch_failed", { applicationId, deploymentId: deployment.externalId, error: error instanceof Error ? error.message : String(error) });
   }
@@ -87,20 +87,22 @@ export interface DeploymentLogResult {
   status: UniverseDeployment["status"];
   /** "history" = guardado no Universe; "live" = lido agora do Coolify. */
   source: "history" | "live" | "none";
+  /** Por que não há linhas (ex.: o token do Coolify não tem a permissão de ver logs); nulo quando há linhas. */
+  note: string | null;
 }
 
 /** Log de um deploy: do histórico se já terminou e foi guardado; senão direto do Coolify (e guarda se terminou). */
 export async function getDeploymentLogs(applicationId: string, provider: DeploymentProvider, deploymentExternalId: string): Promise<DeploymentLogResult> {
   const stored = await prisma.deploymentCache.findUnique({ where: { applicationId_externalId: { applicationId, externalId: deploymentExternalId } } });
-  if (stored?.logs && isFinalDeployment(stored.status)) return { lines: unpackLog(stored.logs, levelOf), status: stored.status as UniverseDeployment["status"], source: "history" };
+  if (stored?.logs && isFinalDeployment(stored.status)) return { lines: unpackLog(stored.logs, levelOf), status: stored.status as UniverseDeployment["status"], source: "history", note: null };
   try {
-    const [deployment, lines] = await Promise.all([provider.getDeployment(deploymentExternalId), provider.getDeploymentLogs(deploymentExternalId)]);
-    if (isFinalDeployment(deployment.status)) await snapshotDeployment(applicationId, deployment, lines);
-    return { lines, status: deployment.status, source: "live" };
+    const [deployment, logs] = await Promise.all([provider.getDeployment(deploymentExternalId), provider.getDeploymentLogs(deploymentExternalId)]);
+    if (isFinalDeployment(deployment.status)) await snapshotDeployment(applicationId, deployment, logs.lines);
+    return { lines: logs.lines, status: deployment.status, source: "live", note: logs.note };
   } catch (error) {
     // Coolify já não tem esse deploy (ou está fora do ar): se guardamos algo, mostra; senão, repassa o erro.
-    if (stored?.logs) return { lines: unpackLog(stored.logs, levelOf), status: stored.status as UniverseDeployment["status"], source: "history" };
-    if (stored) return { lines: [], status: stored.status as UniverseDeployment["status"], source: "none" };
+    if (stored?.logs) return { lines: unpackLog(stored.logs, levelOf), status: stored.status as UniverseDeployment["status"], source: "history", note: null };
+    if (stored) return { lines: [], status: stored.status as UniverseDeployment["status"], source: "none", note: "O Coolify já não tem este deploy e nenhum log foi guardado antes." };
     throw error;
   }
 }
