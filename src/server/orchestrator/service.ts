@@ -55,6 +55,9 @@ const profileSchema = z.object({
   disallowedTools: z.array(toolRule).max(60).optional(),
   githubRepositoryId: z.string().max(40).optional().nullable(),
   githubBranch: z.string().trim().max(120).regex(/^[A-Za-z0-9._\/-]*$/, "Branch inválida.").optional().nullable(),
+  /** Cargo e função (instruções) do funcionário — entram no prompt a cada execução. */
+  roleTitle: z.string().trim().max(80).optional().nullable(),
+  description: z.string().trim().max(4000).optional().nullable(),
   dailyTokenLimit: z.number().int().min(1000).max(2_000_000_000).optional().nullable(),
   monthlyTokenLimit: z.number().int().min(1000).max(2_000_000_000).optional().nullable(),
 });
@@ -85,7 +88,7 @@ export async function updateAgent(id: string, input: unknown, actor: Actor) {
   const resetSession = data.cwd !== undefined && data.cwd !== existing.cwd;
   const agent = await prisma.agentProfile.update({
     where: { id },
-    data: { ...data, ...(data.specialty !== undefined ? { specialty: data.specialty || null } : {}), ...(data.model !== undefined ? { model: data.model || null } : {}), ...(data.effort !== undefined ? { effort: data.effort || null } : {}), ...(data.githubRepositoryId !== undefined ? { githubRepositoryId: data.githubRepositoryId || null } : {}), ...(data.githubBranch !== undefined ? { githubBranch: data.githubBranch || null } : {}), ...(resetSession ? { claudeSessionId: null } : {}) },
+    data: { ...data, ...(data.specialty !== undefined ? { specialty: data.specialty || null } : {}), ...(data.roleTitle !== undefined ? { roleTitle: data.roleTitle || null } : {}), ...(data.description !== undefined ? { description: data.description || null } : {}), ...(data.model !== undefined ? { model: data.model || null } : {}), ...(data.effort !== undefined ? { effort: data.effort || null } : {}), ...(data.githubRepositoryId !== undefined ? { githubRepositoryId: data.githubRepositoryId || null } : {}), ...(data.githubBranch !== undefined ? { githubBranch: data.githubBranch || null } : {}), ...(resetSession ? { claudeSessionId: null } : {}) },
   });
   await recordAuditEvent({ userId: actor.userId, action: "AGENT_PROFILE_UPDATED", status: "SUCCESS", entityType: "AgentProfile", entityId: id, ipAddress: actor.ip, userAgent: actor.userAgent });
   orchestratorBus.emit({ type: "agent", agentId: id });

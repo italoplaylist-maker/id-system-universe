@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CLT_DISALLOWED_TOOLS, CLT_TEAM, cltAllowedTools, evaluateBudget, findDuplicate, normalizePrompt, routeTask } from "../src/lib/clt-team";
+import { CLT_DISALLOWED_TOOLS, CLT_RULES, CLT_TEAM, cltAllowedTools, cltRoleNote, evaluateBudget, findDuplicate, normalizePrompt, routeTask } from "../src/lib/clt-team";
 
 test("a equipe tem os 7 cargos, slugs únicos e nenhum modo perigoso", () => {
   assert.equal(CLT_TEAM.length, 7);
@@ -61,4 +61,15 @@ test("orçamento: ok, aviso a 80%, bloqueio a 100% (dia ou mês), sem limite = s
   const none = evaluateBudget({ usedDay: 9e9, usedMonth: 9e9, dailyLimit: null, monthlyLimit: null });
   assert.equal(none.blocked, false);
   assert.equal(none.dayPercent, null);
+});
+
+test("cada funcionário tem função concreta, e a nota do prompt usa a função editada + as regras da equipe", () => {
+  for (const a of CLT_TEAM) {
+    assert.ok(a.description.length > 200, `${a.name}: função curta demais`);
+    assert.match(a.description, /Responsabilidades/, `${a.name}: função sem estrutura`);
+  }
+  const note = cltRoleNote({ name: "ID QA", roleTitle: "Qualidade", description: "Só rode testes." });
+  assert.match(note, /Qualidade/);
+  assert.match(note, /Só rode testes\./);
+  for (const rule of CLT_RULES) assert.ok(note.includes(rule), "regra da equipe ausente do prompt");
 });

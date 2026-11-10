@@ -9,6 +9,7 @@ import { StoragePanel } from "./storage-panel";
 import { RepoConnect } from "./repo-connect";
 import { AttachButton, AttachmentStrip, MicButton, useComposerAttachments, useDictation } from "./composer-attachments";
 import { cn } from "@/lib/cn";
+import { cltDef } from "@/lib/clt-team";
 import {
   useAgentGit,
   useAgentRepos,
@@ -287,7 +288,7 @@ function AgentForm({ initial, onDone }: { initial?: RoomAgentView; onDone: () =>
   const { createAgent, updateAgent } = useOrchestratorMutations();
   const [f, setF] = useState({
     name: initial?.name ?? "", specialty: initial?.specialty ?? "", cwd: initial?.cwd ?? "", model: initial?.model ?? "", permissionMode: initial?.permissionMode ?? "default",
-    autoMerge: (initial?.allowedTools ?? []).includes(MERGE_RULE), effort: initial?.effort ?? "", allowed: (initial?.allowedTools ?? []).filter((t) => t !== MERGE_RULE).join("\n"), disallowed: (initial?.disallowedTools ?? []).join("\n"),
+    roleTitle: initial?.roleTitle ?? "", description: initial?.description ?? "", autoMerge: (initial?.allowedTools ?? []).includes(MERGE_RULE), effort: initial?.effort ?? "", allowed: (initial?.allowedTools ?? []).filter((t) => t !== MERGE_RULE).join("\n"), disallowed: (initial?.disallowedTools ?? []).join("\n"),
   });
   const field = "w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs focus:border-accent focus:outline-none";
   const { data: models } = useAvailableModels(true);
@@ -302,12 +303,38 @@ function AgentForm({ initial, onDone }: { initial?: RoomAgentView; onDone: () =>
       onSubmit={(e) => {
         e.preventDefault();
         const body = { name: f.name, specialty: f.specialty || undefined, cwd: f.cwd, model: f.model || undefined, permissionMode: f.permissionMode, effort: f.effort || null, allowedTools: [...lines(f.allowed), ...(f.autoMerge ? [MERGE_RULE] : [])], disallowedTools: lines(f.disallowed) };
-        if (initial) updateAgent.mutate({ id: initial.id, ...body, specialty: f.specialty, model: f.model }, { onSuccess: onDone, onError: (err) => toast.error(err.message) });
+        if (initial) updateAgent.mutate({ id: initial.id, ...body, specialty: f.specialty, model: f.model, ...(initial.team ? { roleTitle: f.roleTitle, description: f.description } : {}) }, { onSuccess: onDone, onError: (err) => toast.error(err.message) });
         else createAgent.mutate({ ...body, effort: f.effort || undefined }, { onSuccess: onDone, onError: (err) => toast.error(err.message) });
       }}
     >
       <p className="text-xs font-semibold text-foreground">{initial ? `Editar ${initial.name}` : "Novo funcionário"}</p>
       <input className={field} placeholder="Nome (ex.: Backend)" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required />
+      {initial?.team && (
+        <>
+          <input className={field} placeholder="Cargo (ex.: Segurança)" value={f.roleTitle} onChange={(e) => setF({ ...f, roleTitle: e.target.value })} maxLength={80} />
+          <textarea
+            className={`${field} h-40`}
+            placeholder={"Função e instruções deste funcionário (o que ele faz, o que entrega, o que nunca faz). Vai no prompt dele a cada execução."}
+            value={f.description}
+            onChange={(e) => setF({ ...f, description: e.target.value })}
+            maxLength={4000}
+          />
+          {initial.slug && cltDef(initial.slug) && (
+            <Button
+              size="sm"
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                const def = cltDef(initial.slug!)!;
+                setF({ ...f, roleTitle: def.roleTitle, description: def.description });
+              }}
+            >
+              Usar função padrão
+            </Button>
+          )}
+          <p className="text-[11px] text-muted">{f.description.length}/4000 · As regras de segurança da equipe (sem deploy, sem apagar dados, sem mexer em credenciais) continuam valendo, não importa o que estiver aqui.</p>
+        </>
+      )}
       <input className={field} placeholder="Especialidade (opcional)" value={f.specialty} onChange={(e) => setF({ ...f, specialty: e.target.value })} />
       <input className={field} placeholder="Diretório no servidor, ex.: /srv/meu-projeto" value={f.cwd} onChange={(e) => setF({ ...f, cwd: e.target.value })} required />
       <div className="flex gap-2">
