@@ -59,6 +59,11 @@ export async function register() {
   setTimeout(safely("clt_scope", () => reconcileCltScope()), 45_000);
   setInterval(safely("clt_scope", () => reconcileCltScope()), 30 * 60_000);
 
+  // Erros nos logs dos sistemas: a cada 15 min o servidor lê os logs, separa os erros novos e agrupa (sem notificar ninguém).
+  const { runErrorCollectorTick } = await import("@/server/monitoring/error-collector");
+  setInterval(safely("error_collector", () => runErrorCollectorTick()), 15 * 60_000);
+  setTimeout(safely("error_collector", () => runErrorCollectorTick()), 90_000);
+
   // Orquestrador de agentes Claude: despacha a fila e recupera tarefas interrompidas por reinício.
   const { startOrchestratorWorker } = await import("@/server/orchestrator/worker");
   startOrchestratorWorker();

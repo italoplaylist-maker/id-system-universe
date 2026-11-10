@@ -87,3 +87,16 @@ test("escopo da equipe: só sai da pasta de um projeto; pasta escolhida de prop�
   assert.equal(dirs.get("1"), "cerebro-do-brabo");
   assert.deepEqual([dirs.get("2"), dirs.get("3")], ["construsil", "construsil-2"], "nomes iguais ganham sufixo, nunca colidem");
 });
+
+test("o Doctor, o DevOps e o Manager sabem usar as ferramentas de erros/logs/estado (e as rotinas também)", async () => {
+  const { CLT_ROUTINES } = await import("../src/lib/clt-routines");
+  const by = (slug: string) => CLT_TEAM.find((a) => a.slug === slug)!.description;
+  assert.match(by("id-doctor"), /listar_erros/);
+  assert.match(by("id-doctor"), /ler_logs/);
+  assert.match(by("id-devops"), /listar_erros/);
+  assert.match(by("id-manager"), /status_equipe/);
+  const prompt = (slug: string) => CLT_ROUTINES.filter((r) => r.slug === slug).map((r) => r.prompt).join(" ");
+  assert.match(prompt("id-doctor"), /listar_erros/);
+  assert.match(prompt("id-devops"), /listar_erros/);
+  assert.match(prompt("id-manager"), /status_equipe/);
+});

@@ -1,3 +1,4 @@
+import { classifyLogLine as classifyLine } from "@/lib/error-logs";
 import type {
   CoolifyApplicationRaw,
   CoolifyDatabaseRaw,
@@ -112,15 +113,6 @@ export function mapDeploymentLogs(rawLogs: string | null | undefined): LogLine[]
     for (const line of e.output.split("\n")) if (line.length > 0) lines.push({ raw: line, level: classifyLine(line), timestamp });
   }
   return lines;
-}
-
-const ERROR_PATTERN = /\b(error|panic|fatal|exception|fail(ed|ure)?)\b/i;
-const WARN_PATTERN = /\b(warn(ing)?|deprecat\w*)\b/i;
-
-function classifyLine(line: string): LogLine["level"] {
-  if (ERROR_PATTERN.test(line)) return "ERROR";
-  if (WARN_PATTERN.test(line)) return "WARN";
-  return "INFO";
 }
 
 /**
