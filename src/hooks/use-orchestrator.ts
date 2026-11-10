@@ -329,3 +329,15 @@ export function useSystemErrors(hours: number, enabled = true) {
     refetchInterval: 60_000,
   });
 }
+
+export type CltDashboardView = import("@/server/orchestrator/clt-dashboard").CltDashboard;
+
+/** Painel de um agente da equipe CLT (gráficos, tarefas, rotinas; no Manager, a visão da operação). */
+export function useCltDashboard(agentId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: [...KEY, "clt-dashboard", agentId],
+    queryFn: () => apiFetch<CltDashboardView>(`/api/orchestrator/clt/agents/${agentId}/dashboard`),
+    enabled: enabled && Boolean(agentId),
+    refetchInterval: 15_000,
+  });
+}

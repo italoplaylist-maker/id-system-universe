@@ -204,6 +204,7 @@ model Application {
   deploymentRuns DeploymentRun[]
   errorGroups    ErrorGroup[]
   errorScan      ErrorScanState?
+  errorDaily     ErrorDaily[]
 
   @@unique([providerId, externalId])
   @@index([providerId])
@@ -245,6 +246,18 @@ model ErrorGroup {
 
   @@unique([applicationId, fingerprint])
   @@index([lastSeenAt])
+}
+
+/// Erros por dia e por sistema (dia no fuso de São Paulo, "AAAA-MM-DD"): alimenta os gráficos do painel da equipe.
+model ErrorDaily {
+  id            String      @id @default(cuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  day           String
+  count         Int         @default(0)
+
+  @@unique([applicationId, day])
+  @@index([day])
 }
 
 /// Última leitura de logs de um sistema: as linhas de erro já contadas, para não contá-las de novo na leitura seguinte.
@@ -910,6 +923,8 @@ model AgentTask {
   priority        Int                 @default(0)
   /// Rotina agendada que criou a tarefa (nulo = pedido manual).
   routineId       String?
+  /// Tarefa do ID Manager que delegou esta (nulo = não foi delegada).
+  parentTaskId    String?
   nextSeq         Int                 @default(1)
   events          AgentTaskEvent[]
   attachments     AgentAttachment[]
@@ -918,6 +933,7 @@ model AgentTask {
   @@index([agentId, status])
   @@index([status, createdAt])
   @@index([routineId])
+  @@index([parentTaskId])
 }
 
 /// Rotina agendada de um agente (ex.: auditoria de segurança às 03:00). O servidor dispara sozinho, sem navegador aberto.

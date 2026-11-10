@@ -2,13 +2,21 @@ import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { createDeploymentProvider } from "@/server/providers/provider-registry";
 import { redactSecrets } from "@/server/claude/agent-service";
-import { extractErrorEvents } from "@/lib/error-logs";
+import { extractErrorEvents, hashText } from "@/lib/error-logs";
 import { describeSchedule } from "@/lib/clt-routines";
 import { listErrorGroups } from "@/server/monitoring/error-collector";
+import { DELEGATION_PRIORITIES, checkDelegation, resolveAgentRef } from "@/lib/clt-dashboard";
+import { findDuplicate } from "@/lib/clt-team";
+import { agentBudget, windowStarts } from "./budget";
 import { cltOverview } from "./clt";
+import { ACTIVE, submitSystemTask } from "./service";
 
-/** Ferramentas SOMENTE-LEITURA da equipe CLT (liberadas sem pedir aprovação: não alteram nada). */
-export const UNIVERSE_TEAM_TOOLS = ["listar_erros", "ler_logs", "status_equipe"].map((n) => `mcp__universe__${n}`);
+/**
+ * Ferramentas da equipe CLT liberadas sem pedir aprovação. As de leitura não alteram nada; `delegar_tarefa` (só do ID Manager)
+ * apenas ENFILEIRA uma tarefa para um colega — e passa pelas travas de `checkDelegation` (teto por execução e por dia, sem duplicata,
+ * sem agente pausado ou sem orçamento de tokens).
+ */
+export const UNIVERSE_TEAM_TOOLS = ["listar_erros", "ler_logs", "status_equipe", "delegar_tarefa", "resultado_delegacoes"].map((n) => `mcp__universe__${n}`);
 
 const text = (t: string, isError = false) => ({ content: [{ type: "text" as const, text: t }], ...(isError ? { isError: true } : {}) });
 const fail = (e: unknown) => text(e instanceof Error ? e.message : "Falhou.", true);
@@ -22,7 +30,7 @@ type ToolFn = (name: string, description: string, shape: z.ZodRawShape, handler:
  * Erros e logs dos sistemas para os agentes CLT investigarem de verdade (antes eles só viam o que vinha no pedido).
  * Tudo passa por `redactSecrets`; nenhuma ferramenta escreve nada.
  */
-export async function teamTools(tool: ToolFn, agentId: string): Promise<unknown[]> {
+export async function teamTools(tool: ToolFn, agentId: string, taskId: string): Promise<unknown[]> {
   const agent = await prisma.agentProfile.findUnique({ where: { id: agentId }, select: { team: true, slug: true } });
   if (agent?.team !== "CLT") return [];
 
@@ -76,6 +84,53 @@ export async function teamTools(tool: ToolFn, agentId: string): Promise<unknown[
 
   if (agent.slug === "id-manager") {
     tools.push(
+      tool(
+        "delegar_tarefa",
+        "Passa uma tarefa a um especialista da equipe (ID Guardian, ID Doctor, ID QA, ID Optimizer, ID DevOps ou ID Architect). Escreva a instrução completa e autossuficiente: o colega não vê esta conversa. Recusa duplicata, agente pausado e agente sem orçamento de tokens; máximo de 5 por execução. Depois use resultado_delegacoes para ver o que voltou.",
+        {
+          agente: z.string().min(2).max(60).describe("Nome ou slug do especialista (ex.: ID Doctor, id-doctor ou doctor)."),
+          instrucao: z.string().min(15).max(4000).describe("O que fazer, com o contexto necessário e o que entregar."),
+          prioridade: z.enum(["alta", "normal", "baixa"]).optional().describe("Ordem na fila (padrão normal). Alta só para produção fora do ar ou segurança."),
+        },
+        (async (args: { agente: string; instrucao: string; prioridade?: keyof typeof DELEGATION_PRIORITIES }) => {
+          try {
+            const team = await prisma.agentProfile.findMany({ where: { team: "CLT", archivedAt: null, slug: { not: null } }, select: { id: true, name: true, slug: true, paused: true, dailyTokenLimit: true, monthlyTokenLimit: true } });
+            const named = team.map((a) => ({ id: a.id, name: a.name, slug: a.slug as string }));
+            const hit = resolveAgentRef(args.agente, named);
+            if (!hit) return text(`Agente "${args.agente}" não encontrado. Equipe: ${named.map((a) => a.name).join(", ")}.`, true);
+            if ("ambiguous" in hit) return text(`"${args.agente}" combina com mais de um: ${hit.ambiguous.join(", ")}. Use o nome completo.`, true);
+            const target = team.find((a) => a.id === hit.id)!;
+            const prompt = `[Delegada pelo ID Manager] ${args.instrucao.trim()}`;
+            const open = await prisma.agentTask.findMany({ where: { agent: { team: "CLT" }, status: { in: ["QUEUED", ...ACTIVE] } }, select: { prompt: true } });
+            const [thisRun, today, budget] = await Promise.all([
+              prisma.agentTask.count({ where: { parentTaskId: taskId } }),
+              prisma.agentTask.count({ where: { parentTaskId: { not: null }, createdAt: { gte: windowStarts().day } } }),
+              agentBudget(target.id, { dailyTokenLimit: target.dailyTokenLimit, monthlyTokenLimit: target.monthlyTokenLimit }),
+            ]);
+            const verdict = checkDelegation({ selfSlug: "id-manager", target: { slug: target.slug as string, paused: target.paused, archived: false }, duplicateOpen: Boolean(findDuplicate(prompt, open)), delegatedThisRun: thisRun, delegatedToday: today, budgetReason: budget.blocked ? budget.reason : null });
+            if (!verdict.ok) return text(`Não delegada: ${verdict.reason}`, true);
+            const { task, duplicate } = await submitSystemTask({ agentId: target.id, prompt, idempotencyKey: `delegate:${taskId}:${target.id}:${hashText(prompt)}`, priority: DELEGATION_PRIORITIES[args.prioridade ?? "normal"], parentTaskId: taskId });
+            return text(duplicate ? `Esta delegação já tinha sido feita (tarefa ${task.id.slice(-6)}).` : `Delegada a ${target.name} (tarefa ${task.id.slice(-6)}, prioridade ${args.prioridade ?? "normal"}). Restam ${Math.max(0, 5 - thisRun - 1)} delegações nesta execução. Use resultado_delegacoes para acompanhar.`);
+          } catch (e) {
+            return fail(e);
+          }
+        }) as never,
+      ),
+      tool(
+        "resultado_delegacoes",
+        "Mostra as tarefas que o ID Manager delegou (nesta e em execuções anteriores): para quem foi, situação e o resultado. Use para consolidar o que voltou dos especialistas.",
+        { horas: z.number().int().min(1).max(168).optional().describe("Janela em horas (padrão 48).") },
+        (async (args: { horas?: number }) => {
+          try {
+            const hours = args.horas ?? 48;
+            const rows = await prisma.agentTask.findMany({ where: { parentTaskId: { not: null }, createdAt: { gte: new Date(Date.now() - hours * 3600_000) } }, orderBy: { createdAt: "desc" }, take: 15, include: { agent: { select: { name: true } } } });
+            if (rows.length === 0) return text(`Nenhuma tarefa delegada nas últimas ${hours} h.`);
+            return text(cap(rows.map((t) => `• ${hhmm(t.createdAt)} → ${t.agent.name} [${t.status}] ${t.prompt.replace("[Delegada pelo ID Manager] ", "").replace(/\s+/g, " ").slice(0, 120)}\n    → ${t.status === "COMPLETED" ? (t.result ?? "(sem texto)").replace(/\s+/g, " ").slice(0, 500) : t.error ? t.error.slice(0, 200) : "(ainda sem resultado)"}`).join("\n")));
+          } catch (e) {
+            return fail(e);
+          }
+        }) as never,
+      ),
       tool(
         "status_equipe",
         "Estado REAL da equipe AGENTES CLT agora: situação de cada agente, tarefas e tokens (dia/mês contra o limite), os últimos resultados e o que as rotinas fizeram. Use antes de qualquer resumo — nunca invente números.",
