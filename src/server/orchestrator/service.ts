@@ -205,6 +205,32 @@ export async function submitTask(agentId: string, input: unknown, actor: Actor):
   }
 }
 
+/**
+ * Tarefa criada pelo SISTEMA (rotina agendada), sem usuário logado. Idempotente: a mesma `idempotencyKey`
+ * devolve a mesma tarefa — reinício do servidor ou duas réplicas nunca duplicam uma rotina.
+ */
+export async function submitSystemTask(input: { agentId: string; prompt: string; idempotencyKey: string; priority?: number; routineId?: string }): Promise<{ task: TaskView; duplicate: boolean }> {
+  const existing = await prisma.agentTask.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { agent: { select: { name: true } } } });
+  if (existing) return { task: toTaskView(existing), duplicate: true };
+  try {
+    const created = await prisma.agentTask.create({
+      data: { agentId: input.agentId, prompt: input.prompt, idempotencyKey: input.idempotencyKey, createdById: null, priority: input.priority ?? 0, routineId: input.routineId ?? null },
+      include: { agent: { select: { name: true } } },
+    });
+    await appendEvent(created.id, "message_sent", `[Rotina agendada] ${input.prompt}`);
+    await recordAuditEvent({ action: "AGENT_TASK_SUBMITTED", status: "SUCCESS", entityType: "AgentTask", entityId: created.id, metadata: { agentId: input.agentId, routineId: input.routineId, source: "routine" } });
+    orchestratorBus.emit({ type: "task", taskId: created.id, agentId: input.agentId });
+    hookHolder.__isuTaskHook?.();
+    return { task: toTaskView(created), duplicate: false };
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const again = await prisma.agentTask.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { agent: { select: { name: true } } } });
+      if (again) return { task: toTaskView(again), duplicate: true };
+    }
+    throw error;
+  }
+}
+
 export async function listTasks(options: { agentId?: string; scope?: "active" | "history"; limit?: number } = {}): Promise<TaskView[]> {
   const { agentId, scope = "active", limit = 50 } = options;
   const where: Prisma.AgentTaskWhereInput =

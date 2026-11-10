@@ -849,6 +849,7 @@ model AgentProfile {
   tasks              AgentTask[]
   pullRequests       AgentPullRequest[]
   agentRepositories  AgentRepository[]
+  routines           AgentRoutine[]
 
   @@index([archivedAt, position])
 }
@@ -878,6 +879,10 @@ model AgentTask {
   outputTokens    Int?
   cacheTokens     Int?
   cancelRequested Boolean             @default(false)
+  /// Ordem na fila quando vários agentes esperam: 1 alta · 0 normal · -1 baixa.
+  priority        Int                 @default(0)
+  /// Rotina agendada que criou a tarefa (nulo = pedido manual).
+  routineId       String?
   nextSeq         Int                 @default(1)
   events          AgentTaskEvent[]
   attachments     AgentAttachment[]
@@ -885,6 +890,37 @@ model AgentTask {
 
   @@index([agentId, status])
   @@index([status, createdAt])
+  @@index([routineId])
+}
+
+/// Rotina agendada de um agente (ex.: auditoria de segurança às 03:00). O servidor dispara sozinho, sem navegador aberto.
+model AgentRoutine {
+  id          String       @id @default(cuid())
+  agentId     String
+  agent       AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  name        String
+  prompt      String
+  enabled     Boolean      @default(true)
+  /// Dias da semana (0 = domingo … 6 = sábado).
+  days        Int[]
+  /// Horário local (America/Sao_Paulo) "HH:MM".
+  time        String
+  /// 1 alta · 0 normal · -1 baixa (ordem na fila).
+  priority    Int          @default(0)
+  /// always | changed | alert | activity — gatilho determinístico: sem ele o Claude nem é chamado.
+  gate        String       @default("always")
+  /// Último horário tratado ("AAAA-MM-DD HH:MM"): impede disparar duas vezes o mesmo horário.
+  lastSlot    String?
+  lastRunAt   DateTime?
+  lastTaskId  String?
+  /// "iniciada" ou "pulada: motivo".
+  lastOutcome String?
+  /// Marca do gatilho "changed" na última execução (último deploy com sucesso visto).
+  lastGateKey String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([agentId])
 }
 
 model AgentTaskEvent {

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@/server/db/client";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { recordAuditEvent } from "@/server/audit/audit-log";
+import { CLT_ROUTINES } from "@/lib/clt-routines";
 import { CLT_DISALLOWED_TOOLS, CLT_TEAM, CLT_TEAM_ID, cltAllowedTools, evaluateBudget, findDuplicate, routeTask, type RouteDecision } from "@/lib/clt-team";
 import { orchestratorBus } from "./bus";
 import { agentBudget, windowStarts } from "./budget";
@@ -49,6 +50,14 @@ export async function ensureCltTeam(actor: Actor): Promise<{ created: string[]; 
       },
     });
     created.push(def.slug);
+  }
+  // Rotinas padrão (idempotente por agente + nome): equipe nova já nasce com seus horários.
+  const agents = await prisma.agentProfile.findMany({ where: { slug: { in: CLT_TEAM.map((a) => a.slug) }, archivedAt: null }, select: { id: true, slug: true } });
+  for (const r of CLT_ROUTINES) {
+    const agent = agents.find((a) => a.slug === r.slug);
+    if (!agent) continue;
+    const has = await prisma.agentRoutine.findFirst({ where: { agentId: agent.id, name: r.name }, select: { id: true } });
+    if (!has) await prisma.agentRoutine.create({ data: { agentId: agent.id, name: r.name, prompt: r.prompt, days: r.days, time: r.time, priority: r.priority, gate: r.gate } });
   }
   await recordAuditEvent({ userId: actor.userId, action: "AGENT_PROFILE_CREATED", status: "SUCCESS", entityType: "AgentProfile", entityId: "clt-team", metadata: { team: CLT_TEAM_ID, created }, ipAddress: actor.ip, userAgent: actor.userAgent });
   orchestratorBus.emit({ type: "agent", agentId: "clt-team" });

@@ -287,3 +287,32 @@ export function useClaudeUsage(enabled = true) {
     refetchInterval: 90_000,
   });
 }
+
+export type RoutineView = import("@/server/orchestrator/routines").RoutineView;
+
+/** Rotinas agendadas dos agentes (horário, dias, prioridade, gatilho e última execução). */
+export function useRoutines(enabled = true) {
+  return useQuery({
+    queryKey: [...KEY, "routines"],
+    queryFn: () => apiFetch<{ routines: RoutineView[] }>("/api/orchestrator/routines"),
+    select: (d) => d.routines,
+    enabled,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useRoutineMutations() {
+  const queryClient = useQueryClient();
+  const refresh = () => queryClient.invalidateQueries({ queryKey: KEY });
+  return {
+    update: useMutation({
+      mutationFn: ({ id, ...patch }: { id: string } & Partial<Pick<RoutineView, "name" | "prompt" | "enabled" | "days" | "time" | "priority" | "gate" | "agentId">>) =>
+        apiFetch<{ routine: RoutineView }>(`/api/orchestrator/routines/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+      onSettled: refresh,
+    }),
+    run: useMutation({
+      mutationFn: (id: string) => apiFetch<{ started: boolean; outcome: string; taskId?: string }>(`/api/orchestrator/routines/${id}/run`, { method: "POST" }),
+      onSettled: refresh,
+    }),
+  };
+}

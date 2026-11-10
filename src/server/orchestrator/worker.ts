@@ -83,7 +83,7 @@ async function dispatchPass(): Promise<number> {
   for (;;) {
     const [activeTasks, queued] = await Promise.all([
       prisma.agentTask.findMany({ where: { status: { in: [...ACTIVE] } }, select: { agentId: true } }),
-      prisma.agentTask.findMany({ where: { status: "QUEUED", agent: { archivedAt: null, paused: false } }, orderBy: { createdAt: "asc" }, take: 50, select: { id: true, agentId: true } }),
+      prisma.agentTask.findMany({ where: { status: "QUEUED", agent: { archivedAt: null, paused: false } }, orderBy: [{ priority: "desc" }, { createdAt: "asc" }], take: 50, select: { id: true, agentId: true } }),
     ]);
     if (activeTasks.length >= maxConcurrent) break;
     const busy = new Set(activeTasks.map((t) => t.agentId));

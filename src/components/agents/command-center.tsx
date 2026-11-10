@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ToolsPanel } from "./tools-panel";
 import { StoragePanel } from "./storage-panel";
+import { RoutinesPanel } from "./routines-panel";
 import { RepoConnect } from "./repo-connect";
 import { AttachButton, AttachmentStrip, MicButton, useComposerAttachments, useDictation } from "./composer-attachments";
 import { cn } from "@/lib/cn";
@@ -386,6 +387,7 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
   const att = useComposerAttachments();
   const [editing, setEditing] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [routinesOpen, setRoutinesOpen] = useState(false);
   // Uma chave por COMANDO: se o envio falhar e o usuário clicar de novo, é a mesma chave (nunca duplica).
   const keyRef = useRef<{ text: string; key: string } | null>(null);
 
@@ -440,7 +442,7 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
     "--background": "#262624", "--surface": "#30302e", "--surface-raised": "#1f1e1d", "--border": "#3d3d3a",
     "--foreground": "#faf9f5", "--muted": "#a6a39a", "--accent": "#d97757",
   } as CSSProperties;
-  const composer = canWrite && selected && !toolsOpen && !openTask && (
+  const composer = canWrite && selected && !toolsOpen && !routinesOpen && !openTask && (
     <div className="shrink-0 px-4 pb-4 pt-2">
       <div className="mx-auto w-full max-w-3xl">
         {last && (
@@ -543,8 +545,8 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
           {agents?.map((a) => (
             <button
               key={a.id}
-              onClick={() => { setAgentId(a.id); setOpenTask(null); setToolsOpen(false); setCreating(false); setEditing(false); }}
-              className={cn("flex w-full flex-col rounded-lg px-3 py-2 text-left", a.id === selected?.id && !toolsOpen ? "bg-surface text-foreground" : "text-muted hover:bg-surface/60 hover:text-foreground")}
+              onClick={() => { setAgentId(a.id); setOpenTask(null); setToolsOpen(false); setRoutinesOpen(false); setCreating(false); setEditing(false); }}
+              className={cn("flex w-full flex-col rounded-lg px-3 py-2 text-left", a.id === selected?.id && !toolsOpen && !routinesOpen ? "bg-surface text-foreground" : "text-muted hover:bg-surface/60 hover:text-foreground")}
             >
               <span className="truncate text-sm font-medium">{a.name}</span>
               <span className={cn("truncate text-[11px]", ROOM_LABEL[a.state].cls)}>{ROOM_LABEL[a.state].label}{a.queued > 0 ? ` · ${a.queued} na fila` : ""}</span>
@@ -552,7 +554,8 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
           ))}
         </nav>
         <div className="space-y-1 border-t border-border p-2">
-          <button onClick={() => { setToolsOpen(true); setCreating(false); setEditing(false); }} className={cn("w-full rounded-lg px-3 py-2 text-left text-sm", toolsOpen ? "bg-surface text-foreground" : "text-muted hover:bg-surface/60 hover:text-foreground")}>Ferramentas</button>
+          <button onClick={() => { setRoutinesOpen(true); setToolsOpen(false); setCreating(false); setEditing(false); }} className={cn("w-full rounded-lg px-3 py-2 text-left text-sm", routinesOpen ? "bg-surface text-foreground" : "text-muted hover:bg-surface/60 hover:text-foreground")}>Rotinas agendadas</button>
+          <button onClick={() => { setToolsOpen(true); setRoutinesOpen(false); setCreating(false); setEditing(false); }} className={cn("w-full rounded-lg px-3 py-2 text-left text-sm", toolsOpen ? "bg-surface text-foreground" : "text-muted hover:bg-surface/60 hover:text-foreground")}>Ferramentas</button>
         </div>
         <ClaudeLogin canWrite={canWrite} />
       </aside>
@@ -584,9 +587,10 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
         {/* No celular a barra lateral some: agentes viram abas no topo */}
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border px-4 py-2 md:hidden">
           {agents?.map((a) => (
-            <button key={a.id} onClick={() => { setAgentId(a.id); setOpenTask(null); setToolsOpen(false); }} className={cn(btn, "border", a.id === selected?.id ? "border-accent bg-accent/15 text-foreground" : "border-border text-muted")}>{a.name}</button>
+            <button key={a.id} onClick={() => { setAgentId(a.id); setOpenTask(null); setToolsOpen(false); setRoutinesOpen(false); }} className={cn(btn, "border", a.id === selected?.id ? "border-accent bg-accent/15 text-foreground" : "border-border text-muted")}>{a.name}</button>
           ))}
-          <button onClick={() => setToolsOpen(true)} className={cn(btn, "ml-auto border border-border text-muted")}>Ferramentas</button>
+          <button onClick={() => { setRoutinesOpen(true); setToolsOpen(false); }} className={cn(btn, "ml-auto border border-border text-muted")}>Rotinas</button>
+          <button onClick={() => { setToolsOpen(true); setRoutinesOpen(false); }} className={cn(btn, "border border-border text-muted")}>Ferramentas</button>
           {canWrite && <button onClick={() => setCreating((v) => !v)} className={cn(btn, "border border-dashed border-border text-muted")}><Plus className="inline h-3 w-3" /> Novo</button>}
         </div>
 
@@ -600,7 +604,9 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
               <p className="p-6 text-sm text-muted">Nenhum funcionário ainda. {canWrite ? "Crie o primeiro em “Novo agente”: informe o diretório do projeto no servidor do Universe." : "Peça a um administrador para criar."}</p>
             )}
 
-            {toolsOpen ? (
+            {routinesOpen ? (
+              <RoutinesPanel canWrite={canWrite} onBack={() => setRoutinesOpen(false)} />
+            ) : toolsOpen ? (
               <ToolsPanel canWrite={canWrite} onBack={() => setToolsOpen(false)} />
             ) : selected && openTask ? (
               <TaskDetail taskId={openTask} canWrite={canWrite} onBack={() => setOpenTask(null)} />
