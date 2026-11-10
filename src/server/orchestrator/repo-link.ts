@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db/client";
+import { slugDir } from "@/lib/repo-dir";
 
 /**
  * Qual repositório GitHub é o deste agente. Ordem: (1) o ligado DIRETO ao agente (escolhido na própria central);
@@ -23,8 +24,6 @@ export async function pickAgentRepository(agent: { githubRepositoryId: string | 
 /** Onde ficam os repositórios EXTRAS de um agente: ao lado da cópia principal, nunca dentro dela (o Git da principal não os enxerga). */
 export const extrasRoot = (agentCwd: string) => `${agentCwd}.extras`;
 export const extraDir = (agentCwd: string, dir: string) => `${extrasRoot(agentCwd)}/${dir}`;
-
-const slugDir = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "repo";
 
 export async function listExtraRepos(agentId: string) {
   return prisma.agentRepository.findMany({ where: { agentId }, include: { githubRepository: { include: { installation: true } } }, orderBy: { createdAt: "asc" } });

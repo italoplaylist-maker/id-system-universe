@@ -6,6 +6,17 @@
 
 export const CLT_TEAM_ID = "CLT";
 
+/**
+ * A equipe CLT atende TODOS os sistemas, então não pode morar na pasta de um projeto. Só corrige o caso errado:
+ * o agente CLT está na mesma pasta de trabalho de um agente de projeto (era assim quando a equipe herdava a do primeiro agente).
+ * Quem foi apontado de propósito para outra pasta nunca é mexido.
+ */
+export function cltNeedsNeutralCwd(cltCwd: string, projectAgentCwds: Iterable<string>, neutralCwd: string): boolean {
+  if (cltCwd === neutralCwd) return false;
+  for (const c of projectAgentCwds) if (c === cltCwd) return true;
+  return false;
+}
+
 export type CltSlug = "id-manager" | "id-guardian" | "id-doctor" | "id-qa" | "id-optimizer" | "id-devops" | "id-architect";
 
 export interface CltAgentDef {
