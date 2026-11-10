@@ -19,8 +19,6 @@ export interface ActorVisual {
   gait: number;
   walk: number;
   sit: number;
-  hipSeat: number;
-  backLean: number;
   work: number;
 }
 
@@ -81,7 +79,7 @@ const ease = (t: number) => t * t * (3 - 2 * t);
 const damp = (cur: number, target: number, lambda: number, dt: number) => cur + (target - cur) * (1 - Math.exp(-lambda * dt));
 
 function newVisual(): ActorVisual {
-  return { gait: 0, walk: 0, sit: 1, hipSeat: 0.5, backLean: 0.1, work: 0 };
+  return { gait: 0, walk: 0, sit: 1, work: 0 };
 }
 
 export class LifeSim {
@@ -696,8 +694,6 @@ export class LifeSim {
     a.from = { x: a.x, z: a.z };
     a.to = a.desk.seat;
     a.toYaw = a.desk.yaw;
-    a.vis.hipSeat = 0.5;
-    a.vis.backLean = 0.1;
   }
 
   private stepSitting(a: Actor, dt: number) {
