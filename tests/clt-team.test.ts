@@ -73,3 +73,17 @@ test("cada funcionário tem função concreta, e a nota do prompt usa a função
   assert.match(note, /Só rode testes\./);
   for (const rule of CLT_RULES) assert.ok(note.includes(rule), "regra da equipe ausente do prompt");
 });
+
+test("escopo da equipe: só sai da pasta de um projeto; pasta escolhida de propósito não é mexida", async () => {
+  const { cltNeedsNeutralCwd } = await import("../src/lib/clt-team");
+  const { assignRepoDirs, slugDir } = await import("../src/lib/repo-dir");
+  const neutral = "/srv/workspaces/clt";
+  const projects = ["/srv/workspaces/construsil", "/srv/workspaces/padaria"];
+  assert.equal(cltNeedsNeutralCwd("/srv/workspaces/construsil", projects, neutral), true, "presa a um projeto: corrige");
+  assert.equal(cltNeedsNeutralCwd(neutral, projects, neutral), false, "já está na neutra");
+  assert.equal(cltNeedsNeutralCwd("/srv/outra-pasta-minha", projects, neutral), false, "escolha manual: não mexe");
+  assert.equal(slugDir("ID System Universe!"), "id-system-universe");
+  const dirs = assignRepoDirs([{ id: "1", name: "Cérebro do Brabo" }, { id: "2", name: "construsil" }, { id: "3", name: "Construsil" }]);
+  assert.equal(dirs.get("1"), "cerebro-do-brabo");
+  assert.deepEqual([dirs.get("2"), dirs.get("3")], ["construsil", "construsil-2"], "nomes iguais ganham sufixo, nunca colidem");
+});

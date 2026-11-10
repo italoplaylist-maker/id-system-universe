@@ -54,6 +54,11 @@ export async function register() {
   setInterval(safely("routines_tick", () => runRoutinesTick()), 60_000);
   setTimeout(safely("routines_tick", () => runRoutinesTick()), 30_000);
 
+  // Escopo da equipe CLT: pasta neutra + todos os repositórios do GitHub App (corrige quem herdou a pasta de um projeto).
+  const { reconcileCltScope } = await import("@/server/orchestrator/clt");
+  setTimeout(safely("clt_scope", () => reconcileCltScope()), 45_000);
+  setInterval(safely("clt_scope", () => reconcileCltScope()), 30 * 60_000);
+
   // Orquestrador de agentes Claude: despacha a fila e recupera tarefas interrompidas por reinício.
   const { startOrchestratorWorker } = await import("@/server/orchestrator/worker");
   startOrchestratorWorker();
