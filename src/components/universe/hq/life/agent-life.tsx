@@ -44,25 +44,13 @@ export function useLifeSim(world: PlanWorldInput | null, agents: LifeAgent[], re
   return sim;
 }
 
-/** Distância da câmera (m) a partir da qual o personagem detalhado (~65 meshes) troca por um boneco simples (2 meshes). Histerese evita piscar. */
-const LOD_FAR = 30;
-const LOD_NEAR = 26;
-const FAR_BODY = new THREE.CapsuleGeometry(0.2, 0.85, 3, 8);
-const FAR_HEAD = new THREE.SphereGeometry(0.13, 10, 8);
-const FAR_SKIN = new THREE.MeshStandardMaterial({ color: "#d9b89a", roughness: 0.8 });
-
-/** Um personagem: mesma `EmployeeModel` das mesas, agora movido pela simulação (posição, rumo e pose). */
+/** Um personagem: mesma `EmployeeModel` (minifigura) das mesas, agora movido pela simulação (posição, rumo e pose). */
 const ActorAvatar = memo(function ActorAvatar({ sim, agent, reduced }: { sim: LifeSim; agent: LifeAgent; reduced: boolean }) {
   const group = useRef<THREE.Group>(null);
   const seed = useMemo(() => hashSeed(agent.id), [agent.id]);
   const visual = sim.visualFor(agent.id);
   const shown = useRef(false);
-  const rig = useRef<THREE.Group>(null);
-  const far = useRef<THREE.Group>(null);
-  const isFar = useRef(false);
-  const bodyMat = useMemo(() => new THREE.MeshStandardMaterial({ color: agent.accent, roughness: 0.7 }), [agent.accent]);
-  useEffect(() => () => bodyMat.dispose(), [bodyMat]);
-  useFrame(({ camera }, delta) => {
+  useFrame((_, delta) => {
     const g = group.current;
     const actor = sim.actors.get(agent.id);
     if (!g) return;
@@ -77,24 +65,10 @@ const ActorAvatar = memo(function ActorAvatar({ sim, agent, reduced }: { sim: Li
     shown.current = true;
     g.position.set(actor.x, y, actor.z);
     g.rotation.y = actor.yaw;
-    // LOD: longe da câmera só um boneco simples é desenhado (o rig detalhado fica invisível: zero draw calls).
-    if (far.current && isFar.current) far.current.scale.y = actor.phase === "desk" ? 0.7 : 1;
-    const d = camera.position.distanceTo(g.position);
-    if (isFar.current ? d < LOD_NEAR : d > LOD_FAR) {
-      isFar.current = !isFar.current;
-      if (rig.current) rig.current.visible = !isFar.current;
-      if (far.current) far.current.visible = isFar.current;
-    }
   });
   return (
     <group ref={group} visible={false}>
-      <group ref={rig}>
-        <EmployeeModel accent={agent.accent} pose="standing" seed={seed} reduced={reduced} visual={visual} />
-      </group>
-      <group ref={far} visible={false}>
-        <mesh geometry={FAR_BODY} material={bodyMat} position={[0, 0.85, 0]} />
-        <mesh geometry={FAR_HEAD} material={FAR_SKIN} position={[0, 1.6, 0]} />
-      </group>
+      <EmployeeModel accent={agent.accent} pose="standing" seed={seed} reduced={reduced} visual={visual} />
     </group>
   );
 });
