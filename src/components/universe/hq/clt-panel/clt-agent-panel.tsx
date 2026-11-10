@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertCircle, AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronRight, Clock, Loader2, PauseCircle, Play, Send, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -290,6 +290,18 @@ export function CltAgentPanel({ agentId, canWrite, onClose, onSelectAgent, onOpe
   const [tab, setTab] = useState<Tab | null>(null);
   const current: Tab = tab && tabs.some((t) => t.id === tab) ? tab : tabs[0].id;
   const a = d?.agent;
+
+  // Esc fecha o painel (menos quando o foco está num campo de texto)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   return (
     <aside className="absolute inset-y-0 right-0 z-20 flex w-full max-w-4xl flex-col border-l border-border bg-background/97 shadow-2xl backdrop-blur" aria-label={a ? `Painel de ${a.name}` : "Painel do agente"}>
