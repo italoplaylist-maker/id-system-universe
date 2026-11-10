@@ -1,7 +1,7 @@
 import type { UniverseProject, UniverseProviderSummary } from "@/types/domain";
 
 /** One big open-plan office: a row-and-column grid of project desks facing the Central de Comando
-    screen on the back wall, a lounge/reception strip along the (open) front, server racks beside
+    screen on the back wall, a reception/waiting strip along the (open) front, server racks beside
     the screen. Pure data — everything that positions something in the office reads from here. */
 export const OFFICE = {
   WALL_HEIGHT: 3.9,
@@ -10,7 +10,7 @@ export const OFFICE = {
   SLOT_Z: 2.6,
   /** Free space between the back wall and the first desk row (the screen + walkway). */
   BACK_ZONE: 3.0,
-  /** Free space between the last desk row and the open front edge (lounge + reception). */
+  /** Free space between the last desk row and the open front edge (waiting area + reception). */
   FRONT_ZONE: 2.3,
   SIDE_MARGIN: 0.95,
   MIN_WIDTH: 12.5,

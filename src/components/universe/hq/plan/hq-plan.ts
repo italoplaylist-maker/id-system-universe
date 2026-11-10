@@ -7,7 +7,7 @@ import { inOrect, inPolygon, toWorld, type Rigid, type Vec2 } from "../life/geom
  *
  *   • Ala Tecnológica (projetos, racks, NOC)  — sudoeste, +0,20 m
  *   • Ala Operacional (agentes)               — norte-noroeste, 0,00 m
- *   • Ala Social (ID Lounge)                  — leste, −0,20 m
+ *   • Ala AGENTES CLT (equipe de agentes de IA) — leste, +0,10 m
  *
  * Cada ala mantém seu sistema de coordenadas próprio (x = largura, z = profundidade, frente em +z)
  * e é posta no mundo por uma transformação rígida (rotação em Y como no three.js + translação).
@@ -22,13 +22,13 @@ export const HQ = {
   DOOR_DIST: 7.6,
   DOOR_WIDTH: 2.4,
   RAMP_LENGTH: 2.8,
-  LEVEL: { tech: 0.5, agents: 0.3, lounge: 0.1 },
-  WALL: { tech: 4.5, agents: 3.9, lounge: 3.5 },
+  LEVEL: { tech: 0.5, agents: 0.3, clt: 0.1 },
+  WALL: { tech: 4.5, agents: 3.9, clt: 3.9 },
   /** Direção de cada ala (radianos, ângulo no plano x–z a partir de +x, z para a frente/câmera). Múltiplos de 22,5° = meio de uma face do átrio. */
-  HEADING: { tech: (135 * Math.PI) / 180, agents: (247.5 * Math.PI) / 180, lounge: 0 },
+  HEADING: { tech: (135 * Math.PI) / 180, agents: (247.5 * Math.PI) / 180, clt: 0 },
 } as const;
 
-export type WingId = "tech" | "agents" | "lounge";
+export type WingId = "tech" | "agents" | "clt";
 
 export interface WingPlacement extends Rigid {
   id: WingId;
@@ -71,7 +71,7 @@ export interface HqPlanInput {
   /** `doorZ`: z LOCAL da porta na parede leste da ala (padrão 0 = meio da parede). */
   tech: { width: number; depth: number; doorZ?: number };
   agents: { width: number; depth: number; doorZ?: number };
-  lounge: { width: number; depth: number; doorZ?: number };
+  clt: { width: number; depth: number; doorZ?: number };
 }
 
 function atriumPolygon(radius: number, sides = 16): Vec2[] {
@@ -83,7 +83,7 @@ function atriumPolygon(radius: number, sides = 16): Vec2[] {
   });
 }
 
-function placeRotated(id: "tech" | "agents", size: { width: number; depth: number; doorZ?: number }): WingPlacement {
+function placeRotated(id: WingId, size: { width: number; depth: number; doorZ?: number }): WingPlacement {
   const phi = HQ.HEADING[id];
   const u = { x: Math.cos(phi), z: Math.sin(phi) };
   const rot = Math.PI - phi; // o +x local aponta para o átrio (−u)
@@ -108,21 +108,8 @@ function placeRotated(id: "tech" | "agents", size: { width: number; depth: numbe
 export function computeHqPlan(input: HqPlanInput): HqPlan {
   const tech = placeRotated("tech", input.tech);
   const agents = placeRotated("agents", input.agents);
-  const lounge: WingPlacement = {
-    id: "lounge",
-    // A sala do lounge usa coordenadas absolutas (x0 = parede oeste, z centrado em 0); a transformação é a identidade.
-    x: 0,
-    z: 0,
-    rot: 0,
-    width: input.lounge.width,
-    depth: input.lounge.depth,
-    level: HQ.LEVEL.lounge,
-    wallHeight: HQ.WALL.lounge,
-    u: { x: 1, z: 0 },
-    door: { x: HQ.DOOR_DIST, z: 0 },
-    doorZ: 0,
-  };
-  const wings = { tech, agents, lounge };
+  const clt = placeRotated("clt", input.clt);
+  const wings = { tech, agents, clt };
   const polygon = atriumPolygon(HQ.ATRIUM_RADIUS);
 
   const ramps: Ramp[] = (Object.values(wings) as WingPlacement[]).map((w) => {
@@ -134,8 +121,8 @@ export function computeHqPlan(input: HqPlanInput): HqPlan {
         cz: w.door.z + w.u.z * (HQ.RAMP_LENGTH / 2),
         hx: HQ.RAMP_LENGTH / 2,
         hz,
-        // o eixo local x do retângulo corre ao longo de u: para as alas giradas rot = θ (x local = −u), para o lounge 0
-        rot: w.id === "lounge" ? 0 : w.rot,
+        // o eixo local x do retângulo corre ao longo de u: rot = θ (x local = −u)
+        rot: w.rot,
       },
       origin: w.door,
       dir: w.u,
@@ -145,10 +132,7 @@ export function computeHqPlan(input: HqPlanInput): HqPlan {
     };
   });
 
-  const wingRect = (w: WingPlacement) =>
-    w.id === "lounge"
-      ? { cx: HQ.DOOR_DIST + w.width / 2, cz: 0, hx: w.width / 2, hz: w.depth / 2, rot: 0 }
-      : { cx: w.x, cz: w.z, hx: w.width / 2, hz: w.depth / 2, rot: w.rot };
+  const wingRect = (w: WingPlacement) => wingWorldRect(w);
 
   const levelAt = (x: number, z: number): number => {
     for (const r of ramps) {
@@ -180,7 +164,7 @@ export function computeHqPlan(input: HqPlanInput): HqPlan {
     }
   }
   const pad = 1.4;
-  const maxWall = Math.max(HQ.WALL.tech, HQ.WALL.agents, HQ.WALL.lounge);
+  const maxWall = Math.max(HQ.WALL.tech, HQ.WALL.agents, HQ.WALL.clt);
   const bounds = { minX: minX - pad, maxX: maxX + pad, minZ: minZ - pad, maxZ: maxZ + pad + 0.6, minY: -0.5, maxY: maxWall + 0.8 };
   const cx = (bounds.minX + bounds.maxX) / 2;
   const cz = (bounds.minZ + bounds.maxZ) / 2;
@@ -198,7 +182,5 @@ export function computeHqPlan(input: HqPlanInput): HqPlan {
 
 /** Retângulo (em mundo) da ala — usado para pintar o chão caminhável e para localizar quem está em qual ala. */
 export function wingWorldRect(w: WingPlacement) {
-  return w.id === "lounge"
-    ? { cx: HQ.DOOR_DIST + w.width / 2, cz: 0, hx: w.width / 2, hz: w.depth / 2, rot: 0 }
-    : { cx: w.x, cz: w.z, hx: w.width / 2, hz: w.depth / 2, rot: w.rot };
+  return { cx: w.x, cz: w.z, hx: w.width / 2, hz: w.depth / 2, rot: w.rot };
 }

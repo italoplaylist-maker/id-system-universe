@@ -6,7 +6,7 @@ import * as THREE from "three";
 import { EmployeeModel } from "../assets/employee-model";
 import { hashSeed } from "../assets/office-decor";
 import { LifeSim, type SyncInput } from "./sim";
-import { buildLifeWorld, buildLifeWorldFromPlan, type LifeWorldInput, type PlanWorldInput } from "./world";
+import { buildLifeWorldFromPlan, type PlanWorldInput } from "./world";
 
 /** Só para validação visual em máquinas lentas (build de teste); em produção é sempre 1. */
 const LIFE_SPEED = Number(process.env.NEXT_PUBLIC_LIFE_SPEED ?? 1) || 1;
@@ -21,10 +21,10 @@ export interface LifeAgent {
 }
 
 /** Uma só instância da simulação por cena; a UI só enxerga o objeto estável. */
-export function useLifeSim(world: LifeWorldInput | PlanWorldInput | null, agents: LifeAgent[], ready = true): LifeSim {
+export function useLifeSim(world: PlanWorldInput | null, agents: LifeAgent[], ready = true): LifeSim {
   const [sim] = useState(() => new LifeSim(Date.now() % 100000));
 
-  const built = useMemo(() => (world ? ('plan' in world ? buildLifeWorldFromPlan(world) : buildLifeWorld(world)) : null), [world]);
+  const built = useMemo(() => (world ? buildLifeWorldFromPlan(world) : null), [world]);
   const syncKey = agents.map((a) => `${a.id}:${a.mustWork ? 1 : 0}${a.working ? 1 : 0}`).join("|");
 
   useEffect(() => {
@@ -32,7 +32,7 @@ export function useLifeSim(world: LifeWorldInput | PlanWorldInput | null, agents
     if (!built || !ready) return;
     sim.setWorld(built);
     const inputs: SyncInput[] = agents.map((a) => ({ id: a.id, seed: hashSeed(a.id), mustWork: a.mustWork, working: a.working }));
-    // O primeiro retrato já posiciona cada um onde o estado real manda: ociosos no lounge, trabalhando na mesa.
+    // O primeiro retrato já posiciona cada um onde o estado real manda: ociosos passeando no átrio, trabalhando na mesa.
     sim.sync(inputs, { instant: !sim.initialized });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `syncKey` resume `agents`
   }, [sim, built, syncKey, ready]);
@@ -78,7 +78,7 @@ const ActorAvatar = memo(function ActorAvatar({ sim, agent, reduced }: { sim: Li
     g.position.set(actor.x, y, actor.z);
     g.rotation.y = actor.yaw;
     // LOD: longe da câmera só um boneco simples é desenhado (o rig detalhado fica invisível: zero draw calls).
-    if (far.current && isFar.current) far.current.scale.y = actor.phase === "seated" || actor.phase === "desk" ? 0.7 : 1;
+    if (far.current && isFar.current) far.current.scale.y = actor.phase === "desk" ? 0.7 : 1;
     const d = camera.position.distanceTo(g.position);
     if (isFar.current ? d < LOD_NEAR : d > LOD_FAR) {
       isFar.current = !isFar.current;

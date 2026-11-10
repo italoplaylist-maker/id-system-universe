@@ -434,7 +434,7 @@ export function OfficeShell({ layout, nocEnabled = false, westWall = "windows", 
         />
         {doorSide === "east" && <PartitionDoor x={-doorAt} width={HQ.DOOR_WIDTH} />}
       </group>
-      {/* west wall as glass + door (lounge: the atrium is on its west side) */}
+      {/* west wall as glass + door (the atrium side of a wing) */}
       {doorSide === "west" && (
         <group position={[-width / 2, 0, 0]} rotation={[0, -Math.PI / 2, 0]}>
           <GlassWall length={depth} height={H} mullions={Math.max(4, Math.round(depth / 2.4))} gap={{ center: doorAt, width: HQ.DOOR_WIDTH }} />

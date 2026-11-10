@@ -6,15 +6,12 @@ import { Html } from "@react-three/drei";
 import { OfficeShell } from "./office-shell";
 import { AgentDesk } from "./agent-desk";
 import { AgentsBoard, type AgentsBoardStats } from "./agents-board";
-import { LoungeRoom } from "./lounge-furniture";
 import { TallPlant } from "./office-props";
 import { RoundedBox } from "@react-three/drei";
 import { MergeStatic } from "../render/merge-static";
-import type { AgentPodLayout, OfficeLayout } from "./office-layout";
+import type { AgentPodLayout } from "./office-layout";
 import { toWorld } from "../life/geometry";
 import type { HqPlan } from "../plan/hq-plan";
-import type { LoungeLayout } from "../life/lounge-layout";
-import { useLife } from "../life/life-context";
 import { useCameraStore } from "@/store/camera-store";
 import type { AgentSessionView } from "@/server/claude/agent-service";
 
@@ -27,12 +24,8 @@ export interface AgentEntry {
 interface AgentsWingProps {
   plan: HqPlan;
   agentsLayout: AgentPodLayout;
-  loungeShellLayout: OfficeLayout;
-  lounge: LoungeLayout;
   entries: AgentEntry[];
   stats: AgentsBoardStats;
-  /** Quantos estão livres para o lounge agora (agentes ociosos + projetos sem trabalho). */
-  resting: number;
   selectedAgentId: string | null;
   onSelectAgent: (id: string) => void;
   reducedGraphics: boolean;
@@ -52,7 +45,7 @@ const pill = (hot: boolean): React.CSSProperties => ({
 });
 
 /** Sala de projeto: caixa de vidro (aberta no teto) com mesa de reunião, cadeiras e um painel — encostada na parede de fundo. */
-function ProjectRoom({ x, z, w, d }: { x: number; z: number; w: number; d: number }) {
+export function ProjectRoom({ x, z, w, d }: { x: number; z: number; w: number; d: number }) {
   const H = 2.5;
   const glass = <meshPhysicalMaterial color="#cfe3ff" transparent opacity={0.16} roughness={0.04} clearcoat={1} envMapIntensity={1.4} depthWrite={false} side={THREE.DoubleSide} />;
   const steel = <meshStandardMaterial color="#8d95a3" metalness={0.9} roughness={0.3} />;
@@ -150,20 +143,16 @@ function PodDecor({ x, z, yaw }: { x: number; z: number; yaw: number }) {
 }
 
 /**
- * Ala Operacional (agentes) e Ala Social (lounge). Os personagens são os MESMOS da sala de trabalho: a
- * simulação visual decide se ficam na mesa ou na convivência a partir do estado real — e nunca escreve de volta.
+ * Ala Operacional (agentes). Os personagens são os MESMOS da sala de trabalho: a simulação visual decide se
+ * ficam na mesa ou passeiam pelo átrio a partir do estado real — e nunca escreve de volta.
  */
-export function AgentsWing({ plan, agentsLayout, loungeShellLayout, lounge, entries, stats, resting, selectedAgentId, onSelectAgent, reducedGraphics }: AgentsWingProps) {
+export function AgentsWing({ plan, agentsLayout, entries, stats, selectedAgentId, onSelectAgent, reducedGraphics }: AgentsWingProps) {
   const focusProject = useCameraStore((s) => s.focusProject);
   const focusId = useCameraStore((s) => s.focusId);
   const cameraMode = useCameraStore((s) => s.mode);
   const ag = plan.wings.agents;
-  const lw = plan.wings.lounge;
 
-  const sim = useLife() ?? undefined;
   const byId = useMemo(() => new Map(entries.map((e) => [e.session.id, e])), [entries]);
-  const f = lounge.furniture;
-  const loungeCenterX = lounge.x0 + lounge.width / 2;
 
   return (
     <>
@@ -206,14 +195,6 @@ export function AgentsWing({ plan, agentsLayout, loungeShellLayout, lounge, entr
         );
       })}
 
-      {/* Ala Social — nível −0,20 m, parede oeste com a porta do átrio */}
-      <group position={[0, lw.level, 0]}>
-        <group position={[loungeCenterX, 0, 0]}>
-          <OfficeShell layout={loungeShellLayout} westWall="none" doorSide="west" doorZ={0} screenPanel={false} wallHeight={lw.wallHeight} tower={{ side: 1, extra: 1.4 }} />
-        </group>
-        <LoungeRoom layout={lounge} life={sim} />
-      </group>
-
       {/* navegação: portas e áreas */}
       <Html position={[ag.door.x, 3.2, ag.door.z]} center zIndexRange={[20, 0]}>
         <button
@@ -224,23 +205,6 @@ export function AgentsWing({ plan, agentsLayout, loungeShellLayout, lounge, entr
           Ala Operacional · {stats.approvals > 0 ? `${stats.approvals} aguardando aprovação` : stats.working > 0 ? `${stats.working} trabalhando` : `${stats.active} ativo${stats.active === 1 ? "" : "s"}`}
         </button>
       </Html>
-      <Html position={[lw.door.x, 3.2, lw.door.z]} center zIndexRange={[20, 0]}>
-        <button type="button" onClick={() => focusProject("lounge", [loungeCenterX, 1.0 + lw.level, 0], loungeShellLayout.radius * 0.64, "Ala Social")} style={pill(false)}>
-          ID Lounge · {resting} descansando
-        </button>
-      </Html>
-      {cameraMode !== "overview" &&
-        [
-          { id: "lounge-pool", label: "Sinuca", p: [f.pool.x, f.pool.z] as const, r: 3.8 },
-          { id: "lounge-bar", label: "Bar", p: [f.bar.x - 3.2, f.bar.z] as const, r: 3.8 },
-          { id: "lounge-sofas", label: "Sofás", p: [f.rug.x, f.rug.z] as const, r: 5.4 },
-        ].map((h) => (
-          <Html key={h.id} position={[h.p[0], 2.5 + lw.level, h.p[1]]} center zIndexRange={[20, 0]}>
-            <button type="button" onClick={() => focusProject(h.id, [h.p[0], 1.0 + lw.level, h.p[1]], h.r, h.label)} style={{ ...pill(false), opacity: focusId === h.id ? 0.5 : 0.95 }}>
-              {h.label}
-            </button>
-          </Html>
-        ))}
     </>
   );
 }

@@ -18,8 +18,8 @@ interface EmployeeModelProps {
   /** Skips secondary motion (breathing, sway) — Reduced Graphics. */
   reduced?: boolean;
   /**
-   * Quando presente, a pose vem da simulação da vida dos agentes (andar, sentar, beber, sinuca,
-   * conversar) e substitui `pose`/`activity`. O objeto é mutado pela simulação a cada frame.
+   * Quando presente, a pose vem da simulação da vida dos agentes (andar, sentar e
+   * trabalhar) e substitui `pose`/`activity`. O objeto é mutado pela simulação a cada frame.
    */
   visual?: ActorVisual;
 }
@@ -63,13 +63,8 @@ function solveArm(shoulderY: number, shoulderZ: number, targetY: number, targetZ
 const FOOT_FLOOR = 0.07;
 const lerp = THREE.MathUtils.lerp;
 
-/** Pose assentos: onde ficam os pés e as mãos de quem está sentado em cada tipo de móvel. */
-const SEAT_POSE = {
-  desk: { footY: FOOT_FLOOR, footZ: 0.42, handY: 0.64, handZ: 0.3 },
-  sofa: { footY: FOOT_FLOOR, footZ: 0.5, handY: 0.6, handZ: 0.28 },
-  armchair: { footY: FOOT_FLOOR, footZ: 0.46, handY: 0.58, handZ: 0.26 },
-  stool: { footY: 0.3, footZ: 0.3, handY: 1.07, handZ: 0.55 },
-} as const;
+/** Pose sentada na mesa: onde ficam os pés e as mãos. */
+const DESK_POSE = { footY: FOOT_FLOOR, footZ: 0.42, handY: 0.64, handZ: 0.3 } as const;
 
 function Hair({ style, color }: { style: HairStyle; color: string }) {
   const r = D.HEAD_R;
@@ -130,12 +125,9 @@ export function EmployeeModel({ accent = "#38bdf8", pose = "standing", activity 
   const rightThigh = useRef<THREE.Group>(null);
   const leftKnee = useRef<THREE.Group>(null);
   const rightKnee = useRef<THREE.Group>(null);
-  const glassRef = useRef<THREE.Group>(null);
-  const cueRef = useRef<THREE.Group>(null);
   // Props simples (mesas dos projetos) viram um "visual" estático; a vida dos agentes passa o seu próprio.
   const legacy = useRef<ActorVisual>({
-    gait: 0, walk: 0, sit: pose === "seated" ? 1 : 0, seatKind: "desk", hipSeat: 0.5, backLean: 0, work: activity === "working" ? 1 : 0,
-    talk: 0, drink: 0, pool: 0, stroke: 0, glass: false, cue: false, lookYaw: 0,
+    gait: 0, walk: 0, sit: pose === "seated" ? 1 : 0, hipSeat: 0.5, backLean: 0.1, work: activity === "working" ? 1 : 0,
   });
 
   const look = useMemo(() => {
@@ -167,30 +159,28 @@ export function EmployeeModel({ accent = "#38bdf8", pose = "standing", activity 
     const sit = v.sit;
     const w = v.work;
     const walk = v.walk * (1 - sit);
-    const seat = SEAT_POSE[v.seatKind];
+    const seat = DESK_POSE;
 
     // ---- quadril: altura de pé (com balanço de caminhada) → altura sentado --------------------------
-    const pool = v.pool;
-    const standHip = D.HIP_STAND - 0.02 * walk - 0.05 * pool + (reduced ? 0 : Math.cos(v.gait * 2) * 0.016 * walk);
+    const standHip = D.HIP_STAND - 0.02 * walk + (reduced ? 0 : Math.cos(v.gait * 2) * 0.016 * walk);
     const hipY = lerp(standHip, v.hipSeat, sit);
     if (hipRef.current) hipRef.current.position.y = hipY;
 
     // ---- tronco -----------------------------------------------------------------------------------
     const breathe = reduced ? 0 : Math.sin(t * 1.6) * 0.004;
-    const seatedLean = v.seatKind === "desk" ? lerp(0.03, 0.16, w) : v.backLean;
-    const lean = lerp(0.01 + 0.07 * walk, seatedLean, sit) + pool * 0.8 + breathe;
+    const seatedLean = lerp(0.03, 0.16, w);
+    const lean = lerp(0.01 + 0.07 * walk, seatedLean, sit) + breathe;
     if (spineRef.current) {
       spineRef.current.rotation.x = lean;
       spineRef.current.rotation.y = reduced ? 0 : Math.sin(v.gait) * 0.12 * walk;
     }
     if (headRef.current) {
-      const glance = reduced ? 0 : Math.sin(t * 0.37) * 0.05 * (1 - w) * (1 - v.talk);
-      const nod = reduced ? 0 : Math.sin(t * 3.6) * 0.05 * v.talk;
-      headRef.current.rotation.x = lerp(0.02, v.seatKind === "desk" ? lerp(0.02, 0.2, w) : 0.0, sit) - lean * 0.55 + nod + pool * 0.45;
-      headRef.current.rotation.y = glance + v.lookYaw;
+      const glance = reduced ? 0 : Math.sin(t * 0.37) * 0.05 * (1 - w);
+      headRef.current.rotation.x = lerp(0.02, lerp(0.02, 0.2, w), sit) - lean * 0.55;
+      headRef.current.rotation.y = glance;
     }
 
-    // ---- pernas por IK: passada, sentar, postura de sinuca ------------------------------------------
+    // ---- pernas por IK: passada e sentar ------------------------------------------
     for (let side = 0; side < 2; side += 1) {
       const thigh = (side === 0 ? leftThigh : rightThigh).current;
       const knee = (side === 0 ? leftKnee : rightKnee).current;
@@ -198,10 +188,8 @@ export function EmployeeModel({ accent = "#38bdf8", pose = "standing", activity 
       const off = side === 0 ? 0 : Math.PI;
       const swing = Math.sin(v.gait + off);
       const lift = Math.max(0, Math.cos(v.gait + off));
-      let footZ = lerp(swing * 0.3 * walk, seat.footZ, sit);
+      const footZ = lerp(swing * 0.3 * walk, seat.footZ, sit);
       const footY = lerp(FOOT_FLOOR + lift * 0.11 * walk, seat.footY, sit);
-      // sinuca: afastamento de pernas (uma à frente, outra atrás)
-      footZ += pool * (side === 0 ? 0.3 : -0.18);
       // sentado, a perna não balança: os joelhos ficam ligeiramente abertos
       const legs = solveLeg(D.THIGH, D.SHIN, hipY, footY, footZ);
       thigh.rotation.x = legs.thigh;
@@ -212,7 +200,6 @@ export function EmployeeModel({ accent = "#38bdf8", pose = "standing", activity 
     // ---- braços por IK ----------------------------------------------------------------------------
     const shoulderY = hipY + 0.46 * Math.cos(lean);
     const shoulderZ = 0.46 * Math.sin(lean);
-    const gesture = v.talk;
     for (let side = 0; side < 2; side += 1) {
       const arm = (side === 0 ? leftArm : rightArm).current;
       const elbow = (side === 0 ? leftElbow : rightElbow).current;
@@ -225,54 +212,15 @@ export function EmployeeModel({ accent = "#38bdf8", pose = "standing", activity 
       let targetZ = 0.07 + Math.sin(v.gait + off) * 0.2 * walk;
       let spread = 0.06;
 
-      // sentado: mãos no colo / teclado / balcão
+      // sentado: mãos no teclado (digitando) ou no colo
       if (sit > 0.001) {
-        let seatedY: number;
-        let seatedZ: number;
-        if (v.seatKind === "desk") {
-          const keyboardY = 0.79 + (reduced ? 0 : Math.sin(t * 15 + side * 2.1) * 0.006 * w);
-          const mouseMix = side === 1 && !reduced ? THREE.MathUtils.smoothstep(Math.sin(t * 0.45), 0.3, 0.8) : 0;
-          seatedY = lerp(seat.handY, keyboardY, w);
-          seatedZ = lerp(seat.handZ, 0.56 + mouseMix * 0.04 + (reduced ? 0 : Math.sin(t * 11 + side) * 0.008 * w), w);
-        } else if (v.seatKind === "stool") {
-          seatedY = seat.handY;
-          seatedZ = seat.handZ - (side === 0 ? 0.04 : 0);
-        } else {
-          seatedY = hipY + 0.1;
-          seatedZ = seat.handZ + (reduced ? 0 : Math.sin(t * 0.8 + side) * 0.02);
-        }
+        const keyboardY = 0.79 + (reduced ? 0 : Math.sin(t * 15 + side * 2.1) * 0.006 * w);
+        const mouseMix = side === 1 && !reduced ? THREE.MathUtils.smoothstep(Math.sin(t * 0.45), 0.3, 0.8) : 0;
+        const seatedY = lerp(seat.handY, keyboardY, w);
+        const seatedZ = lerp(seat.handZ, 0.56 + mouseMix * 0.04 + (reduced ? 0 : Math.sin(t * 11 + side) * 0.008 * w), w);
         targetY = lerp(targetY, seatedY, sit);
         targetZ = lerp(targetZ, seatedZ, sit);
         spread = lerp(spread, 0.1, sit);
-      }
-
-      // conversa em pé: a mão direita gesticula, a esquerda acompanha de leve
-      if (gesture > 0.001) {
-        const g = gesture * (side === 1 ? 1 : 0.35);
-        targetY = lerp(targetY, hipY + 0.2 + (reduced ? 0 : Math.sin(t * 3.1 + side) * 0.06), g);
-        targetZ = lerp(targetZ, 0.3 + (reduced ? 0 : Math.sin(t * 2.3 + side * 1.7) * 0.08), g);
-      }
-
-      // sinuca: esquerda faz a "ponte" sobre o pano, direita empunha o taco
-      if (pool > 0.001) {
-        if (side === 0) {
-          targetY = lerp(targetY, 0.88, pool);
-          targetZ = lerp(targetZ, 0.78, pool);
-        } else {
-          targetY = lerp(targetY, 0.98, pool);
-          targetZ = lerp(targetZ, 0.18 + v.stroke * 0.3, pool);
-        }
-        spread = lerp(spread, side === 0 ? 0.12 : 0.02, pool);
-      } else if (v.cue && side === 1) {
-        // espera a vez com o taco apoiado no chão
-        targetY = hipY + 0.02;
-        targetZ = 0.2;
-      }
-
-      // beber: a mão direita leva o copo à boca
-      if (v.drink > 0.001 && side === 1) {
-        targetY = lerp(targetY, shoulderY + 0.12, v.drink);
-        targetZ = lerp(targetZ, shoulderZ + 0.18, v.drink);
       }
 
       const solved = solveArm(shoulderY, shoulderZ, targetY, targetZ);
@@ -281,17 +229,6 @@ export function EmployeeModel({ accent = "#38bdf8", pose = "standing", activity 
       elbow.rotation.x = solved.elbow;
     }
 
-    // ---- objetos nas mãos ---------------------------------------------------------------------------
-    if (glassRef.current) glassRef.current.visible = v.drink > 0.04;
-    if (cueRef.current) {
-      cueRef.current.visible = v.cue;
-      if (v.cue) {
-        // inclinação absoluta desejada do taco: ~na vertical (apoiado) → quase horizontal (jogando)
-        const desired = lerp(1.42, 0.1, pool);
-        const forearmAbs = (rightArm.current?.rotation.x ?? 0) + lean + (rightElbow.current?.rotation.x ?? 0);
-        cueRef.current.rotation.x = desired - forearmAbs;
-      }
-    }
   });
 
   const sleeve = look.outfit === "hoodie" || look.outfit === "blazer" ? look.shirt : look.shirt;
@@ -396,42 +333,12 @@ export function EmployeeModel({ accent = "#38bdf8", pose = "standing", activity 
                   <sphereGeometry args={[0.038, 12, 10]} />
                   <meshStandardMaterial color={look.skin} roughness={0.6} />
                 </mesh>
-                {side === 1 && (
-                  <>
-                    {/* copo na mão direita (só aparece ao beber) */}
-                    <group ref={glassRef} position={[0, -D.FOREARM - 0.06, 0.035]} visible={false}>
-                      <mesh position={[0, 0.045, 0]} castShadow>
-                        <cylinderGeometry args={[0.032, 0.026, 0.1, 14]} />
-                        <meshStandardMaterial color="#cfe8ff" transparent opacity={0.55} roughness={0.08} metalness={0.1} />
-                      </mesh>
-                      <mesh position={[0, 0.03, 0]}>
-                        <cylinderGeometry args={[0.027, 0.022, 0.05, 14]} />
-                        <meshStandardMaterial color="#e8a33d" roughness={0.3} />
-                      </mesh>
-                    </group>
-                    {/* taco de sinuca */}
-                    <group ref={cueRef} position={[0, -D.FOREARM - 0.03, 0.02]} visible={false}>
-                      <mesh position={[0, 0, 0.2]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-                        <cylinderGeometry args={[0.009, 0.015, 1.45, 10]} />
-                        <meshStandardMaterial color="#c8a06a" roughness={0.5} />
-                      </mesh>
-                      <mesh position={[0, 0, 0.93]} rotation={[Math.PI / 2, 0, 0]}>
-                        <cylinderGeometry args={[0.0095, 0.0095, 0.03, 10]} />
-                        <meshStandardMaterial color="#3b82c4" roughness={0.7} />
-                      </mesh>
-                      <mesh position={[0, 0, -0.45]} rotation={[Math.PI / 2, 0, 0]}>
-                        <cylinderGeometry args={[0.016, 0.016, 0.3, 10]} />
-                        <meshStandardMaterial color="#1b1b1f" roughness={0.6} />
-                      </mesh>
-                    </group>
-                  </>
-                )}
               </group>
             </group>
           ))}
         </group>
 
-        {/* legs: hip → knee → shoe, driven by IK every frame (stride, sitting, pool stance). */}
+        {/* legs: hip → knee → shoe, driven by IK every frame (stride, sitting). */}
         {[-1, 1].map((sign) => (
           <group key={sign} ref={sign === -1 ? leftThigh : rightThigh} position={[sign * 0.09, 0, 0]}>
             <mesh position={[0, -D.THIGH / 2, 0]} castShadow>

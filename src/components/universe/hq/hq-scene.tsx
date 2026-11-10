@@ -7,19 +7,20 @@ import { QUALITY_PROFILES, type GraphicsQuality } from "./render/quality";
 import { StudioEnvironment } from "./render/studio-environment";
 import * as THREE from "three";
 import { computeAgentPods, computeOfficeLayout } from "./office/office-layout";
-import { computeHqPlan, HQ } from "./plan/hq-plan";
+import { computeHqPlan } from "./plan/hq-plan";
 import { Atrium, Ramp } from "./office/atrium";
-import { atriumObstacles } from "./plan/atrium-layout";
+import { ATRIUM_WANDER, atriumObstacles } from "./plan/atrium-layout";
+import { CLT_ROOM, computeCltLayout, CLT_MAX_STATIONS } from "./plan/clt-layout";
 import { toWorld } from "./life/geometry";
 import { useHqViews } from "@/store/hq-views-store";
 import { OfficeShell, partitionDoorZ } from "./office/office-shell";
 import { agentTitle } from "./office/agent-desk";
 import { AgentsWing } from "./office/agents-wing";
+import { CltWing } from "./office/clt-wing";
 import { LifeLayer } from "./office/life-layer";
 import { agentIsTyping, agentNeedsDesk } from "./life/policy";
 import type { LifeAgent } from "./life/agent-life";
 import type { PlanWorldInput } from "./life/world";
-import { computeLoungeLayout, LOUNGE_MIN_DEPTH, LOUNGE_WIDTH } from "./life/lounge-layout";
 import { useAgentSessions } from "@/hooks/use-agents";
 import { agentAccent, orderAgentSessions } from "@/lib/agent-order";
 import { roomAgentToSession, useClaudeUsage, useRoomAgents } from "@/hooks/use-orchestrator";
@@ -136,6 +137,16 @@ export function HqScene({
     [observedSessions, roomAgents],
   );
   const agentsEnabled = agentSessions !== undefined;
+  // Equipe AGENTES CLT (sala própria): agentes reais do orquestrador, na ordem de cadastro (o ID Manager é o primeiro).
+  const cltEntries = useMemo(
+    () =>
+      (roomAgents ?? [])
+        .filter((a) => a.team === "CLT")
+        .slice(0, CLT_MAX_STATIONS)
+        .map(roomAgentToSession)
+        .map((session) => ({ session, name: session.profile?.title ?? "Agente", accent: agentAccent(session.id, AGENT_ACCENTS) })),
+    [roomAgents],
+  );
 
   const agentEntries = useMemo(
     () => {
@@ -151,24 +162,25 @@ export function HqScene({
     [agentSessions],
   );
   const agentLayoutKey = agentEntries.map((e) => `${e.session.id}:${e.name}:${e.accent}`).join("|");
-  // Planta em Y: três alas (tecnológica, operacional, social) ligadas por um átrio central. Cada ala é uma sala com o
+  // Planta em Y: três alas (tecnológica, operacional, AGENTES CLT) ligadas por um átrio central. Cada ala é uma sala com o
   // seu próprio sistema de coordenadas; `plan` as posiciona, gira e põe em níveis diferentes.
-  const { layout, agentsLayout, loungeLayout, loungeShellLayout, plan } = useMemo(() => {
+  const cltCount = cltEntries.length;
+  const { layout, agentsLayout, cltLayout, cltShellLayout, plan } = useMemo(() => {
     const agentInputs = agentEntries.map((e) => ({ id: e.session.id, name: e.name, accent: e.accent }));
     const main = computeOfficeLayout(activeProjects, enabledProviders);
     const agents = computeAgentPods(agentInputs);
-    const lounge = computeLoungeLayout(HQ.DOOR_DIST, LOUNGE_MIN_DEPTH, 0);
-    const loungeShell = computeOfficeLayout([], [], { minWidth: LOUNGE_WIDTH, minDepth: LOUNGE_MIN_DEPTH });
+    const cltRoom = computeCltLayout(cltCount);
+    const cltShell = computeOfficeLayout([], [], { minWidth: CLT_ROOM.width, minDepth: CLT_ROOM.depth });
     const hq = computeHqPlan({
       tech: { width: main.width, depth: main.depth, doorZ: partitionDoorZ(main.depth) },
       agents: { width: agents.width, depth: agents.depth, doorZ: agents.aisleZ },
-      lounge: { width: LOUNGE_WIDTH, depth: LOUNGE_MIN_DEPTH },
+      clt: { width: CLT_ROOM.width, depth: CLT_ROOM.depth, doorZ: cltRoom.doorZ },
     });
-    return { layout: main, agentsLayout: agents, loungeLayout: lounge, loungeShellLayout: loungeShell, plan: hq };
+    return { layout: main, agentsLayout: agents, cltLayout: cltRoom, cltShellLayout: cltShell, plan: hq };
     // As alas só dependem de QUEM são os agentes (ids/nomes), não do que eles estão fazendo agora:
     // o estado muda a cada poucos segundos e não pode reconstruir layout nem malha de navegação.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjects, enabledProviders, agentLayoutKey]);
+  }, [activeProjects, enabledProviders, agentLayoutKey, cltCount]);
 
   // O "mundo" que a câmera, o céu, a sombra e a luz enxergam: a planta inteira.
   const world = useMemo(() => ({ width: plan.bounds.maxX - plan.bounds.minX, depth: plan.bounds.maxZ - plan.bounds.minZ, center: plan.center, radius: plan.radius, bounds: plan.bounds }), [plan]);
@@ -217,10 +229,12 @@ export function HqScene({
         ...[-1, 1].map((sd) => ({ kind: "circle" as const, cx: sd * (agentsLayout.width / 2 - 0.9), cz: -agentsLayout.depth / 2 + 0.9, r: 0.38, label: "plant" })),
         ...agentsLayout.rooms.map((r) => ({ kind: "rect" as const, minX: r.x - r.w / 2, maxX: r.x + r.w / 2, minZ: r.z - r.d / 2, maxZ: r.z + r.d / 2, label: "project-room" })),
       ],
-      lounge: loungeLayout,
+      cltDesks: cltLayout.stations.map((st, i) => ({ id: cltEntries[i]?.session.id ?? `clt-vaga-${i}`, x: st.x, z: st.z, yaw: st.yaw })).filter((d) => !d.id.startsWith("clt-vaga-")),
+      cltObstacles: cltLayout.obstacles,
+      wander: ATRIUM_WANDER,
       atriumObstacles: atriumObstacles(),
     };
-  }, [plan, layout, agentsLayout, loungeLayout, resourcesByProject, agentsEnabled]);
+  }, [plan, layout, agentsLayout, cltLayout, cltEntries, resourcesByProject, agentsEnabled]);
   const lifeAgents: LifeAgent[] = useMemo(
     () => [
       // Funcionários dos projetos: trabalhando (deploy/operação) ou com erro ficam na mesa; sem trabalho circulam; tudo parado = ausente.
@@ -230,11 +244,10 @@ export function HqScene({
         return [{ id: slot.projectId, accent: slot.accent, mustWork: state === "WORKING" || state === "ERROR", working: state === "WORKING" }];
       }),
       // Agentes do Claude: pelo estado real da sessão.
-      ...agentEntries.map((e) => ({ id: e.session.id, accent: e.accent, mustWork: agentNeedsDesk(e.session.state), working: e.session.profile ? e.session.profile.roomState === "RUNNING" : agentIsTyping(e.session.state) })),
+      ...[...agentEntries, ...cltEntries].map((e) => ({ id: e.session.id, accent: e.accent, mustWork: agentNeedsDesk(e.session.state), working: e.session.profile ? e.session.profile.roomState === "RUNNING" : agentIsTyping(e.session.state) })),
     ],
-    [layout.desks, deskStates, agentEntries],
+    [layout.desks, deskStates, agentEntries, cltEntries],
   );
-  const restingCount = lifeAgents.filter((a) => !a.mustWork).length;
 
   const canSeeBilling = sessionUser ? canUser(sessionUser, "billing:view") : false;
   const { data: billingCounts } = useBillingCounts(canSeeBilling);
@@ -260,7 +273,7 @@ export function HqScene({
     [applications, activeProjects, layout.desks, deskStates, canSeeBilling, billingCounts, canSeeClaude, claudeError, claudeUsage],
   );
 
-  // Com agentes + lounge, os personagens são movidos pela simulação; sem isso, as mesas funcionam como antes.
+  // Com agentes, os personagens são movidos pela simulação; sem isso, as mesas funcionam como antes.
   const withLife = (children: React.ReactNode) =>
     lifeWorld ? (
       <LifeLayer world={lifeWorld} agents={lifeAgents} reduced={reducedGraphics} ready={dataReady}>
@@ -273,12 +286,12 @@ export function HqScene({
   const setViews = useHqViews((st) => st.setViews);
   useEffect(() => {
     const ag = plan.wings.agents;
-    const lw = plan.wings.lounge;
+    const clt = plan.wings.clt;
     const t = plan.wings.tech;
     setViews([
       { id: "core", label: "Núcleo", center: [0, plan.atrium.level + 1.2, 0], radius: 5.5 },
       { id: "ops", label: "Operacional", center: [ag.x, ag.level + 1.0, ag.z], radius: Math.max(ag.width, ag.depth) * 0.5 },
-      { id: "social", label: "Social", center: [HQ.DOOR_DIST + lw.width / 2, lw.level + 1.0, 0], radius: Math.max(lw.width, lw.depth) * 0.5 },
+      { id: "clt", label: "AGENTES CLT", center: [clt.x, clt.level + 1.0, clt.z], radius: Math.max(clt.width, clt.depth) * 0.5 },
       { id: "tech", label: "Tecnológica", center: [t.x, t.level + 1.0, t.z], radius: Math.max(t.width, t.depth) * 0.5 },
     ]);
   }, [plan, setViews]);
@@ -328,10 +341,8 @@ export function HqScene({
       <directionalLight position={[centerX - 8, Math.max(9, world.bounds.maxY + 4), centerZ + 6]} intensity={0.9} color="#ffd9a8" />
       {/* poucas luzes quentes de preenchimento — uma por ala, nunca uma por mesa */}
       {quality === "high" && Object.values(plan.wings).map((w) => {
-        const cx = w.id === "lounge" ? HQ.DOOR_DIST + w.width / 2 : w.x;
-        const cz = w.id === "lounge" ? 0 : w.z;
         const reach = Math.max(w.width, w.depth) * 0.75;
-        return <pointLight key={w.id} position={[cx, w.level + 3.4, cz]} intensity={w.id === "lounge" ? 2.0 : 1.7} color={w.id === "tech" ? "#dfe9ff" : "#ffe2b8"} distance={reach} decay={1.6} />;
+        return <pointLight key={w.id} position={[w.x, w.level + 3.4, w.z]} intensity={1.7} color={w.id === "tech" ? "#dfe9ff" : "#ffe2b8"} distance={reach} decay={1.6} />;
       })}
 
       {/* Double-click empty floor = "look here" (Focus modes only; Overview is a locked maquette). */}
@@ -417,14 +428,23 @@ export function HqScene({
             })}
 
             {agentsEnabled && (
+              <CltWing
+                plan={plan}
+                shellLayout={cltShellLayout}
+                layout={cltLayout}
+                entries={cltEntries}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={onSelectAgent}
+                reducedGraphics={reducedGraphics}
+              />
+            )}
+
+            {agentsEnabled && (
               <AgentsWing
                 plan={plan}
                 agentsLayout={agentsLayout}
-                loungeShellLayout={loungeShellLayout}
-                lounge={loungeLayout}
                 entries={agentEntries}
                 stats={agentStats}
-                resting={restingCount}
                 selectedAgentId={selectedAgentId}
                 onSelectAgent={onSelectAgent}
                 reducedGraphics={reducedGraphics}

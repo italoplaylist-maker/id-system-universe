@@ -3,15 +3,14 @@ import assert from "node:assert/strict";
 import { computeHqPlan, HQ, wingWorldRect } from "../src/components/universe/hq/plan/hq-plan";
 import { inOrect, toWorld } from "../src/components/universe/hq/life/geometry";
 
-const plan = computeHqPlan({ tech: { width: 12.5, depth: 10.5 }, agents: { width: 11, depth: 14 }, lounge: { width: 16, depth: 14.4 } });
+const plan = computeHqPlan({ tech: { width: 12.5, depth: 10.5 }, agents: { width: 11, depth: 14 }, clt: { width: 18, depth: 15 } });
 
 test("a porta de cada ala fica na parede voltada para o átrio (+x local)", () => {
-  for (const id of ["tech", "agents"] as const) {
+  for (const id of ["tech", "agents", "clt"] as const) {
     const w = plan.wings[id];
     const p = toWorld(w, { x: w.width / 2, z: 0 });
     assert.ok(Math.hypot(p.x - w.door.x, p.z - w.door.z) < 1e-6, `${id}: porta local ≠ porta no mundo`);
   }
-  assert.equal(plan.wings.lounge.door.x, HQ.DOOR_DIST);
 });
 
 test("alas têm direções distintas e não se sobrepõem", () => {
@@ -28,10 +27,10 @@ test("alas têm direções distintas e não se sobrepõem", () => {
 
 test("níveis: átrio +0,40, alas nos seus níveis, rampa interpola na porta", () => {
   assert.equal(plan.levelAt(0, 0), HQ.ATRIUM_LEVEL);
-  const lounge = plan.wings.lounge;
-  assert.equal(plan.levelAt(HQ.DOOR_DIST + 10, 3), lounge.level);
-  const mid = plan.levelAt(HQ.DOOR_DIST + HQ.RAMP_LENGTH / 2, 0);
-  assert.ok(mid < HQ.ATRIUM_LEVEL && mid > lounge.level, `rampa no meio deveria estar entre os níveis, veio ${mid}`);
+  const clt = plan.wings.clt;
+  assert.equal(plan.levelAt(clt.x, clt.z), clt.level);
+  const mid = plan.levelAt(clt.door.x + clt.u.x * (HQ.RAMP_LENGTH / 2), clt.door.z + clt.u.z * (HQ.RAMP_LENGTH / 2));
+  assert.ok(mid < HQ.ATRIUM_LEVEL && mid > clt.level, `rampa no meio deveria estar entre os níveis, veio ${mid}`);
   const a = plan.wings.agents;
   assert.equal(plan.levelAt(a.x, a.z), HQ.LEVEL.agents);
   const t = plan.wings.tech;

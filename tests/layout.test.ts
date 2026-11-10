@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { agentAccent, orderAgentSessions } from "@/lib/agent-order";
 import { computeOfficeLayout, OFFICE } from "@/components/universe/hq/office/office-layout";
-import { computeLoungeLayout, LOUNGE_MIN_DEPTH, LOUNGE_WIDTH } from "@/components/universe/hq/life/lounge-layout";
-import { PoolGame } from "@/components/universe/hq/life/pool-game";
-import { makeRng } from "@/components/universe/hq/life/geometry";
+import { CLT_MAX_STATIONS, CLT_ROOM, computeCltLayout } from "@/components/universe/hq/plan/clt-layout";
 
 const proj = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `P${String(i).padStart(3, "0")}`, accent: "#fff" }));
 
@@ -31,48 +29,52 @@ describe("layout compacto", () => {
     const l = computeOfficeLayout(proj(16), []);
     for (const d of l.desks) assert.ok(Math.abs(d.x) + 1.25 <= l.width / 2, "mesa encosta na parede");
   });
-
-  it("lounge: sofá + poltrona, sofá em U (3 sofás), 7 banquetas, tudo dentro da sala", () => {
-    const l = computeLoungeLayout(30, LOUNGE_MIN_DEPTH, LOUNGE_MIN_DEPTH / 2 - 1.9);
-    assert.equal(l.width, LOUNGE_WIDTH);
-    assert.equal(l.furniture.sofas.length, 4); // 2 de fundo + 2 laterais do U
-    assert.equal(l.furniture.armchairs.length, 1);
-    assert.equal(l.furniture.stools.length, 7);
-    assert.equal(l.seats.filter((s) => s.kind === "sofa").length, 10);
-    assert.equal(l.seats.filter((s) => s.kind === "stool").length, 7);
-    for (const s of l.seats) {
-      assert.ok(s.pos.x > l.x0 && s.pos.x < l.x0 + l.width, `${s.id} fora da sala (x)`);
-      assert.ok(s.pos.z > l.minZ && s.pos.z < l.maxZ, `${s.id} fora da sala (z)`);
-    }
-  });
 });
 
-describe("sinuca (PoolGame)", () => {
-  it("o ponto do atirador fica na linha bola-alvo → branca, atrás da branca, ao alcance", () => {
-    const g = new PoolGame();
-    const rng = makeRng(5);
-    for (let k = 0; k < 40; k += 1) {
-      const plan = g.plan([], rng);
-      assert.ok(plan, "sempre há uma jogada");
-      const cue = { x: g.pos[0], z: g.pos[1] };
-      const obj = { x: g.pos[plan.target * 2], z: g.pos[plan.target * 2 + 1] };
-      // o corpo mira exatamente na direção branca → alvo
-      const aim = Math.atan2(obj.x - cue.x, obj.z - cue.z);
-      assert.ok(Math.abs(Math.atan2(Math.sin(aim - plan.yaw), Math.cos(aim - plan.yaw))) < 1e-6);
-      // e está atrás da branca (o vetor stand→branca aponta para o alvo)
-      const back = (cue.x - plan.stand.x) * Math.sin(plan.yaw) + (cue.z - plan.stand.z) * Math.cos(plan.yaw);
-      assert.ok(back > 0 && back <= 2.3, `alcance ${back}`);
-      g.strike(plan);
-      for (let t = 0; t < 8; t += 0.05) g.step(0.05);
-      assert.ok(g.settled);
+describe("sala AGENTES CLT", () => {
+  it("estações em ferradura: dentro da sala, longe uma da outra e da mesa de supervisão, voltadas para ela", () => {
+    for (const n of [1, 7, CLT_MAX_STATIONS]) {
+      const l = computeCltLayout(n);
+      assert.equal(l.stations.length, n);
+      for (const s of l.stations) {
+        // assento e ponto de aproximação (0,95 m atrás da cadeira) cabem dentro das paredes
+        const back = { x: s.x + 0.95 * Math.sin(s.yaw), z: s.z + 0.95 * Math.cos(s.yaw) };
+        for (const p of [s, back]) {
+          assert.ok(Math.abs(p.x) < CLT_ROOM.width / 2 - 0.3 && Math.abs(p.z) < CLT_ROOM.depth / 2 - 0.4, `estação ${s.index} fora da sala (${p.x.toFixed(1)}, ${p.z.toFixed(1)})`);
+        }
+        // a mesa fica à frente do assento, apontando para o centro: a distância à mesa de supervisão diminui
+        const ahead = { x: s.x - 0.84 * Math.sin(s.yaw), z: s.z - 0.84 * Math.cos(s.yaw) };
+        assert.ok(Math.hypot(ahead.x - l.table.x, ahead.z - l.table.z) < Math.hypot(s.x - l.table.x, s.z - l.table.z), `estação ${s.index} não olha para a mesa de supervisão`);
+      }
+      for (let i = 0; i < n; i += 1) for (let j = i + 1; j < n; j += 1) {
+        assert.ok(Math.hypot(l.stations[i].x - l.stations[j].x, l.stations[i].z - l.stations[j].z) > 1.9, `estações ${i} e ${j} coladas`);
+      }
     }
   });
 
-  it("ninguém é posto em cima de outro jogador", () => {
-    const g = new PoolGame();
-    const plan = g.plan([{ x: 0, z: 1.4 }, { x: 0, z: -1.4 }], makeRng(2));
-    if (plan) assert.ok(Math.hypot(plan.stand.x, Math.abs(plan.stand.z) - 1.4) >= 0.85 || Math.abs(plan.stand.x) > 0.85);
+  it("não é uma fila reta, o ID Manager (estação 0) fica no meio do arco e o corredor da porta fica livre", () => {
+    const l = computeCltLayout(7);
+    const zs = l.stations.map((s) => s.z);
+    const xs = l.stations.map((s) => s.x);
+    assert.ok(Math.max(...zs) - Math.min(...zs) > 4 && Math.max(...xs) - Math.min(...xs) > 2, "estações deveriam formar um arco, não uma linha");
+    const mid = l.stations[0];
+    // ângulo de cada estação em relação ao gerente, já normalizado para (−π, π] (o arco cruza a volta de 360°)
+    const delta = (st: { x: number; z: number }) => {
+      const d = Math.atan2(st.z - l.table.z, st.x - l.table.x) - Math.atan2(mid.z - l.table.z, mid.x - l.table.x);
+      return Math.atan2(Math.sin(d), Math.cos(d));
+    };
+    const others = l.stations.slice(1, 7).map(delta);
+    assert.ok(others.filter((a) => a < 0).length === 3 && others.filter((a) => a > 0).length === 3, "três de cada lado do gerente");
+    // corredor da porta (x > 2,5, |z| < 1,2) sem estação, sala de reunião, descanso nem mesa
+    for (const s of l.stations) assert.ok(!(s.x > 2.5 && Math.abs(s.z) < 1.2));
+    for (const room of [l.meeting, l.rest]) assert.ok(room.z - room.d / 2 > 1.2 || room.z + room.d / 2 < -1.2, "sala bloqueia o corredor da porta");
   });
+
+  it("limita o número de estações e ignora valores inválidos", () => {
+    assert.equal(computeCltLayout(99).stations.length, CLT_MAX_STATIONS);
+    assert.equal(computeCltLayout(-3).stations.length, 0);
+  });
+});
 
 describe("Sala dos Agentes: ninguém troca de mesa sozinho", () => {
   const people = (names: string[]) => names.map((n) => ({ id: `id-${n}`, name: n, accent: "#fff" }));
@@ -103,5 +105,4 @@ describe("Sala dos Agentes: ninguém troca de mesa sozinho", () => {
     const set = new Set(["a", "b", "c", "d", "e", "f"].map((x) => agentAccent(`id-${x}`, palette)));
     assert.ok(set.size >= 3, "cores variam entre agentes");
   });
-});
 });

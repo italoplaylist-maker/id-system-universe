@@ -102,7 +102,7 @@ function Bookshelf({ width = 1.6 }: { width?: number }) {
   );
 }
 
-/** Reception, lounge, bookshelves and plants — dressing for the open front and the sides of the screen. */
+/** Reception, waiting area, bookshelves and plants — dressing for the open front and the sides of the screen. */
 export function OfficeProps({ layout }: { layout: OfficeLayout }) {
   const { width, depth, screen } = layout;
   const frontZ = depth / 2;
@@ -143,7 +143,7 @@ export function OfficeProps({ layout }: { layout: OfficeLayout }) {
   );
 }
 
-/** Onde a decoração fixa do escritório (recepção, lounge pequeno, estante, plantas, racks) bloqueia o caminho dos personagens. */
+/** Onde a decoração fixa do escritório (recepção, sala de espera pequena, estante, plantas, racks) bloqueia o caminho dos personagens. */
 export function officePropObstacles(layout: OfficeLayout): Obstacle[] {
   const { width, depth, screen } = layout;
   const frontZ = depth / 2;
