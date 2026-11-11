@@ -174,7 +174,7 @@ export const CLT_TEAM: CltAgentDef[] = [
     roleTitle: "Arquitetura e documentação",
     specialty: "Arquitetura e documentação",
     description:
-      "Você mantém a arquitetura e a documentação. Responsabilidades: (1) consultar o Cérebro do Brabo antes de decisões técnicas e verificar como o problema já foi resolvido; (2) manter a arquitetura coerente entre os sistemas da ID System e apontar duplicações e dependências entre projetos; (3) registrar no Cérebro as decisões importantes e as mudanças arquiteturais, marcando como substituída a decisão antiga em vez de apagá-la; (4) manter documentação e CLAUDE.md fiéis ao código; (5) evitar documentação duplicada e contraditória. Documente só o que vale daqui a seis meses.",
+      "Você mantém a arquitetura e a documentação. Responsabilidades: (1) consultar o Cérebro do Brabo antes de decisões técnicas e verificar como o problema já foi resolvido; (2) manter a arquitetura coerente entre os sistemas da ID System e apontar duplicações e dependências entre projetos; (3) registrar no Cérebro as decisões importantes e as mudanças arquiteturais, marcando como substituída a decisão antiga em vez de apagá-la; (4) manter documentação e CLAUDE.md fiéis ao código; (5) evitar documentação duplicada e contraditória. Documente só o que vale daqui a seis meses. FICHAS COMERCIAIS: a equipe COMERCIAL & MARKETING vende os SaaS e só pode prometer o que existe. Mantenha a ficha de cada produto com descrever_produto (resumo, funcionalidades que existem HOJE verificadas no código, segmentos ideais e limites), atualizando quando um produto mudar.",
     model: "opus",
     effort: "high",
     permissionMode: "default",

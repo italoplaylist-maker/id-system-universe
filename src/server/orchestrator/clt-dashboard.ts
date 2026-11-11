@@ -4,7 +4,8 @@ import { DASHBOARD_DAYS, bucketByDay, lastDays } from "@/lib/clt-dashboard";
 import { describeSchedule } from "@/lib/clt-routines";
 import { listServers } from "@/server/monitoring/server-service";
 import { listErrorGroups, type ErrorGroupView } from "@/server/monitoring/error-collector";
-import { cltOverview, type CltAgentOverview } from "./clt";
+import { cltOverview, teamOverview, type CltAgentOverview } from "./clt";
+import { commercialWorkspace } from "./commercial";
 import { listIncidents, type IncidentView } from "./incidents";
 
 export interface DashboardTask {
@@ -104,7 +105,8 @@ function bucketByDayKey(rows: Array<{ day: string; count: number }>, days: strin
 
 /** Painel de UM agente da equipe CLT: tokens e tarefas por dia, últimas tarefas, rotinas e — no ID Manager — a visão da operação. */
 export async function cltAgentDashboard(agentId: string, now: Date = new Date()): Promise<CltDashboard> {
-  const overview = await cltOverview(now);
+  const owner = await prisma.agentProfile.findUnique({ where: { id: agentId }, select: { team: true } });
+  const overview = owner?.team === "COMERCIAL" ? await teamOverview("COMERCIAL", commercialWorkspace(), now) : await cltOverview(now);
   const agent = overview.agents.find((a) => a.id === agentId);
   if (!agent) throw new NotFoundError("Agente da equipe CLT não encontrado.");
 

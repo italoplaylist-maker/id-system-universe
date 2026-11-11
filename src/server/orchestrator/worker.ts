@@ -7,7 +7,7 @@ import { orchestratorBus } from "./bus";
 import { ExecutorStartError, getExecutor } from "./executor";
 import { prepareForRun } from "./attachments";
 import { buildUniverseMcp, UNIVERSE_AUTO_ALLOWED, UNIVERSE_MERGE_TOOL } from "./git/tools";
-import { UNIVERSE_TEAM_TOOLS } from "./tools-team";
+import { UNIVERSE_COMMERCIAL_TOOLS, UNIVERSE_TEAM_TOOLS } from "./tools-team";
 import { notifyApprovalRequested, notifyTaskFinished } from "./notify";
 import { loadMcpServersForRun } from "./tools-config";
 import { seedDefaultPacks } from "./skill-packs";
@@ -15,6 +15,8 @@ import { seedGlobalClaudeMd } from "./tools-config";
 import { cleanupStorage } from "./storage";
 import { getWorkspacePreparer, loadExtraRepos, syncProjectAgents } from "./workspace";
 import { budgetNote, cltDef, cltRoleNote } from "@/lib/clt-team";
+import { commercialDef, commercialRoleNote } from "@/lib/commercial-team";
+import { advanceCommercialCycle } from "./commercial";
 import { agentBudget } from "./budget";
 import { ACTIVE, appendEvent, getSettings, purgeOldTasks, setTaskRegisteredHook } from "./service";
 
@@ -187,7 +189,7 @@ async function runTask(taskId: string): Promise<void> {
   const { autoApprove } = await getSettings();
   // Equipe CLT: o agente sabe quanto já gastou e se administra (nota no início da execução).
   const cltBudgetNote =
-    agent.team === "CLT"
+    agent.team === "CLT" || agent.team === "COMERCIAL"
       ? await agentBudget(agent.id, { dailyTokenLimit: agent.dailyTokenLimit, monthlyTokenLimit: agent.monthlyTokenLimit })
           .then((b) => budgetNote({ usedDay: b.usedDay, usedMonth: b.usedMonth, dailyLimit: agent.dailyTokenLimit, monthlyLimit: agent.monthlyTokenLimit }))
           .catch(() => "")
@@ -202,12 +204,12 @@ async function runTask(taskId: string): Promise<void> {
     permissionMode: (agent.permissionMode === "plan" ? "plan" : agent.permissionMode === "acceptEdits" || autoApprove ? "acceptEdits" : "default") as "default" | "acceptEdits" | "plan",
     agentName: agent.name,
     specialty: agent.specialty,
-    roleNote: agent.team === "CLT" ? cltRoleNote({ name: agent.name, roleTitle: agent.roleTitle || cltDef(agent.slug ?? "")?.roleTitle || "Funcionário", description: agent.description || cltDef(agent.slug ?? "")?.description || "" }) + cltBudgetNote : undefined,
+    roleNote: agent.team === "COMERCIAL" ? commercialRoleNote({ name: agent.name, roleTitle: agent.roleTitle || commercialDef(agent.slug ?? "")?.roleTitle || "Funcionário", description: agent.description || commercialDef(agent.slug ?? "")?.description || "" }) + cltBudgetNote : agent.team === "CLT" ? cltRoleNote({ name: agent.name, roleTitle: agent.roleTitle || cltDef(agent.slug ?? "")?.roleTitle || "Funcionário", description: agent.description || cltDef(agent.slug ?? "")?.description || "" }) + cltBudgetNote : undefined,
     effort: agent.effort,
     attachments: prepared.attachments,
     attachmentsDir: prepared.dir,
     extraRepos,
-    allowedTools: [...new Set([...agent.allowedTools, ...(universe ? UNIVERSE_AUTO_ALLOWED : []), ...(universe && agent.team === "CLT" ? UNIVERSE_TEAM_TOOLS : []), ...(autoApprove ? [...AUTO_APPROVE_TOOLS, ...(universe ? [UNIVERSE_MERGE_TOOL] : [])] : [])])],
+    allowedTools: [...new Set([...agent.allowedTools, ...(universe && agent.team !== "COMERCIAL" ? UNIVERSE_AUTO_ALLOWED : []), ...(universe && agent.team === "CLT" ? UNIVERSE_TEAM_TOOLS : []), ...(universe && agent.team === "COMERCIAL" ? UNIVERSE_COMMERCIAL_TOOLS : []), ...(autoApprove && agent.team !== "COMERCIAL" ? [...AUTO_APPROVE_TOOLS, ...(universe ? [UNIVERSE_MERGE_TOOL] : [])] : [])])],
     disallowedTools: [...new Set([...agent.disallowedTools, ...(autoApprove ? AUTO_APPROVE_DENY : [])])],
     mcpServers,
     resumeSessionId: resume,
@@ -268,6 +270,7 @@ async function finish(taskId: string, agentId: string, status: "COMPLETED" | "FA
     data: { status, finishedAt: new Date(), result: data.result ?? undefined, error: data.error ?? undefined, costUsd: data.costUsd ?? undefined, turns: data.turns ?? undefined, inputTokens: data.inputTokens ?? undefined, outputTokens: data.outputTokens ?? undefined, cacheTokens: data.cacheTokens ?? undefined, claudeSessionId: data.claudeSessionId ?? undefined },
   });
   if (won.count === 1 && status !== "CANCELLED") void notifyTaskFinished(taskId, status).catch(() => undefined);
+  if (won.count === 1) void advanceCommercialCycle(taskId, status).catch(() => undefined);
   await prisma.agentProfile.update({ where: { id: agentId }, data: { lastActiveAt: new Date(), ...(status === "COMPLETED" ? { lastError: null } : {}), ...(data.claudeSessionId ? { claudeSessionId: data.claudeSessionId } : {}) } }).catch(() => undefined);
   orchestratorBus.emit({ type: "task", taskId, agentId });
 }

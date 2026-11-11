@@ -47,6 +47,18 @@ export async function evaluateGate(gate: string, lastGateKey: string | null, now
       const finished = await prisma.agentTask.count({ where: { finishedAt: { gte: since } } });
       return finished > 0 ? { run: true, key: null, reason: `${finished} tarefa(s) terminada(s) em 24 h` } : { run: false, key: null, reason: "a equipe não trabalhou nas últimas 24 h" };
     }
+    case "leads_novos": {
+      const n = await prisma.lead.count({ where: { stage: "NOVO", discarded: false } });
+      return n > 0 ? { run: true, key: null, reason: `${n} lead(s) novo(s)` } : { run: false, key: null, reason: "nenhum lead novo para analisar" };
+    }
+    case "leads_abertos": {
+      const n = await prisma.lead.count({ where: { discarded: false, stage: { notIn: ["CONVERTIDO", "PERDIDO"] } } });
+      return n > 0 ? { run: true, key: null, reason: `${n} lead(s) em aberto` } : { run: false, key: null, reason: "o funil está vazio" };
+    }
+    case "leads_qualificados": {
+      const n = await prisma.lead.count({ where: { discarded: false, stage: "QUALIFICADO", interactions: { none: { kind: "RASCUNHO", status: "PENDENTE_APROVACAO" } } } });
+      return n > 0 ? { run: true, key: null, reason: `${n} lead(s) qualificado(s) sem abordagem preparada` } : { run: false, key: null, reason: "nenhum lead qualificado aguardando abordagem" };
+    }
     default:
       return { run: true, key: null, reason: "sempre" };
   }

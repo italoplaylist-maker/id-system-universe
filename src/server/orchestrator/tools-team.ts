@@ -12,13 +12,18 @@ import { agentBudget, windowStarts } from "./budget";
 import { cltOverview } from "./clt";
 import { listIncidents } from "./incidents";
 import { ACTIVE, submitSystemTask } from "./service";
+import { COMMERCIAL_MCP_TOOLS, commercialDef, COMMERCIAL_TEAM_ID, type CommercialSlug } from "@/lib/commercial-team";
+import { commercialTools } from "./tools-commercial";
 
 /**
  * Ferramentas da equipe CLT liberadas sem pedir aprovação. As de leitura não alteram nada; `delegar_tarefa` (só do ID Manager)
  * apenas ENFILEIRA uma tarefa para um colega — e passa pelas travas de `checkDelegation` (teto por execução e por dia, sem duplicata,
  * sem agente pausado ou sem orçamento de tokens).
  */
-export const UNIVERSE_TEAM_TOOLS = ["listar_erros", "registrar_achado", "ler_logs", "status_equipe", "delegar_tarefa", "resultado_delegacoes"].map((n) => `mcp__universe__${n}`);
+export const UNIVERSE_TEAM_TOOLS = ["listar_erros", "registrar_achado", "ler_logs", "status_equipe", "delegar_tarefa", "resultado_delegacoes", "descrever_produto"].map((n) => `mcp__universe__${n}`);
+
+/** Ferramentas da equipe COMERCIAL liberadas sem aprovação: só leem/gravam o funil; nenhuma envia nada. */
+export const UNIVERSE_COMMERCIAL_TOOLS = COMMERCIAL_MCP_TOOLS;
 
 const text = (t: string, isError = false) => ({ content: [{ type: "text" as const, text: t }], ...(isError ? { isError: true } : {}) });
 const fail = (e: unknown) => text(e instanceof Error ? e.message : "Falhou.", true);
@@ -34,6 +39,7 @@ type ToolFn = (name: string, description: string, shape: z.ZodRawShape, handler:
  */
 export async function teamTools(tool: ToolFn, agentId: string, taskId: string): Promise<unknown[]> {
   const agent = await prisma.agentProfile.findUnique({ where: { id: agentId }, select: { team: true, slug: true } });
+  if (agent?.team === COMMERCIAL_TEAM_ID && agent.slug && commercialDef(agent.slug)) return commercialTools(tool, agentId, taskId, agent.slug as CommercialSlug);
   if (agent?.team !== "CLT") return [];
 
   const tools: unknown[] = [
@@ -186,6 +192,32 @@ export async function teamTools(tool: ToolFn, agentId: string, taskId: string): 
               ? openIncidents.map((i) => `• ${i.application} — ${i.status === "ESCALATED" ? "PRECISA DE HUMANO" : "em conserto"} · tentativa ${i.attempts} · ${i.commit ?? "?"} ${i.commitMessage ?? ""}${i.culprit?.locked ? ` · agente ${i.culprit.name} bloqueado` : ""}`).join("\n")
               : "(nenhum incidente de deploy aberto)";
             return text(cap(`EQUIPE (${overview.totals.working} trabalhando, ${overview.totals.available} disponíveis, ${overview.totals.waiting} aguardando aprovação, ${overview.totals.errored} com erro) · tokens hoje ${overview.totals.tokensDay}, mês ${overview.totals.tokensMonth}\n\n${agents}\n\nRESULTADOS (${hours} h):\n${results}\n\nROTINAS:\n${routs}\n\nERROS DOS SISTEMAS (${hours} h, mais recentes):\n${sysErrors}\n\nINCIDENTES DE DEPLOY ABERTOS:\n${incidentLines}`));
+          } catch (e) {
+            return fail(e);
+          }
+        }) as never,
+      ),
+    );
+  }
+  // O catálogo que a equipe comercial lê é mantido por quem conhece o produto: Architect e Manager.
+  if (agent.slug === "id-architect" || agent.slug === "id-manager") {
+    tools.push(
+      tool(
+        "descrever_produto",
+        "Cria ou atualiza a FICHA COMERCIAL de um produto (SaaS) da ID System, que a equipe Comercial & Marketing lê para não prometer o que não existe. Descreva só o que o produto FAZ de verdade hoje (verificado no código/documentação), em linguagem de cliente, sem segredos técnicos.",
+        {
+          produto: z.string().min(2).max(80).describe("Nome do produto (igual ao do projeto no Universe)."),
+          resumo: z.string().min(20).max(600),
+          funcionalidades: z.string().min(20).max(3000).describe("Lista do que existe hoje."),
+          segmentos_ideais: z.string().max(400).optional(),
+          observacao: z.string().max(600).optional().describe("Limites, o que ainda NÃO existe, pré-requisitos."),
+        },
+        (async (args: { produto: string; resumo: string; funcionalidades: string; segmentos_ideais?: string; observacao?: string }) => {
+          try {
+            const me = await prisma.agentProfile.findUnique({ where: { id: agentId }, select: { name: true } });
+            const data = { summary: redactSecrets(args.resumo), features: redactSecrets(args.funcionalidades), idealSegments: args.segmentos_ideais ?? null, commercialNote: args.observacao ?? null, updatedBy: me?.name ?? "Equipe CLT" };
+            await prisma.productProfile.upsert({ where: { name: args.produto.trim() }, create: { name: args.produto.trim(), ...data }, update: data });
+            return text(`Ficha de "${args.produto.trim()}" salva. A equipe comercial já enxerga.`);
           } catch (e) {
             return fail(e);
           }
