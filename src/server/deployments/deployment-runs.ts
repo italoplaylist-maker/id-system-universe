@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db/client";
 import type { DeploymentRun, DeploymentRunStatus, Prisma } from "@prisma/client";
 import type { ProviderDeployment } from "@/providers/deployment/types";
+import { onDeployFailed, onDeploySucceeded } from "@/server/orchestrator/incidents";
 
 const TERMINAL_MAP: Record<string, DeploymentRunStatus | undefined> = {
   SUCCESS: "SUCCESS",
@@ -28,6 +29,12 @@ export async function finalizeRunsForDeployment(coolifyDeploymentId: string, dep
         error: status === "SUCCESS" ? null : `Deploy ${deployment.status === "CANCELLED" ? "cancelado" : "falhou"} no provider.`,
       },
     });
+  }
+  // Deploy FALHOU: abre incidente (bloqueia o agente culpado e aciona o ID Manager). SUCESSO: fecha o incidente aberto do sistema.
+  // Fora do caminho crítico: nunca atrasa nem derruba a reconciliação do deploy.
+  for (const run of runs) {
+    if (status === "FAILED") void onDeployFailed({ applicationId: run.applicationId, deploymentExternalId: coolifyDeploymentId, commitSha: deployment.commit ?? run.commitSha, commitMessage: run.commitMessage ?? deployment.commitMessage ?? null, repository: run.repository });
+    else if (status === "SUCCESS") void onDeploySucceeded(run.applicationId);
   }
   return runs.length;
 }

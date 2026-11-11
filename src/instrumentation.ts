@@ -64,6 +64,10 @@ export async function register() {
   setInterval(safely("error_collector", () => runErrorCollectorTick()), 15 * 60_000);
   setTimeout(safely("error_collector", () => runErrorCollectorTick()), 90_000);
 
+  // Incidentes de deploy: o que passou de 6 h sem resolver vira "precisa de humano" (o agente bloqueado continua bloqueado).
+  const { escalateStaleIncidents } = await import("@/server/orchestrator/incidents");
+  setInterval(safely("incident_escalation", () => escalateStaleIncidents()), 10 * 60_000);
+
   // Orquestrador de agentes Claude: despacha a fila e recupera tarefas interrompidas por reinício.
   const { startOrchestratorWorker } = await import("@/server/orchestrator/worker");
   startOrchestratorWorker();

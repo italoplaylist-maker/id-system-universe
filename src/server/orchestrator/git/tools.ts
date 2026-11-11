@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { cleanupWorkspace, getGitStatus, mergePullRequest, publishChanges, resolveAgentRepo } from "./ops";
 import { teamTools } from "../tools-team";
+import { assertAgentNotLocked, assertCltMayMerge } from "../incidents";
 
 export const UNIVERSE_TOOL_PREFIX = "mcp__universe__";
 /** Sem pedir aprovação: abrir PR (seguro), ver estado e limpar a cópia (só apaga o que já foi enviado). Merge pede aprovação, a menos que o agente tenha a regra liberada. */
@@ -37,6 +38,7 @@ export async function buildUniverseMcp(agentId: string, taskId: string) {
         { title: z.string().max(200).optional().describe("Título do PR (padrão: o pedido da tarefa)"), body: z.string().max(5000).optional().describe("Descrição do PR: o que mudou e por quê"), repo: z.string().max(120).optional().describe("Qual repositório (nome da subpasta ou dono/nome). Vazio = o principal.") },
         async (args) => {
           try {
+            await assertAgentNotLocked(agentId);
             const r = await publishChanges(agentId, { title: args.title, body: args.body, taskId, repo: args.repo });
             return text(`PR #${r.pullRequest.number} ${r.reused ? "atualizado" : "aberto"}: ${r.pullRequest.url} (branch ${r.branch}${r.committed ? ", novo commit" : ""}).`);
           } catch (e) {
@@ -53,6 +55,10 @@ export async function buildUniverseMcp(agentId: string, taskId: string) {
             const target = args.repo ? await resolveAgentRepo(agentId, args.repo) : null;
             const pr = await prisma.agentPullRequest.findFirst({ where: { agentId, status: "OPEN", ...(args.number ? { number: args.number } : {}), ...(target ? { repo: target.fullName } : {}) }, orderBy: { createdAt: "desc" } });
             if (!pr) return text("Não há PR seu aberto para mergear. Use publish_changes primeiro.", true);
+            await assertAgentNotLocked(agentId);
+            // Equipe CLT: o merge só é permitido para consertar um incidente de deploy aberto (e só por quem faz parte do conserto).
+            const me = await prisma.agentProfile.findUnique({ where: { id: agentId }, select: { team: true } });
+            if (me?.team === "CLT") await assertCltMayMerge(agentId, pr.repo);
             const r = await mergePullRequest(pr.id);
             return text(`PR #${r.number} mergeado. ${r.cleanup.removed ? "Cópia de trabalho apagada." : `Cópia mantida: ${r.cleanup.reason ?? ""}`}`);
           } catch (e) {

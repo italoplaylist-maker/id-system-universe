@@ -5,6 +5,7 @@ import { describeSchedule } from "@/lib/clt-routines";
 import { listServers } from "@/server/monitoring/server-service";
 import { listErrorGroups, type ErrorGroupView } from "@/server/monitoring/error-collector";
 import { cltOverview, type CltAgentOverview } from "./clt";
+import { listIncidents, type IncidentView } from "./incidents";
 
 export interface DashboardTask {
   id: string;
@@ -28,6 +29,8 @@ export interface ManagerOperation {
   deploysByDay: { success: number[]; failed: number[] };
   delegations: Array<{ id: string; to: string; prompt: string; status: string; at: string; result: string | null }>;
   delegationsToday: number;
+  /** Incidentes de deploy (mais recentes primeiro): em conserto, resolvidos e os que precisam de humano. */
+  incidents: IncidentView[];
 }
 
 export interface CltDashboard {
@@ -48,7 +51,7 @@ const sum = (a: { inputTokens: number | null; outputTokens: number | null; cache
 async function managerOperation(days: string[], now: Date): Promise<ManagerOperation> {
   const since = new Date(now.getTime() - DASHBOARD_DAYS * 24 * 3600_000);
   const weekAgo = new Date(now.getTime() - 7 * 24 * 3600_000);
-  const [apps, servers, daily, byApp, groups, runs, delegated, today] = await Promise.all([
+  const [apps, servers, daily, byApp, groups, runs, delegated, today, incidents] = await Promise.all([
     prisma.application.groupBy({ by: ["status"], where: { provider: { enabled: true } }, _count: { _all: true } }),
     listServers(now).catch(() => []),
     prisma.errorDaily.findMany({ where: { day: { gte: days[0] } }, select: { day: true, count: true } }),
@@ -57,6 +60,7 @@ async function managerOperation(days: string[], now: Date): Promise<ManagerOpera
     prisma.deploymentRun.findMany({ where: { finishedAt: { gte: since }, status: { in: ["SUCCESS", "FAILED"] } }, select: { finishedAt: true, status: true } }),
     prisma.agentTask.findMany({ where: { parentTaskId: { not: null }, createdAt: { gte: weekAgo } }, orderBy: { createdAt: "desc" }, take: 8, include: { agent: { select: { name: true } } } }),
     prisma.agentTask.count({ where: { parentTaskId: { not: null }, createdAt: { gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()) } } }),
+    listIncidents(8),
   ]);
   const names = byApp.length ? await prisma.application.findMany({ where: { id: { in: byApp.map((b) => b.applicationId) } }, select: { id: true, name: true } }) : [];
   return {
@@ -71,6 +75,7 @@ async function managerOperation(days: string[], now: Date): Promise<ManagerOpera
     },
     delegations: delegated.map((t) => ({ id: t.id, to: t.agent.name, prompt: t.prompt.replace("[Delegada pelo ID Manager] ", ""), status: t.status, at: t.createdAt.toISOString(), result: t.result })),
     delegationsToday: today,
+    incidents,
   };
 }
 

@@ -106,6 +106,9 @@ test("o Manager sabe delegar e, como ele e o Architect precisam agir, nenhum age
   assert.match(manager.description, /delegar_tarefa/);
   assert.match(manager.description, /resultado_delegacoes/);
   for (const a of CLT_TEAM) assert.equal(a.permissionMode, "default", `${a.name}: modo plan impede de usar ferramentas e editar`);
-  // a trava de segurança continua valendo para quem age: merge/deploy seguem bloqueados
-  assert.ok(CLT_DISALLOWED_TOOLS.includes("mcp__universe__merge_pull_request"));
+  // o merge deixou de ser proibido por regra fixa: agora só passa DENTRO de um incidente de deploy (checado em código; ver deploy-incidents.test)
+  assert.ok(!CLT_DISALLOWED_TOOLS.includes("mcp__universe__merge_pull_request"));
+  assert.match(CLT_RULES.join(" "), /INCIDENTE DE DEPLOY FALHO/);
+  assert.match(CLT_TEAM.find((x) => x.slug === "id-doctor")!.description, /AUTORIDADE TOTAL/);
+  assert.match(CLT_TEAM.find((x) => x.slug === "id-devops")!.description, /AUTORIDADE/);
 });
