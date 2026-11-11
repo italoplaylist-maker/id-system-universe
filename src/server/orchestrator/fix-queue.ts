@@ -1,21 +1,28 @@
 import { prisma } from "@/server/db/client";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { recordAuditEvent } from "@/server/audit/audit-log";
-import { FIX_KEY_PREFIX, buildFixBrief, fixIdempotencyKey, fixState, type FixState } from "@/lib/fix-queue";
+import { FIX_KEY_PREFIX, buildFindingBrief, buildFixBrief, fixIdempotencyKey, fixState, parseItemId, type FixState } from "@/lib/fix-queue";
 import { agentBudget } from "./budget";
 import { submitSystemTask } from "./service";
 
 const ACTIVE = ["QUEUED", "STARTING", "RUNNING", "WAITING_APPROVAL"] as const;
 const WINDOW_HOURS = 24 * 7;
+const SEVERITY_ORDER: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 
 export interface FixItemView {
+  /** "erro:<id>" (veio dos logs) ou "achado:<id>" (registrado por um agente). */
   id: string;
-  application: string;
+  kind: "erro" | "achado";
+  title: string;
+  application: string | null;
   project: string | null;
+  /** Só nos achados. */
+  severity: string | null;
+  category: string | null;
+  reportedBy: string | null;
   count: number;
-  firstSeenAt: string;
   lastSeenAt: string;
-  sample: string;
+  detail: string;
   state: FixState;
   taskId: string | null;
 }
@@ -31,57 +38,69 @@ async function activeFixTaskIds(): Promise<Set<string>> {
   return new Set(rows.map((r) => r.id));
 }
 
-/** Erros dos sistemas (7 dias) que os agentes viram, com o estado de cada um na fila de correção. */
+/** Tudo que a equipe viu e pode melhorar: erros dos logs + achados registrados pelos agentes, com o estado de cada um. */
 export async function listFixQueue(now: Date = new Date()): Promise<FixQueueView> {
   const since = new Date(now.getTime() - WINDOW_HOURS * 3600_000);
-  const [rows, active] = await Promise.all([
-    prisma.errorGroup.findMany({
-      where: { lastSeenAt: { gte: since } },
-      include: { application: { select: { name: true, project: { select: { name: true } } } } },
-      orderBy: [{ lastSeenAt: "desc" }, { count: "desc" }],
-      take: 40,
-    }),
+  const [errors, findings, active] = await Promise.all([
+    prisma.errorGroup.findMany({ where: { lastSeenAt: { gte: since } }, include: { application: { select: { name: true, project: { select: { name: true } } } } }, orderBy: [{ lastSeenAt: "desc" }, { count: "desc" }], take: 40 }),
+    prisma.agentFinding.findMany({ where: { updatedAt: { gte: new Date(now.getTime() - 30 * 24 * 3600_000) } }, orderBy: { updatedAt: "desc" }, take: 60 }),
     activeFixTaskIds(),
   ]);
-  const items = rows.map((r): FixItemView => ({
-    id: r.id,
-    application: r.application.name,
-    project: r.application.project?.name ?? null,
-    count: r.count,
-    firstSeenAt: r.firstSeenAt.toISOString(),
-    lastSeenAt: r.lastSeenAt.toISOString(),
-    sample: r.sample,
-    state: fixState({ lastSeenAt: r.lastSeenAt, fixSentAt: r.fixSentAt, dismissedAt: r.dismissedAt, taskActive: r.fixTaskId !== null && active.has(r.fixTaskId) }),
-    taskId: r.fixTaskId,
-  }));
+  const isActive = (id: string | null) => id !== null && active.has(id);
+  const items: FixItemView[] = [
+    ...errors.map((r): FixItemView => ({
+      id: `erro:${r.id}`, kind: "erro", title: r.sample.split("\n")[0].slice(0, 200), application: r.application.name, project: r.application.project?.name ?? null,
+      severity: null, category: null, reportedBy: "Logs dos sistemas", count: r.count, lastSeenAt: r.lastSeenAt.toISOString(), detail: r.sample,
+      state: fixState({ lastSeenAt: r.lastSeenAt, fixSentAt: r.fixSentAt, dismissedAt: r.dismissedAt, taskActive: isActive(r.fixTaskId) }), taskId: r.fixTaskId,
+    })),
+    ...findings.map((f): FixItemView => ({
+      id: `achado:${f.id}`, kind: "achado", title: f.title, application: f.applicationName, project: null,
+      severity: f.severity, category: f.category, reportedBy: f.agentName, count: 1, lastSeenAt: f.updatedAt.toISOString(), detail: f.detail,
+      state: fixState({ lastSeenAt: f.updatedAt, fixSentAt: f.fixSentAt, dismissedAt: f.dismissedAt, taskActive: isActive(f.fixTaskId) }), taskId: f.fixTaskId,
+    })),
+  ];
   const order: Record<FixState, number> = { fixing: 0, pending: 1, sent: 2, dismissed: 3 };
-  items.sort((a, b) => order[a.state] - order[b.state]);
+  items.sort((a, b) => order[a.state] - order[b.state] || (SEVERITY_ORDER[a.severity ?? "MEDIUM"] ?? 2) - (SEVERITY_ORDER[b.severity ?? "MEDIUM"] ?? 2) || b.lastSeenAt.localeCompare(a.lastSeenAt));
   return { items, busy: active.size > 0 };
 }
 
 type Actor = { userId: string; ip?: string; userAgent?: string };
 
-/** Manda UM erro para o ID Manager corrigir. Recusa se já há uma correção em andamento. */
-export async function sendToFix(groupId: string, actor: Actor, now: Date = new Date()): Promise<FixQueueView> {
-  const group = await prisma.errorGroup.findUnique({ where: { id: groupId }, include: { application: { select: { name: true, project: { select: { name: true } } } } } });
-  if (!group) throw new NotFoundError("Erro não encontrado.");
-  if ((await activeFixTaskIds()).size > 0) throw new ConflictError("O ID Manager já está corrigindo outro erro. Espere terminar: é um de cada vez.");
+/** Manda UM item (erro ou achado) para o ID Manager corrigir. Recusa se já há uma correção em andamento. */
+export async function sendToFix(itemId: string, actor: Actor, now: Date = new Date()): Promise<FixQueueView> {
+  const ref = parseItemId(itemId);
+  if (!ref) throw new ValidationError("Item inválido.");
+  let brief: string;
+  if (ref.kind === "erro") {
+    const g = await prisma.errorGroup.findUnique({ where: { id: ref.rawId }, include: { application: { select: { name: true, project: { select: { name: true } } } } } });
+    if (!g) throw new NotFoundError("Erro não encontrado.");
+    brief = buildFixBrief({ application: g.application.name, project: g.application.project?.name ?? null, count: g.count, firstSeenAt: g.firstSeenAt.toISOString(), lastSeenAt: g.lastSeenAt.toISOString(), sample: g.sample });
+  } else {
+    const f = await prisma.agentFinding.findUnique({ where: { id: ref.rawId } });
+    if (!f) throw new NotFoundError("Achado não encontrado.");
+    brief = buildFindingBrief({ title: f.title, detail: f.detail, severity: f.severity, category: f.category, application: f.applicationName, reportedBy: f.agentName });
+  }
+  if ((await activeFixTaskIds()).size > 0) throw new ConflictError("O ID Manager já está corrigindo outro item. Espere terminar: é um de cada vez.");
   const manager = await prisma.agentProfile.findFirst({ where: { team: "CLT", slug: "id-manager", archivedAt: null }, select: { id: true, dailyTokenLimit: true, monthlyTokenLimit: true } });
   if (!manager) throw new ValidationError("A equipe CLT ainda não foi criada.");
   const budget = await agentBudget(manager.id, { dailyTokenLimit: manager.dailyTokenLimit, monthlyTokenLimit: manager.monthlyTokenLimit }, now);
   if (budget.blocked) throw new ConflictError(`O ID Manager está sem orçamento de tokens: ${budget.reason}`);
-  const brief = buildFixBrief({ application: group.application.name, project: group.application.project?.name ?? null, count: group.count, firstSeenAt: group.firstSeenAt.toISOString(), lastSeenAt: group.lastSeenAt.toISOString(), sample: group.sample });
-  const { task } = await submitSystemTask({ agentId: manager.id, prompt: brief, idempotencyKey: fixIdempotencyKey(group.id, now), priority: 1 });
-  await prisma.errorGroup.update({ where: { id: group.id }, data: { fixTaskId: task.id, fixSentAt: now } });
-  await recordAuditEvent({ userId: actor.userId, action: "AGENT_TASK_SUBMITTED", status: "SUCCESS", entityType: "ErrorGroup", entityId: group.id, metadata: { event: "send_to_fix", taskId: task.id }, ipAddress: actor.ip, userAgent: actor.userAgent });
+  const { task } = await submitSystemTask({ agentId: manager.id, prompt: brief, idempotencyKey: fixIdempotencyKey(`${ref.kind}-${ref.rawId}`, now), priority: 1 });
+  const mark = { fixTaskId: task.id, fixSentAt: now };
+  if (ref.kind === "erro") await prisma.errorGroup.update({ where: { id: ref.rawId }, data: mark });
+  else await prisma.agentFinding.update({ where: { id: ref.rawId }, data: mark });
+  await recordAuditEvent({ userId: actor.userId, action: "AGENT_TASK_SUBMITTED", status: "SUCCESS", entityType: ref.kind === "erro" ? "ErrorGroup" : "AgentFinding", entityId: ref.rawId, metadata: { event: "send_to_fix", taskId: task.id }, ipAddress: actor.ip, userAgent: actor.userAgent });
   return listFixQueue(now);
 }
 
-/** Descarta um erro da fila (o humano decidiu que não precisa corrigir). Se o erro voltar a acontecer, ele reaparece. */
-export async function dismissFix(groupId: string, actor: Actor, now: Date = new Date()): Promise<FixQueueView> {
-  const group = await prisma.errorGroup.findUnique({ where: { id: groupId }, select: { id: true } });
-  if (!group) throw new NotFoundError("Erro não encontrado.");
-  await prisma.errorGroup.update({ where: { id: groupId }, data: { dismissedAt: now } });
-  await recordAuditEvent({ userId: actor.userId, action: "AGENT_PROFILE_UPDATED", status: "SUCCESS", entityType: "ErrorGroup", entityId: groupId, metadata: { event: "dismiss_fix" }, ipAddress: actor.ip, userAgent: actor.userAgent });
+/** Descarta um item da fila (o humano decidiu que não precisa). Se o erro/achado voltar a ser registrado, ele reaparece. */
+export async function dismissFix(itemId: string, actor: Actor, now: Date = new Date()): Promise<FixQueueView> {
+  const ref = parseItemId(itemId);
+  if (!ref) throw new ValidationError("Item inválido.");
+  const exists = ref.kind === "erro" ? await prisma.errorGroup.findUnique({ where: { id: ref.rawId }, select: { id: true } }) : await prisma.agentFinding.findUnique({ where: { id: ref.rawId }, select: { id: true } });
+  if (!exists) throw new NotFoundError("Item não encontrado.");
+  if (ref.kind === "erro") await prisma.errorGroup.update({ where: { id: ref.rawId }, data: { dismissedAt: now } });
+  else await prisma.agentFinding.update({ where: { id: ref.rawId }, data: { dismissedAt: now } });
+  await recordAuditEvent({ userId: actor.userId, action: "AGENT_PROFILE_UPDATED", status: "SUCCESS", entityType: ref.kind === "erro" ? "ErrorGroup" : "AgentFinding", entityId: ref.rawId, metadata: { event: "dismiss_fix" }, ipAddress: actor.ip, userAgent: actor.userAgent });
   return listFixQueue(now);
 }

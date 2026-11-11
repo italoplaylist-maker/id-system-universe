@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildFixBrief, fixIdempotencyKey, fixState } from "../src/lib/fix-queue";
+import { buildFindingBrief, buildFixBrief, findingKey, fixIdempotencyKey, fixState, parseItemId } from "../src/lib/fix-queue";
 
 const t = (h: number) => new Date(Date.UTC(2026, 10, 11, h));
 
@@ -26,4 +26,16 @@ test("o pedido ao Manager traz o erro, manda delegar, proíbe merge e a chave é
 test("descartar e enviar no mesmo instante: vale o descarte; tarefa ativa sempre mostra 'corrigindo'", () => {
   assert.equal(fixState({ lastSeenAt: t(5), fixSentAt: t(6), dismissedAt: t(6), taskActive: false }), "dismissed");
   assert.equal(fixState({ lastSeenAt: t(9), fixSentAt: t(6), dismissedAt: null, taskActive: true }), "fixing");
+});
+
+test("achados: mesma impressão digital ignora caixa/acento; ids da fila; pedido ao Manager traz evidência e proíbe merge", () => {
+  assert.equal(findingKey("API", "Rota sem checagem de empresa!"), findingKey("api", "rota SEM checagem de empresá"));
+  assert.notEqual(findingKey("api", "a b c d"), findingKey("web", "a b c d"));
+  assert.deepEqual(parseItemId("achado:abc"), { kind: "achado", rawId: "abc" });
+  assert.deepEqual(parseItemId("erro:x:y"), { kind: "erro", rawId: "x:y" });
+  assert.equal(parseItemId("abc"), null);
+  const b = buildFindingBrief({ title: "Índice faltando em Pedido", detail: "seq scan 1,2 s", severity: "HIGH", category: "desempenho", application: "api", reportedBy: "ID Optimizer" });
+  assert.match(b, /ID Optimizer/);
+  assert.match(b, /seq scan/);
+  assert.match(b, /não faça merge/);
 });

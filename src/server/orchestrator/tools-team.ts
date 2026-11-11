@@ -7,6 +7,7 @@ import { describeSchedule } from "@/lib/clt-routines";
 import { listErrorGroups } from "@/server/monitoring/error-collector";
 import { DELEGATION_PRIORITIES, checkDelegation, resolveAgentRef } from "@/lib/clt-dashboard";
 import { findDuplicate } from "@/lib/clt-team";
+import { FINDING_CATEGORIES, FINDING_SEVERITIES, findingKey } from "@/lib/fix-queue";
 import { agentBudget, windowStarts } from "./budget";
 import { cltOverview } from "./clt";
 import { listIncidents } from "./incidents";
@@ -17,7 +18,7 @@ import { ACTIVE, submitSystemTask } from "./service";
  * apenas ENFILEIRA uma tarefa para um colega — e passa pelas travas de `checkDelegation` (teto por execução e por dia, sem duplicata,
  * sem agente pausado ou sem orçamento de tokens).
  */
-export const UNIVERSE_TEAM_TOOLS = ["listar_erros", "ler_logs", "status_equipe", "delegar_tarefa", "resultado_delegacoes"].map((n) => `mcp__universe__${n}`);
+export const UNIVERSE_TEAM_TOOLS = ["listar_erros", "registrar_achado", "ler_logs", "status_equipe", "delegar_tarefa", "resultado_delegacoes"].map((n) => `mcp__universe__${n}`);
 
 const text = (t: string, isError = false) => ({ content: [{ type: "text" as const, text: t }], ...(isError ? { isError: true } : {}) });
 const fail = (e: unknown) => text(e instanceof Error ? e.message : "Falhou.", true);
@@ -76,6 +77,30 @@ export async function teamTools(tool: ToolFn, agentId: string, taskId: string): 
           const raw = logs.lines.map((l) => l.raw);
           const out = args.somente_erros ? extractErrorEvents(raw, 10).map((e) => [e.line, ...e.context].join("\n")).join("\n---\n") : raw.join("\n");
           return text(cap(`Log de ${pick.name} (${args.somente_erros ? "só erros" : `últimas ${raw.length} linhas`}):\n${redactSecrets(out) || "(sem linhas)"}`));
+        } catch (e) {
+          return fail(e);
+        }
+      }) as never,
+    ),
+    tool(
+      "registrar_achado",
+      "Registra na FILA DE CORREÇÃO do Italo qualquer coisa que você viu e que pode melhorar ou corrigir (vulnerabilidade, lentidão, falta de teste, dívida técnica, documentação desatualizada, risco de infraestrutura, índice faltando…) — não só erros de log. O Italo escolhe um item por vez e o ID Manager coordena a correção. Registre só o que você VERIFICOU (arquivo/linha, medição ou trecho de log), um item por problema, com título específico. Repetir o mesmo achado só atualiza o existente.",
+      {
+        titulo: z.string().min(8).max(160).describe("Título específico (ex.: 'Rota /api/x sem checagem de empresa')."),
+        detalhe: z.string().min(20).max(3000).describe("Evidência (arquivo/linha, medição, trecho de log) e a correção sugerida."),
+        gravidade: z.enum(FINDING_SEVERITIES).describe("LOW, MEDIUM, HIGH ou CRITICAL (CRITICAL = dado exposto ou produção em risco)."),
+        categoria: z.enum(FINDING_CATEGORIES).describe("Tipo do achado."),
+        sistema: z.string().max(80).optional().describe("Nome do sistema afetado. Vazio = geral."),
+      },
+      (async (args: { titulo: string; detalhe: string; gravidade: (typeof FINDING_SEVERITIES)[number]; categoria: (typeof FINDING_CATEGORIES)[number]; sistema?: string }) => {
+        try {
+          const me = await prisma.agentProfile.findUnique({ where: { id: agentId }, select: { name: true } });
+          const sys = args.sistema?.trim() || null;
+          const data = { title: args.titulo.trim(), detail: redactSecrets(args.detalhe), severity: args.gravidade, category: args.categoria, applicationName: sys, agentName: me?.name ?? "Agente CLT" };
+          const fingerprint = findingKey(sys, args.titulo);
+          const existing = await prisma.agentFinding.findUnique({ where: { fingerprint }, select: { id: true } });
+          await prisma.agentFinding.upsert({ where: { fingerprint }, create: { ...data, fingerprint }, update: { ...data, updatedAt: new Date() } });
+          return text(existing ? "Achado já registrado: atualizei os dados (se já tinha sido tratado, voltou para a fila)." : "Achado registrado na fila de correção do Italo.");
         } catch (e) {
           return fail(e);
         }

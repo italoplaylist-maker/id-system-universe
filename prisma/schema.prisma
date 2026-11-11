@@ -1147,3 +1147,23 @@ model AgentRepository {
   @@unique([agentId, githubRepositoryId])
   @@unique([agentId, dir])
 }
+
+/// Achado registrado por um agente da equipe CLT (segurança, desempenho, qualidade, dívida técnica, documentação, infra...): vira item da fila de
+/// correção do ID Manager ao lado dos erros dos logs. Mesmo achado repetido atualiza o existente (fingerprint) e, se já tinha sido tratado, reabre.
+model AgentFinding {
+  id              String    @id @default(cuid())
+  fingerprint     String    @unique
+  agentName       String
+  applicationName String?
+  title           String
+  detail          String
+  severity        String    @default("MEDIUM")
+  category        String    @default("outro")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @default(now())
+  fixTaskId       String?
+  fixSentAt       DateTime?
+  dismissedAt     DateTime?
+
+  @@index([updatedAt])
+}
