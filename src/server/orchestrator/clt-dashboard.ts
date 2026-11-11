@@ -38,7 +38,7 @@ export interface CltDashboard {
   days: string[];
   tokensByDay: number[];
   tasksByDay: { completed: number[]; failed: number[] };
-  kpis: { tasks: { completed: number; failed: number; running: number; pending: number }; successRate: number | null; avgSeconds: number | null };
+  kpis: { tasks: { completed: number; failed: number; running: number; pending: number }; successRate: number | null; avgSeconds: number | null; efficiency: { tokensPerTask: number | null; cachePercent: number | null; wastedPercent: number | null } };
   recentTasks: DashboardTask[];
   routines: Array<{ id: string; name: string; schedule: string; enabled: boolean; gate: string; priority: number; lastRunAt: string | null; lastOutcome: string | null }>;
   /** Só para o ID Manager. */
@@ -79,6 +79,19 @@ async function managerOperation(days: string[], now: Date): Promise<ManagerOpera
   };
 }
 
+/** Eficiência no uso de tokens: custo médio por tarefa concluída, parte vinda de cache (barata) e parte gasta em tarefas que falharam. */
+export function efficiency(rows: Array<{ status: string; inputTokens: number | null; outputTokens: number | null; cacheTokens: number | null }>): { tokensPerTask: number | null; cachePercent: number | null; wastedPercent: number | null } {
+  const total = rows.reduce((n, r) => n + sum(r), 0);
+  const done = rows.filter((r) => r.status === "COMPLETED");
+  const lost = rows.filter((r) => r.status !== "COMPLETED").reduce((n, r) => n + sum(r), 0);
+  const cache = rows.reduce((n, r) => n + (r.cacheTokens ?? 0), 0);
+  return {
+    tokensPerTask: done.length ? Math.round(done.reduce((n, r) => n + sum(r), 0) / done.length) : null,
+    cachePercent: total > 0 ? Math.round((cache / total) * 100) : null,
+    wastedPercent: total > 0 ? Math.round((lost / total) * 100) : null,
+  };
+}
+
 /** ErrorDaily já vem por dia ("AAAA-MM-DD"): soma por chave de dia. */
 function bucketByDayKey(rows: Array<{ day: string; count: number }>, days: string[]): number[] {
   const out = days.map(() => 0);
@@ -113,7 +126,7 @@ export async function cltAgentDashboard(agentId: string, now: Date = new Date())
     days,
     tokensByDay: bucketByDay(finished.map((t) => ({ at: t.finishedAt, value: sum(t) })), days),
     tasksByDay: { completed: bucketByDay(done.map((t) => ({ at: t.finishedAt, value: 1 })), days), failed: bucketByDay(failed.map((t) => ({ at: t.finishedAt, value: 1 })), days) },
-    kpis: { tasks: agent.tasks, successRate: total > 0 ? Math.round((done.length / total) * 100) : null, avgSeconds: durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null },
+    kpis: { tasks: agent.tasks, successRate: total > 0 ? Math.round((done.length / total) * 100) : null, avgSeconds: durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null, efficiency: efficiency(finished) },
     recentTasks: recent.map((t) => ({
       id: t.id,
       status: t.status,

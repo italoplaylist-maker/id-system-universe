@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CLT_DISALLOWED_TOOLS, CLT_RULES, CLT_TEAM, cltAllowedTools, cltRoleNote, evaluateBudget, findDuplicate, normalizePrompt, routeTask } from "../src/lib/clt-team";
+import { budgetNote, CLT_DISALLOWED_TOOLS, CLT_RULES, CLT_TEAM, cltAllowedTools, cltRoleNote, evaluateBudget, findDuplicate, normalizePrompt, routeTask } from "../src/lib/clt-team";
 
 test("a equipe tem os 7 cargos, slugs únicos e nenhum modo perigoso", () => {
   assert.equal(CLT_TEAM.length, 7);
@@ -111,4 +111,19 @@ test("o Manager sabe delegar e, como ele e o Architect precisam agir, nenhum age
   assert.match(CLT_RULES.join(" "), /INCIDENTE DE DEPLOY FALHO/);
   assert.match(CLT_TEAM.find((x) => x.slug === "id-doctor")!.description, /AUTORIDADE TOTAL/);
   assert.match(CLT_TEAM.find((x) => x.slug === "id-devops")!.description, /AUTORIDADE/);
+});
+
+test("orçamento: o agente recebe quanto gastou e o conselho muda conforme aperta; limites novos coerentes", () => {
+  assert.match(budgetNote({ usedDay: 100_000, usedMonth: 1_000_000, dailyLimit: 4_000_000, monthlyLimit: 80_000_000 }), /folgado/);
+  assert.match(budgetNote({ usedDay: 3_000_000, usedMonth: 1, dailyLimit: 4_000_000, monthlyLimit: 80_000_000 }), /apertado/);
+  assert.match(budgetNote({ usedDay: 3_700_000, usedMonth: 1, dailyLimit: 4_000_000, monthlyLimit: 80_000_000 }), /CRÍTICO/);
+  assert.match(budgetNote({ usedDay: 5, usedMonth: 5, dailyLimit: null, monthlyLimit: null }), /sem limite/);
+  assert.ok(CLT_RULES.some((r) => /tokens como dinheiro/.test(r)));
+  for (const a of CLT_TEAM) assert.ok(a.dailyTokenLimit >= 3_000_000 && a.monthlyTokenLimit >= 20 * a.dailyTokenLimit);
+});
+
+test("nota de orçamento mostra o que resta de hoje e do mês", () => {
+  const n = budgetNote({ usedDay: 1_000_000, usedMonth: 10_000_000, dailyLimit: 4_000_000, monthlyLimit: 80_000_000 });
+  assert.match(n, /restam 3 mi/);
+  assert.match(n, /restam 70 mi/);
 });

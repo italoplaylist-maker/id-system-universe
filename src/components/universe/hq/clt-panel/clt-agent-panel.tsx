@@ -117,6 +117,7 @@ function Resumo({ d }: { d: CltDashboardView }) {
           <Meter percent={a.usage.monthPercent} label="Uso mensal de tokens" />
         </StatTile>
         <StatTile label={`Tarefas em ${DASHBOARD_DAYS} dias`} value={t.completed + t.failed} hint={`${t.completed} concluídas · ${t.failed} falhas`} />
+        <StatTile label="Eficiência" value={d.kpis.efficiency.tokensPerTask === null ? "—" : fmtTokens(d.kpis.efficiency.tokensPerTask)} hint={`por tarefa concluída · ${d.kpis.efficiency.cachePercent ?? 0}% cache · ${d.kpis.efficiency.wastedPercent ?? 0}% perdido em falhas`} />
         <StatTile label="Taxa de sucesso" value={d.kpis.successRate === null ? "—" : `${d.kpis.successRate}%`} hint={`tempo médio ${dur(d.kpis.avgSeconds)}`} />
       </div>
       <DayBarChart title="Tokens por dia" subtitle={`Últimos ${DASHBOARD_DAYS} dias · entrada + saída + cache`} days={d.days} series={[{ key: "tokens", label: "Tokens", color: SERIES.blue, values: d.tokensByDay }]} format={fmtTokens} />

@@ -79,6 +79,7 @@ export const CLT_RULES = [
   "Acesse somente os repositórios autorizados a você; se precisar de outro, peça autorização em vez de tentar.",
   "Prefira análise incremental (git diff desde a última análise) a varrer o repositório inteiro; não repita trabalho já feito.",
   "Responda de forma curta, com o resultado e as pendências; qualquer ação de risco vira um pedido de aprovação.",
+  "Gerencie seus tokens como dinheiro da empresa: leia só o que precisa (arquivo/trecho, não o repositório inteiro), não releia o que já entendeu, não repita análise sem mudança nova, delegue ou registre achado em vez de investigar fora do seu cargo, pare quando a pergunta estiver respondida e priorize o que dá mais retorno. Siga a nota de ORÇAMENTO DE TOKENS que o Universe põe no início de cada execução.",
   "Tudo que você VERIFICAR e puder melhorar (segurança, desempenho, qualidade, dívida técnica, documentação, infraestrutura), mesmo fora do que foi pedido, registre com a ferramenta registrar_achado (um item por problema, com evidência): o Italo escolhe da fila o que mandar corrigir. Não registre suposição. Quando a solução depender de algo que só o Italo pode fazer (credenciais, painel de terceiros, autorizações), registre com categoria acao-humana, dizendo exatamente o passo a passo.",
 ];
 
@@ -93,8 +94,8 @@ export const CLT_TEAM: CltAgentDef[] = [
     model: "sonnet",
     effort: "medium",
     permissionMode: "default",
-    dailyTokenLimit: 2_000_000,
-    monthlyTokenLimit: 40_000_000,
+    dailyTokenLimit: 4_000_000,
+    monthlyTokenLimit: 80_000_000,
     keywords: ["coorden", "priorid", "equipe", "relatório", "relatorio", "resumo geral", "distribu"],
   },
   {
@@ -107,8 +108,8 @@ export const CLT_TEAM: CltAgentDef[] = [
     model: "sonnet",
     effort: "high",
     permissionMode: "default",
-    dailyTokenLimit: 1_500_000,
-    monthlyTokenLimit: 30_000_000,
+    dailyTokenLimit: 3_000_000,
+    monthlyTokenLimit: 60_000_000,
     keywords: ["segurança", "seguranca", "vulnerab", "cve", "segredo", "secret", "credencial", "xss", "csrf", "injection", "auth", "permiss", "owasp", "token vazado"],
   },
   {
@@ -121,8 +122,8 @@ export const CLT_TEAM: CltAgentDef[] = [
     model: "opus",
     effort: "high",
     permissionMode: "default",
-    dailyTokenLimit: 2_500_000,
-    monthlyTokenLimit: 50_000_000,
+    dailyTokenLimit: 5_000_000,
+    monthlyTokenLimit: 100_000_000,
     keywords: ["bug", "erro", "falha", "exception", "stack trace", "crash", "quebr", "500", "não funciona", "nao funciona", "corrig", "corrij", "diagnóstic", "diagnostic"],
   },
   {
@@ -135,8 +136,8 @@ export const CLT_TEAM: CltAgentDef[] = [
     model: "sonnet",
     effort: "medium",
     permissionMode: "default",
-    dailyTokenLimit: 1_500_000,
-    monthlyTokenLimit: 30_000_000,
+    dailyTokenLimit: 3_000_000,
+    monthlyTokenLimit: 60_000_000,
     keywords: ["test", "cobertura", "regress", "qualidade", "lint", "typecheck", "build", "e2e", "qa"],
   },
   {
@@ -149,8 +150,8 @@ export const CLT_TEAM: CltAgentDef[] = [
     model: "sonnet",
     effort: "medium",
     permissionMode: "default",
-    dailyTokenLimit: 1_500_000,
-    monthlyTokenLimit: 30_000_000,
+    dailyTokenLimit: 3_000_000,
+    monthlyTokenLimit: 60_000_000,
     keywords: ["performance", "lento", "lentidão", "otimiz", "query", "consulta", "índice", "indice", "memória", "memoria", "cpu", "latência", "latencia", "banco de dados", "fps"],
   },
   {
@@ -163,8 +164,8 @@ export const CLT_TEAM: CltAgentDef[] = [
     model: "sonnet",
     effort: "medium",
     permissionMode: "default",
-    dailyTokenLimit: 1_500_000,
-    monthlyTokenLimit: 30_000_000,
+    dailyTokenLimit: 3_000_000,
+    monthlyTokenLimit: 60_000_000,
     keywords: ["deploy", "docker", "coolify", "servidor", "vps", "infra", "container", "contêiner", "traefik", "disco", "ci/cd", "pipeline", "dns", "ssl"],
   },
   {
@@ -177,8 +178,8 @@ export const CLT_TEAM: CltAgentDef[] = [
     model: "opus",
     effort: "high",
     permissionMode: "default",
-    dailyTokenLimit: 1_500_000,
-    monthlyTokenLimit: 30_000_000,
+    dailyTokenLimit: 3_000_000,
+    monthlyTokenLimit: 60_000_000,
     keywords: ["arquitet", "document", "cérebro", "cerebro", "decisão", "decisao", "refator", "design", "padrão", "padrao", "adr", "readme"],
   },
 ];
@@ -271,4 +272,15 @@ export function evaluateBudget(b: BudgetInput): BudgetState {
 /** Texto acrescentado ao prompt de sistema do Claude para um agente CLT: cargo, descrição e as regras da equipe. */
 export function cltRoleNote(def: { name: string; roleTitle: string; description: string }): string {
   return ` Você faz parte da equipe AGENTES CLT da ID System como ${def.roleTitle} (${def.name}). ${def.description} Regras da equipe: ${CLT_RULES.join(" ")}`;
+}
+
+/** Quanto do orçamento já foi usado → orientação para o próprio agente se administrar (entra no prompt a cada execução). */
+export function budgetNote(b: { usedDay: number; usedMonth: number; dailyLimit: number | null; monthlyLimit: number | null }): string {
+  const fmt = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")} mi` : n >= 1000 ? `${Math.round(n / 1000)} mil` : String(n));
+  const part = (label: string, used: number, limit: number | null) => (limit === null ? `${label}: ${fmt(used)} usados (sem limite)` : `${label}: ${fmt(used)} de ${fmt(limit)} (${Math.round((used / limit) * 100)}%), restam ${fmt(Math.max(0, limit - used))}`);
+  const day = b.dailyLimit ? b.usedDay / b.dailyLimit : 0;
+  const month = b.monthlyLimit ? b.usedMonth / b.monthlyLimit : 0;
+  const worst = Math.max(day, month);
+  const advice = worst >= 0.9 ? "ORÇAMENTO CRÍTICO: só o essencial, uma ação por vez, sem análise ampla; deixe o resto registrado como achado." : worst >= 0.7 ? "Orçamento apertado: priorize o que tem mais retorno e evite leituras amplas." : worst >= 0.4 ? "Orçamento sob controle: seja direto e não repita trabalho." : "Orçamento folgado, mas sem desperdício.";
+  return ` ORÇAMENTO DE TOKENS agora — ${part("hoje", b.usedDay, b.dailyLimit)}; ${part("no mês", b.usedMonth, b.monthlyLimit)}. ${advice}`;
 }
