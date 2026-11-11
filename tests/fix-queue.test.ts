@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildFindingBrief, buildFixBrief, findingKey, fixIdempotencyKey, fixState, parseItemId } from "../src/lib/fix-queue";
+import { HUMAN_CATEGORY, buildFindingBrief, sortHumanActions, buildFixBrief, findingKey, fixIdempotencyKey, fixState, parseItemId } from "../src/lib/fix-queue";
 
 const t = (h: number) => new Date(Date.UTC(2026, 10, 11, h));
 
@@ -38,4 +38,11 @@ test("achados: mesma impressão digital ignora caixa/acento; ids da fila; pedido
   assert.match(b, /ID Optimizer/);
   assert.match(b, /seq scan/);
   assert.match(b, /não faça merge/);
+});
+
+test("o que espera o Italo sai em ordem de prioridade: merge, autorização, incidente, ação manual; empate pelo mais antigo", () => {
+  const mk = (kind: "merge" | "aprovacao" | "incidente" | "acao", at: string) => ({ kind, at });
+  const out = sortHumanActions([mk("acao", "1"), mk("incidente", "1"), mk("merge", "3"), mk("aprovacao", "1"), mk("merge", "2")]);
+  assert.deepEqual(out.map((x) => `${x.kind}${x.at}`), ["merge2", "merge3", "aprovacao1", "incidente1", "acao1"]);
+  assert.equal(HUMAN_CATEGORY, "acao-humana");
 });

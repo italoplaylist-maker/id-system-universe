@@ -84,7 +84,7 @@ export async function teamTools(tool: ToolFn, agentId: string, taskId: string): 
     ),
     tool(
       "registrar_achado",
-      "Registra na FILA DE CORREÇÃO do Italo qualquer coisa que você viu e que pode melhorar ou corrigir (vulnerabilidade, lentidão, falta de teste, dívida técnica, documentação desatualizada, risco de infraestrutura, índice faltando…) — não só erros de log. O Italo escolhe um item por vez e o ID Manager coordena a correção. Registre só o que você VERIFICOU (arquivo/linha, medição ou trecho de log), um item por problema, com título específico. Repetir o mesmo achado só atualiza o existente.",
+      "Registra na FILA DE CORREÇÃO do Italo qualquer coisa que você viu e que pode melhorar ou corrigir (vulnerabilidade, lentidão, falta de teste, dívida técnica, documentação desatualizada, risco de infraestrutura, índice faltando…) — não só erros de log. O Italo escolhe um item por vez e o ID Manager coordena a correção. Se a ação só o Italo pode fazer (credencial, painel de terceiro, autorização, remover dados em conta externa), use categoria 'acao-humana': ela aparece no topo da tela dele como 'Ação sua' e NÃO vai para o Manager. Registre só o que você VERIFICOU (arquivo/linha, medição ou trecho de log), um item por problema, com título específico. Repetir o mesmo achado só atualiza o existente.",
       {
         titulo: z.string().min(8).max(160).describe("Título específico (ex.: 'Rota /api/x sem checagem de empresa')."),
         detalhe: z.string().min(20).max(3000).describe("Evidência (arquivo/linha, medição, trecho de log) e a correção sugerida."),
