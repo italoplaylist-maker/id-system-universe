@@ -14,7 +14,7 @@ import { seedDefaultPacks } from "./skill-packs";
 import { seedGlobalClaudeMd } from "./tools-config";
 import { cleanupStorage } from "./storage";
 import { getWorkspacePreparer, loadExtraRepos, syncProjectAgents } from "./workspace";
-import { cltDef, cltRoleNote } from "@/lib/clt-team";
+import { budgetNote, cltDef, cltRoleNote } from "@/lib/clt-team";
 import { agentBudget } from "./budget";
 import { ACTIVE, appendEvent, getSettings, purgeOldTasks, setTaskRegisteredHook } from "./service";
 
@@ -185,6 +185,13 @@ async function runTask(taskId: string): Promise<void> {
   const universe = await buildUniverseMcp(agent.id, taskId).catch(() => null);
   const mcpServers: Record<string, unknown> = { ...configured, ...(universe ? { universe } : {}) };
   const { autoApprove } = await getSettings();
+  // Equipe CLT: o agente sabe quanto já gastou e se administra (nota no início da execução).
+  const cltBudgetNote =
+    agent.team === "CLT"
+      ? await agentBudget(agent.id, { dailyTokenLimit: agent.dailyTokenLimit, monthlyTokenLimit: agent.monthlyTokenLimit })
+          .then((b) => budgetNote({ usedDay: b.usedDay, usedMonth: b.usedMonth, dailyLimit: agent.dailyTokenLimit, monthlyLimit: agent.monthlyTokenLimit }))
+          .catch(() => "")
+      : "";
   // Repositórios extras já clonados (preenchido depois que o workspace é preparado, logo abaixo).
   let extraRepos: Array<{ dir: string; fullName: string; name: string }> = [];
   const input = (resume: string | null | undefined) => ({
@@ -195,7 +202,7 @@ async function runTask(taskId: string): Promise<void> {
     permissionMode: (agent.permissionMode === "plan" ? "plan" : agent.permissionMode === "acceptEdits" || autoApprove ? "acceptEdits" : "default") as "default" | "acceptEdits" | "plan",
     agentName: agent.name,
     specialty: agent.specialty,
-    roleNote: agent.team === "CLT" ? cltRoleNote({ name: agent.name, roleTitle: agent.roleTitle || cltDef(agent.slug ?? "")?.roleTitle || "Funcionário", description: agent.description || cltDef(agent.slug ?? "")?.description || "" }) : undefined,
+    roleNote: agent.team === "CLT" ? cltRoleNote({ name: agent.name, roleTitle: agent.roleTitle || cltDef(agent.slug ?? "")?.roleTitle || "Funcionário", description: agent.description || cltDef(agent.slug ?? "")?.description || "" }) + cltBudgetNote : undefined,
     effort: agent.effort,
     attachments: prepared.attachments,
     attachmentsDir: prepared.dir,
