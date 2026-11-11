@@ -244,6 +244,10 @@ model ErrorGroup {
   count         Int         @default(1)
   firstSeenAt   DateTime
   lastSeenAt    DateTime
+  /// Fila de correção do ID Manager: tarefa enviada, quando, e se o humano descartou o item. Voltar a aparecer erro depois disso reabre o item.
+  fixTaskId     String?
+  fixSentAt     DateTime?
+  dismissedAt   DateTime?
 
   @@unique([applicationId, fingerprint])
   @@index([lastSeenAt])
