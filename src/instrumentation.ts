@@ -68,6 +68,11 @@ export async function register() {
   const { escalateStaleIncidents } = await import("@/server/orchestrator/incidents");
   setInterval(safely("incident_escalation", () => escalateStaleIncidents()), 10 * 60_000);
 
+  // PRs dos agentes: o webhook atualiza na hora; esta varredura (2 min) pega o que o webhook perdeu e fecha os PRs ultrapassados.
+  const { reconcileOpenPullRequests } = await import("@/server/orchestrator/git/pr-sync");
+  setInterval(safely("pr_reconcile", () => reconcileOpenPullRequests()), 2 * 60_000);
+  setTimeout(safely("pr_reconcile", () => reconcileOpenPullRequests()), 45_000);
+
   // Orquestrador de agentes Claude: despacha a fila e recupera tarefas interrompidas por reinício.
   const { startOrchestratorWorker } = await import("@/server/orchestrator/worker");
   startOrchestratorWorker();

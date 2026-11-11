@@ -3,6 +3,8 @@ import { prisma } from "@/server/db/client";
 import { logger } from "@/lib/logger";
 import { enqueueGitHubDeploy, runDeploymentQueueTick, type EnqueueOutcome } from "@/server/deployments/deployment-queue";
 import { getGitHubCredentials, verifyWebhookSignature } from "@/server/github/github-api";
+import { statusFromWebhook } from "@/lib/pr-sync";
+import { applyPullRequestStatus } from "@/server/orchestrator/git/pr-sync";
 import { syncInstallationRepositories, upsertInstallation } from "@/server/github/github-service";
 
 export interface WebhookResult {
@@ -28,6 +30,7 @@ interface PullRequestPayload {
   action?: string;
   repository?: RepoPayload;
   pull_request?: {
+    number?: number;
     merged?: boolean;
     merge_commit_sha?: string | null;
     title?: string;
@@ -136,6 +139,11 @@ async function handlePush(payload: PushPayload, deliveryId: string): Promise<Enq
 async function handlePullRequest(payload: PullRequestPayload, deliveryId: string): Promise<EnqueueOutcome[]> {
   const pr = payload.pull_request;
   const repository = payload.repository?.full_name;
+  // PR dos agentes: o Universe acompanha o GitHub na hora (mergeado/fechado/reaberto por qualquer um).
+  const synced = statusFromWebhook(payload.action, pr?.merged);
+  if (synced && repository && typeof pr?.number === "number") {
+    await applyPullRequestStatus(repository, pr.number, synced).catch((error) => logger.warn("agent_pr_webhook_sync_failed", { message: error instanceof Error ? error.message : String(error) }));
+  }
   if (payload.action !== "closed" || !pr?.merged || !repository || !pr.base?.ref || !pr.merge_commit_sha) return [];
   if (!SHA_PATTERN.test(pr.merge_commit_sha)) return [];
 
