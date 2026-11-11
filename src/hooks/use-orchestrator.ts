@@ -330,6 +330,17 @@ export function useSystemErrors(hours: number, enabled = true) {
   });
 }
 
+/** Decisão humana sobre um incidente de deploy: liberar o agente bloqueado ou dar o incidente por resolvido. */
+export function useIncidentMutations() {
+  const queryClient = useQueryClient();
+  return {
+    act: useMutation({
+      mutationFn: ({ id, action }: { id: string; action: "unlock" | "resolve" }) => apiFetch<{ incident: unknown }>(`/api/orchestrator/incidents/${id}`, { method: "POST", body: JSON.stringify({ action }) }),
+      onSettled: () => queryClient.invalidateQueries({ queryKey: KEY }),
+    }),
+  };
+}
+
 export type CltDashboardView = import("@/server/orchestrator/clt-dashboard").CltDashboard;
 
 /** Painel de um agente da equipe CLT (gráficos, tarefas, rotinas; no Manager, a visão da operação). */

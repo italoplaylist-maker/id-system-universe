@@ -322,6 +322,10 @@ export interface RoomAgentView {
   allowedTools: string[];
   disallowedTools: string[];
   paused: boolean;
+  /** Motivo do bloqueio automático por incidente de deploy (nulo = não está bloqueado por incidente). */
+  lockReason: string | null;
+  /** Incidente que bloqueou o agente (para o botão "Liberar"). */
+  lockedIncidentId: string | null;
   /** Equipe ("CLT") e cargo, quando o agente faz parte de uma. */
   team: string | null;
   slug: string | null;
@@ -359,8 +363,12 @@ export async function listRoomAgents(now: Date = new Date()): Promise<RoomAgentV
     ? await prisma.agentTaskEvent.findMany({ where: { taskId: { in: active.map((t) => t.id) }, kind: { in: ["tool_use", "assistant_text", "approval_requested"] } }, orderBy: { seq: "desc" }, distinct: ["taskId"] })
     : [];
 
+  const lockedIds = agents.map((a) => a.lockedByIncidentId).filter((x): x is string => !!x);
+  const lockIncidents = lockedIds.length ? await prisma.deployIncident.findMany({ where: { id: { in: lockedIds } }, include: { application: { select: { name: true } } } }) : [];
+
   return agents.map((a) => {
     const task = active.find((t) => t.agentId === a.id) ?? null;
+    const lockInc = lockIncidents.find((i) => i.id === a.lockedByIncidentId);
     const approval = approvals.find((p) => p.task.agentId === a.id) ?? null;
     const finished = lastFinished.find((t) => t.agentId === a.id) ?? null;
     const ev = task ? lastEvents.find((e) => e.taskId === task.id) : null;
@@ -380,6 +388,8 @@ export async function listRoomAgents(now: Date = new Date()): Promise<RoomAgentV
       model: a.model,
       permissionMode: a.permissionMode,
       effort: a.effort,
+      lockedIncidentId: lockInc?.id ?? null,
+      lockReason: lockInc ? `Bloqueado: o deploy de "${lockInc.application.name}" falhou com um commit deste agente. A equipe CLT está consertando; ele volta quando o deploy der certo.` : null,
       team: a.team,
       slug: a.slug,
       roleTitle: a.roleTitle,

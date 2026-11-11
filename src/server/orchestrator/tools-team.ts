@@ -9,6 +9,7 @@ import { DELEGATION_PRIORITIES, checkDelegation, resolveAgentRef } from "@/lib/c
 import { findDuplicate } from "@/lib/clt-team";
 import { agentBudget, windowStarts } from "./budget";
 import { cltOverview } from "./clt";
+import { listIncidents } from "./incidents";
 import { ACTIVE, submitSystemTask } from "./service";
 
 /**
@@ -139,11 +140,12 @@ export async function teamTools(tool: ToolFn, agentId: string, taskId: string): 
           try {
             const hours = args.horas ?? 24;
             const since = new Date(Date.now() - hours * 3600_000);
-            const [overview, recent, routines, errors] = await Promise.all([
+            const [overview, recent, routines, errors, incidents] = await Promise.all([
               cltOverview(),
               prisma.agentTask.findMany({ where: { agent: { team: "CLT" }, finishedAt: { gte: since } }, orderBy: { finishedAt: "desc" }, take: 15, include: { agent: { select: { name: true } } } }),
               prisma.agentRoutine.findMany({ where: { agent: { team: "CLT", archivedAt: null } }, include: { agent: { select: { name: true } } }, orderBy: { time: "asc" } }),
               listErrorGroups({ hours, limit: 5 }),
+              listIncidents(10),
             ]);
             const pct = (p: number | null) => (p === null ? "sem limite" : `${p}%`);
             const agents = overview.agents.map((a) => `• ${a.name} (${a.roleTitle ?? "—"}): ${a.state}${a.activity ? ` — ${a.activity}` : ""} · tarefas: ${a.tasks.running} rodando, ${a.tasks.pending} na fila, ${a.tasks.completed} concluídas, ${a.tasks.failed} falhas · tokens hoje ${a.usage.usedDay} (${pct(a.usage.dayPercent)}), mês ${a.usage.usedMonth} (${pct(a.usage.monthPercent)})${a.paused ? " · PAUSADO" : ""}`).join("\n");
@@ -154,7 +156,11 @@ export async function teamTools(tool: ToolFn, agentId: string, taskId: string): 
             const sysErrors = errors.length
               ? errors.map((g) => `• ${g.application} — ${g.count}× · ${g.sample.split("\n")[0].slice(0, 160)}`).join("\n")
               : `(nenhum erro novo nos logs nas últimas ${hours} h)`;
-            return text(cap(`EQUIPE (${overview.totals.working} trabalhando, ${overview.totals.available} disponíveis, ${overview.totals.waiting} aguardando aprovação, ${overview.totals.errored} com erro) · tokens hoje ${overview.totals.tokensDay}, mês ${overview.totals.tokensMonth}\n\n${agents}\n\nRESULTADOS (${hours} h):\n${results}\n\nROTINAS:\n${routs}\n\nERROS DOS SISTEMAS (${hours} h, mais recentes):\n${sysErrors}`));
+            const openIncidents = incidents.filter((i) => i.status !== "RESOLVED");
+            const incidentLines = openIncidents.length
+              ? openIncidents.map((i) => `• ${i.application} — ${i.status === "ESCALATED" ? "PRECISA DE HUMANO" : "em conserto"} · tentativa ${i.attempts} · ${i.commit ?? "?"} ${i.commitMessage ?? ""}${i.culprit?.locked ? ` · agente ${i.culprit.name} bloqueado` : ""}`).join("\n")
+              : "(nenhum incidente de deploy aberto)";
+            return text(cap(`EQUIPE (${overview.totals.working} trabalhando, ${overview.totals.available} disponíveis, ${overview.totals.waiting} aguardando aprovação, ${overview.totals.errored} com erro) · tokens hoje ${overview.totals.tokensDay}, mês ${overview.totals.tokensMonth}\n\n${agents}\n\nRESULTADOS (${hours} h):\n${results}\n\nROTINAS:\n${routs}\n\nERROS DOS SISTEMAS (${hours} h, mais recentes):\n${sysErrors}\n\nINCIDENTES DE DEPLOY ABERTOS:\n${incidentLines}`));
           } catch (e) {
             return fail(e);
           }

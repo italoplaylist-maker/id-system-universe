@@ -13,6 +13,7 @@ import { AttachButton, AttachmentStrip, MicButton, useComposerAttachments, useDi
 import { cn } from "@/lib/cn";
 import { cltDef } from "@/lib/clt-team";
 import {
+  useIncidentMutations,
   useAgentGit,
   useAgentRepos,
   useExtraRepoMutations,
@@ -379,6 +380,7 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
   const { data: agents } = useRoomAgents(true);
   const { data: settings } = useOrchestratorSettings(true);
   const { submit, updateAgent, archiveAgent, setConcurrency, createCltTeam } = useOrchestratorMutations();
+  const unlockIncident = useIncidentMutations();
   const [agentId, setAgentId] = useState<string | null>(initialAgentId);
   const [text, setText] = useState("");
   const [tab, setTab] = useState<"active" | "history">("active");
@@ -569,6 +571,15 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
           <div className="min-w-0">
             <h2 className="truncate text-base font-medium text-foreground">{selected ? selected.name : "Nenhum agente"}</h2>
             {selected && <p className="truncate text-xs text-muted">{selected.specialty ?? "—"} · {selected.cwd}</p>}
+            {selected?.lockReason && (
+              <p className="mt-1 flex flex-wrap items-center gap-2 text-xs" role="alert" style={{ color: "#fab219" }}>
+                <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+                <span className="text-foreground">{selected.lockReason}</span>
+                {canWrite && selected.lockedIncidentId && (
+                  <button className="underline" onClick={() => unlockIncident.act.mutate({ id: selected.lockedIncidentId!, action: "unlock" }, { onSuccess: () => toast.success("Agente liberado."), onError: (e) => toast.error(e.message) })}>Liberar agora</button>
+                )}
+              </p>
+            )}
             {selected && <p className={cn("text-xs font-medium", ROOM_LABEL[selected.state].cls)}>{ROOM_LABEL[selected.state].label}{selected.activity ? ` — ${selected.activity}` : ""}{selected.queued > 0 ? ` · ${selected.queued} na fila` : ""}</p>}
           </div>
           <div className="flex shrink-0 items-center gap-1">

@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 import { DASHBOARD_DAYS, MAX_DELEGATIONS_PER_DAY } from "@/lib/clt-dashboard";
 import { ROUTINE_GATES } from "@/lib/clt-routines";
 import { fmtTokens } from "@/lib/claude-usage";
-import { useCltDashboard, useOrchestratorMutations, type CltDashboardView } from "@/hooks/use-orchestrator";
+import { useCltDashboard, useIncidentMutations, useOrchestratorMutations, type CltDashboardView } from "@/hooks/use-orchestrator";
 import { DayBarChart, Meter, RankBars, SERIES, STATUS, StatTile } from "./charts";
 
 type Tab = "resumo" | "operacao" | "equipe" | "tarefas" | "rotinas" | "conversar";
@@ -132,7 +132,66 @@ function Resumo({ d }: { d: CltDashboardView }) {
   );
 }
 
-function Operacao({ d }: { d: CltDashboardView }) {
+const INCIDENT_STATUS: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  OPEN: { label: "Em conserto", color: STATUS.warning, icon: <Loader2 className="h-3.5 w-3.5 animate-spin" /> },
+  RESOLVED: { label: "Resolvido", color: STATUS.good, icon: <CheckCircle2 className="h-3.5 w-3.5" /> },
+  ESCALATED: { label: "Precisa de você", color: STATUS.critical, icon: <AlertCircle className="h-3.5 w-3.5" /> },
+};
+
+/** Incidentes de deploy falho: o que a equipe está consertando, quem ficou bloqueado e as ações humanas (liberar / dar por resolvido). */
+function Incidentes({ incidents, canWrite }: { incidents: NonNullable<CltDashboardView["operation"]>["incidents"]; canWrite: boolean }) {
+  const { act } = useIncidentMutations();
+  const [open, setOpen] = useState<string | null>(null);
+  const attention = incidents.filter((i) => i.status !== "RESOLVED").length;
+  return (
+    <section className="overflow-hidden rounded-xl border bg-surface-raised" style={{ borderColor: attention ? `${STATUS.warning}66` : undefined }} aria-label="Incidentes de deploy">
+      <header className="border-b border-border px-4 py-3">
+        <h3 className="text-sm font-semibold text-foreground">Incidentes de deploy{attention ? ` · ${attention} aberto${attention === 1 ? "" : "s"}` : ""}</h3>
+        <p className="text-xs text-muted">Quando um deploy falha, a equipe acha a causa e corrige sozinha. O agente que fez o commit quebrado fica bloqueado até o deploy dar certo.</p>
+      </header>
+      {incidents.length === 0 ? (
+        <p className="p-6 text-center text-sm text-muted">Nenhum deploy falhou desde que o recurso foi ligado.</p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {incidents.map((i) => (
+            <li key={i.id}>
+              <button className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-surface" onClick={() => setOpen(open === i.id ? null : i.id)} aria-expanded={open === i.id}>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-foreground">{i.application}</span>
+                  <span className="block truncate text-xs text-muted">{i.commit ? `${i.commit} · ` : ""}{i.commitMessage ?? "commit desconhecido"}</span>
+                  <span className="mt-1 block text-[11px] text-muted">
+                    aberto {when(i.createdAt)} · tentativa {i.attempts}
+                    {i.culprit ? ` · agente ${i.culprit.name}${i.culprit.locked ? " BLOQUEADO" : ""}` : ""}
+                  </span>
+                </span>
+                <Pill meta={INCIDENT_STATUS[i.status] ?? INCIDENT_STATUS.OPEN} />
+              </button>
+              {open === i.id && (
+                <div className="space-y-2 border-t border-border bg-background/40 px-4 py-3 text-xs">
+                  {i.summary && <pre className="whitespace-pre-wrap break-words text-muted">{i.summary}</pre>}
+                  {canWrite && i.status !== "RESOLVED" && (
+                    <div className="flex flex-wrap gap-2">
+                      {i.culprit?.locked && (
+                        <Button size="sm" variant="secondary" disabled={act.isPending} onClick={() => act.mutate({ id: i.id, action: "unlock" }, { onSuccess: () => toast.success("Agente liberado."), onError: (e) => toast.error(e.message) })}>
+                          Liberar {i.culprit.name}
+                        </Button>
+                      )}
+                      <Button size="sm" variant="secondary" disabled={act.isPending} onClick={() => act.mutate({ id: i.id, action: "resolve" }, { onSuccess: () => toast.success("Incidente fechado."), onError: (e) => toast.error(e.message) })}>
+                        Dar por resolvido
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function Operacao({ d, canWrite }: { d: CltDashboardView; canWrite: boolean }) {
   const op = d.operation;
   const [open, setOpen] = useState<string | null>(null);
   if (!op) return null;
@@ -143,6 +202,7 @@ function Operacao({ d }: { d: CltDashboardView }) {
   const errors7 = op.errorsByDay.slice(-7).reduce((a, b) => a + b, 0);
   return (
     <div className="space-y-4">
+      <Incidentes incidents={op.incidents} canWrite={canWrite} />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile label="Sistemas" value={totalApps} hint={`${apps.RUNNING ?? 0} no ar · ${apps.ERROR ?? 0} com erro · ${apps.DEPLOYING ?? 0} implantando`}>
           {(apps.ERROR ?? 0) > 0 ? <Pill meta={{ label: `${apps.ERROR} com erro`, color: STATUS.critical, icon: <AlertCircle className="h-3.5 w-3.5" /> }} /> : <Pill meta={{ label: "Sem sistema em erro", color: STATUS.good, icon: <CheckCircle2 className="h-3.5 w-3.5" /> }} />}
@@ -344,7 +404,7 @@ export function CltAgentPanel({ agentId, canWrite, onClose, onSelectAgent, onOpe
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
         {isLoading && <p className="text-sm text-muted">Carregando dados do agente…</p>}
         {error && <p className="text-sm" style={{ color: STATUS.critical }}>Não consegui carregar o painel: {error instanceof Error ? error.message : "erro desconhecido"}.</p>}
-        {d && current === "operacao" && <Operacao d={d} />}
+        {d && current === "operacao" && <Operacao d={d} canWrite={canWrite} />}
         {d && current === "resumo" && <Resumo d={d} />}
         {d && current === "equipe" && <Equipe d={d} onSelect={onSelectAgent} />}
         {d && current === "tarefas" && <TaskList tasks={d.recentTasks} />}

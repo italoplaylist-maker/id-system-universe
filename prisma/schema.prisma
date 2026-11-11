@@ -205,6 +205,7 @@ model Application {
   errorGroups    ErrorGroup[]
   errorScan      ErrorScanState?
   errorDaily     ErrorDaily[]
+  deployIncidents DeployIncident[]
 
   @@unique([providerId, externalId])
   @@index([providerId])
@@ -258,6 +259,36 @@ model ErrorDaily {
 
   @@unique([applicationId, day])
   @@index([day])
+}
+
+/// Incidente aberto quando um deploy falha: a equipe CLT acha a causa e corrige. O agente que fez o PR do commit quebrado fica
+/// bloqueado (AgentProfile.lockedByIncidentId) até o incidente fechar. Um incidente por (sistema, deploy).
+model DeployIncident {
+  id                   String      @id @default(cuid())
+  applicationId        String
+  application          Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  deploymentExternalId String
+  commitSha            String?
+  commitMessage        String?
+  repository           String?
+  /// OPEN (em conserto) | RESOLVED (um deploy seguinte teve sucesso) | ESCALATED (3 tentativas ou 6 h sem resolver: precisa de humano)
+  status               String      @default("OPEN")
+  /// Quantos deploys falharam dentro deste incidente (1 = o original; cada correção que também falha soma 1).
+  attempts             Int         @default(1)
+  /// Tarefa do ID Manager que coordena o conserto: as tarefas delegadas por ela (parentTaskId) são quem pode mergear a correção.
+  managerTaskId        String?
+  /// Agente (de projeto) cujo PR gerou o commit quebrado; ficou bloqueado enquanto o incidente estava aberto.
+  culpritAgentId       String?
+  /// O culpado já estava pausado (por um humano) antes do bloqueio: ao fechar o incidente ele continua pausado.
+  culpritWasPaused     Boolean     @default(false)
+  summary              String?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  resolvedAt           DateTime?
+
+  @@unique([applicationId, deploymentExternalId])
+  @@index([applicationId, status])
+  @@index([status, createdAt])
 }
 
 /// Última leitura de logs de um sistema: as linhas de erro já contadas, para não contá-las de novo na leitura seguinte.
@@ -890,6 +921,8 @@ model AgentProfile {
   pullRequests       AgentPullRequest[]
   agentRepositories  AgentRepository[]
   routines           AgentRoutine[]
+  /// Incidente de deploy que bloqueou este agente (ele causou o deploy que falhou). Nulo = livre. Só o incidente que bloqueou desbloqueia.
+  lockedByIncidentId String?
 
   @@index([archivedAt, position])
 }
