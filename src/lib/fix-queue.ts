@@ -24,6 +24,34 @@ export function fixState(i: FixItemInput): FixState {
 export const FIX_KEY_PREFIX = "fix:";
 export const fixIdempotencyKey = (groupId: string, at: Date) => `${FIX_KEY_PREFIX}${groupId}:${at.getTime()}`;
 
+export const FINDING_CATEGORIES = ["seguranca", "desempenho", "qualidade", "divida-tecnica", "documentacao", "infraestrutura", "banco-de-dados", "outro"] as const;
+export const FINDING_SEVERITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
+export type FindingSeverity = (typeof FINDING_SEVERITIES)[number];
+
+/** Mesmo achado (sistema + título, sem caixa/acento/pontuação) = mesma impressão digital. */
+export function findingKey(system: string | null, title: string): string {
+  const norm = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+  return `${norm(system ?? "geral")}|${norm(title)}`;
+}
+
+/** Id do item na fila: "erro:<id>" (log) ou "achado:<id>" (registrado por agente). */
+export function parseItemId(id: string): { kind: "erro" | "achado"; rawId: string } | null {
+  const m = /^(erro|achado):(.+)$/.exec(id);
+  return m ? { kind: m[1] as "erro" | "achado", rawId: m[2] } : null;
+}
+
+export function buildFindingBrief(f: { title: string; detail: string; severity: string; category: string; application: string | null; reportedBy: string }): string {
+  return [
+    `CORREÇÃO PEDIDA PELO ITALO — achado registrado pelo ${f.reportedBy}.`,
+    `Título: ${f.title}`,
+    `Sistema: ${f.application ?? "geral"} · categoria: ${f.category} · gravidade: ${f.severity}.`,
+    `Detalhe:`,
+    f.detail.slice(0, 3000),
+    ``,
+    `Você gerencia esta melhoria, UM item por vez. Confirme o achado no código/ambiente antes de agir, delegue (delegar_tarefa) ao especialista certo (Doctor, Guardian, Optimizer, QA, DevOps ou Architect) e acompanhe com resultado_delegacoes. Entregue um resumo curto: o que era, o que foi feito e o que falta. Mudança de código vai em PR para revisão do Italo — não faça merge (merge só é permitido em incidente de deploy falho).`,
+  ].join("\n");
+}
+
 export function buildFixBrief(e: { application: string; project: string | null; count: number; firstSeenAt: string; lastSeenAt: string; sample: string }): string {
   return [
     `CORREÇÃO PEDIDA PELO ITALO — erro de sistema encontrado pela equipe CLT.`,

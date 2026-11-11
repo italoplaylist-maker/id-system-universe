@@ -198,6 +198,8 @@ const FIX_STATE: Record<string, { label: string; color: string; icon: React.Reac
   dismissed: { label: "Descartado", color: "#8890a3", icon: <Ban className="h-3.5 w-3.5" /> },
 };
 
+const SEVERITY_LABEL: Record<string, string> = { CRITICAL: "Crítica", HIGH: "Alta", MEDIUM: "Média", LOW: "Baixa" };
+
 /** Fila de correção: erros que a equipe CLT viu. O Italo escolhe UM, manda corrigir e o ID Manager gerencia (Doctor/DevOps). */
 function Correcoes({ canWrite }: { canWrite: boolean }) {
   const { data, isLoading, error } = useFixQueue();
@@ -209,12 +211,12 @@ function Correcoes({ canWrite }: { canWrite: boolean }) {
   return (
     <section className="overflow-hidden rounded-xl border bg-surface-raised" style={{ borderColor: pending ? `${STATUS.warning}66` : undefined }} aria-label="Fila de correção">
       <header className="border-b border-border px-4 py-3">
-        <h3 className="text-sm font-semibold text-foreground">O que a equipe viu e precisa corrigir{pending ? ` · ${pending} aguardando` : ""}</h3>
-        <p className="text-xs text-muted">Escolha um erro e mande corrigir. É um de cada vez: o ID Manager delega ao Doctor ou ao DevOps e gerencia. A correção de código chega em PR para você revisar.</p>
+        <h3 className="text-sm font-semibold text-foreground">O que a equipe viu e pode melhorar{pending ? ` · ${pending} aguardando` : ""}</h3>
+        <p className="text-xs text-muted">Erros dos logs e achados de qualquer agente (segurança, desempenho, qualidade, documentação…). Escolha um e mande corrigir. É um de cada vez: o ID Manager delega ao Doctor ou ao DevOps e gerencia. A correção de código chega em PR para você revisar.</p>
       </header>
       {isLoading && <p className="p-6 text-center text-sm text-muted">Carregando…</p>}
       {error && <p className="p-4 text-sm" style={{ color: STATUS.critical }}>Não consegui carregar a fila: {error instanceof Error ? error.message : "erro desconhecido"}.</p>}
-      {data && items.length === 0 && <p className="p-6 text-center text-sm text-muted">Nenhum erro registrado nos últimos 7 dias.</p>}
+      {data && items.length === 0 && <p className="p-6 text-center text-sm text-muted">Nada registrado ainda: erros dos últimos 7 dias e achados dos agentes aparecem aqui.</p>}
       {items.length > 0 && (
         <ul className="divide-y divide-border" role="radiogroup" aria-label="Erros">
           {items.map((e) => {
@@ -226,14 +228,16 @@ function Correcoes({ canWrite }: { canWrite: boolean }) {
                   <input type="radio" name="fix" className="mt-1" checked={on} disabled={locked || !canWrite} onChange={() => setSelected(e.id)} />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-start justify-between gap-2">
-                      <span className="block text-sm font-medium text-foreground">{e.project ? `${e.project} / ` : ""}{e.application}</span>
+                      <span className="block text-sm font-medium text-foreground">{e.kind === "achado" ? e.title : `${e.project ? `${e.project} / ` : ""}${e.application ?? "sistema"}`}</span>
                       <Pill meta={FIX_STATE[e.state]} />
                     </span>
-                    <span className="block truncate font-mono text-[11px] text-muted">{e.sample.split("\n")[0]}</span>
-                    <span className="block text-[11px] text-muted">{e.count}× · última {when(e.lastSeenAt)}</span>
+                    {e.kind === "erro" && <span className="block truncate font-mono text-[11px] text-muted">{e.title}</span>}
+                    <span className="block text-[11px] text-muted">
+                      {e.kind === "achado" ? `${e.severity ? SEVERITY_LABEL[e.severity] ?? e.severity : ""} · ${e.category ?? "outro"}${e.application ? ` · ${e.application}` : ""} · por ${e.reportedBy}` : `erro de log · ${e.count}×`} · {when(e.lastSeenAt)}
+                    </span>
                   </span>
                 </label>
-                {on && <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all border-t border-border bg-background/40 px-4 py-3 font-mono text-[11px] text-foreground/90">{e.sample}</pre>}
+                {on && <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words border-t border-border bg-background/40 px-4 py-3 font-mono text-[11px] text-foreground/90">{e.detail}</pre>}
               </li>
             );
           })}
