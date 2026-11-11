@@ -1,7 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { recordAuditEvent } from "@/server/audit/audit-log";
-import { FIX_KEY_PREFIX, buildFindingBrief, buildFixBrief, fixIdempotencyKey, fixState, parseItemId, type FixState } from "@/lib/fix-queue";
+import { HUMAN_CATEGORY, FIX_KEY_PREFIX, sortHumanActions, type HumanActionKind, buildFindingBrief, buildFixBrief, fixIdempotencyKey, fixState, parseItemId, type FixState } from "@/lib/fix-queue";
 import { agentBudget } from "./budget";
 import { submitSystemTask } from "./service";
 
@@ -27,7 +27,21 @@ export interface FixItemView {
   taskId: string | null;
 }
 
+export interface HumanActionView {
+  id: string;
+  kind: HumanActionKind;
+  title: string;
+  detail: string;
+  /** Link externo (PR no GitHub). */
+  url: string | null;
+  /** "achado:<id>" quando dá para marcar como feito aqui. */
+  itemId: string | null;
+  at: string;
+}
+
 export interface FixQueueView {
+  /** Tudo que espera o Italo, em ordem de prioridade (merge, autorização, incidente, ação manual). */
+  actions: HumanActionView[];
   items: FixItemView[];
   /** Há uma correção em andamento: só uma por vez. */
   busy: boolean;
@@ -38,13 +52,31 @@ async function activeFixTaskIds(): Promise<Set<string>> {
   return new Set(rows.map((r) => r.id));
 }
 
+/** O que só o Italo resolve: PRs aguardando merge, tarefas aguardando autorização, incidentes escalados e ações manuais registradas pelos agentes. */
+async function listHumanActions(): Promise<HumanActionView[]> {
+  const [prs, waiting, incidents, manual] = await Promise.all([
+    prisma.agentPullRequest.findMany({ where: { status: "OPEN" }, orderBy: { createdAt: "asc" }, take: 30, include: { agent: { select: { name: true } } } }),
+    prisma.agentTask.findMany({ where: { status: "WAITING_APPROVAL" }, orderBy: { createdAt: "asc" }, take: 20, include: { agent: { select: { name: true } } } }),
+    prisma.deployIncident.findMany({ where: { status: "ESCALATED" }, orderBy: { createdAt: "asc" }, take: 10, include: { application: { select: { name: true } } } }),
+    prisma.agentFinding.findMany({ where: { category: HUMAN_CATEGORY }, orderBy: { updatedAt: "asc" }, take: 40 }),
+  ]);
+  const manualOpen = manual.filter((f) => fixState({ lastSeenAt: f.updatedAt, fixSentAt: f.fixSentAt, dismissedAt: f.dismissedAt, taskActive: false }) === "pending");
+  return sortHumanActions<HumanActionView>([
+    ...prs.map((p): HumanActionView => ({ id: `merge:${p.id}`, kind: "merge", title: `PR #${p.number} — ${p.title}`, detail: `${p.repo} · aberto por ${p.agent.name}. Revise e faça o merge.`, url: p.url, itemId: null, at: p.createdAt.toISOString() })),
+    ...waiting.map((t): HumanActionView => ({ id: `aprovacao:${t.id}`, kind: "aprovacao", title: `${t.agent.name} aguarda sua autorização`, detail: t.prompt.replace(/\s+/g, " ").slice(0, 240), url: null, itemId: null, at: t.createdAt.toISOString() })),
+    ...incidents.map((i): HumanActionView => ({ id: `incidente:${i.id}`, kind: "incidente", title: `Deploy de ${i.application.name} segue falhando`, detail: `A equipe tentou ${i.attempts}× ou passou do prazo. O agente culpado continua bloqueado até você decidir (aba Operação).`, url: null, itemId: null, at: i.createdAt.toISOString() })),
+    ...manualOpen.map((f): HumanActionView => ({ id: `acao:${f.id}`, kind: "acao", title: f.title, detail: `${f.detail}\n— registrado por ${f.agentName}${f.applicationName ? ` · ${f.applicationName}` : ""}`, url: null, itemId: `achado:${f.id}`, at: f.updatedAt.toISOString() })),
+  ]);
+}
+
 /** Tudo que a equipe viu e pode melhorar: erros dos logs + achados registrados pelos agentes, com o estado de cada um. */
 export async function listFixQueue(now: Date = new Date()): Promise<FixQueueView> {
   const since = new Date(now.getTime() - WINDOW_HOURS * 3600_000);
-  const [errors, findings, active] = await Promise.all([
+  const [errors, findings, active, actions] = await Promise.all([
     prisma.errorGroup.findMany({ where: { lastSeenAt: { gte: since } }, include: { application: { select: { name: true, project: { select: { name: true } } } } }, orderBy: [{ lastSeenAt: "desc" }, { count: "desc" }], take: 40 }),
-    prisma.agentFinding.findMany({ where: { updatedAt: { gte: new Date(now.getTime() - 30 * 24 * 3600_000) } }, orderBy: { updatedAt: "desc" }, take: 60 }),
+    prisma.agentFinding.findMany({ where: { category: { not: HUMAN_CATEGORY }, updatedAt: { gte: new Date(now.getTime() - 30 * 24 * 3600_000) } }, orderBy: { updatedAt: "desc" }, take: 60 }),
     activeFixTaskIds(),
+    listHumanActions(),
   ]);
   const isActive = (id: string | null) => id !== null && active.has(id);
   const items: FixItemView[] = [
@@ -61,7 +93,7 @@ export async function listFixQueue(now: Date = new Date()): Promise<FixQueueView
   ];
   const order: Record<FixState, number> = { fixing: 0, pending: 1, sent: 2, dismissed: 3 };
   items.sort((a, b) => order[a.state] - order[b.state] || (SEVERITY_ORDER[a.severity ?? "MEDIUM"] ?? 2) - (SEVERITY_ORDER[b.severity ?? "MEDIUM"] ?? 2) || b.lastSeenAt.localeCompare(a.lastSeenAt));
-  return { items, busy: active.size > 0 };
+  return { actions, items, busy: active.size > 0 };
 }
 
 type Actor = { userId: string; ip?: string; userAgent?: string };

@@ -5,6 +5,7 @@ import { AlertCircle, AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronRigh
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { HUMAN_ACTION_LABEL, type HumanActionKind } from "@/lib/fix-queue";
 import { DASHBOARD_DAYS, MAX_DELEGATIONS_PER_DAY } from "@/lib/clt-dashboard";
 import { ROUTINE_GATES } from "@/lib/clt-routines";
 import { fmtTokens } from "@/lib/claude-usage";
@@ -198,17 +199,50 @@ const FIX_STATE: Record<string, { label: string; color: string; icon: React.Reac
   dismissed: { label: "Descartado", color: "#8890a3", icon: <Ban className="h-3.5 w-3.5" /> },
 };
 
+const ACTION_COLOR: Record<HumanActionKind, string> = { merge: STATUS.critical, aprovacao: STATUS.warning, incidente: STATUS.critical, acao: STATUS.warning };
 const SEVERITY_LABEL: Record<string, string> = { CRITICAL: "Crítica", HIGH: "Alta", MEDIUM: "Média", LOW: "Baixa" };
 
 /** Fila de correção: erros que a equipe CLT viu. O Italo escolhe UM, manda corrigir e o ID Manager gerencia (Doctor/DevOps). */
-function Correcoes({ canWrite }: { canWrite: boolean }) {
+function Correcoes({ canWrite, onOpenCenter, onGoto }: { canWrite: boolean; onOpenCenter: () => void; onGoto: (t: Tab) => void }) {
   const { data, isLoading, error } = useFixQueue();
   const { act } = useFixMutations();
   const [selected, setSelected] = useState<string | null>(null);
   const items = data?.items ?? [];
   const pick = items.find((i) => i.id === selected && i.state !== "fixing") ?? null;
   const pending = items.filter((i) => i.state === "pending").length;
+  const actions = data?.actions ?? [];
   return (
+    <div className="space-y-4">
+    <section className="overflow-hidden rounded-xl border bg-surface-raised" style={{ borderColor: actions.length ? `${STATUS.critical}66` : undefined }} aria-label="Precisa de você">
+      <header className="border-b border-border px-4 py-3">
+        <h3 className="text-sm font-semibold text-foreground">Precisa de você{actions.length ? ` · ${actions.length}` : ""}</h3>
+        <p className="text-xs text-muted">Só você resolve. Em ordem de prioridade: merge pendente, autorizações, deploy que escalou e ações manuais.</p>
+      </header>
+      {actions.length === 0 ? (
+        <p className="p-4 text-center text-sm text-muted">Nada esperando por você.</p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {actions.map((a) => (
+            <li key={a.id} className="flex items-start justify-between gap-3 px-4 py-3">
+              <span className="min-w-0">
+                <span className="block text-[11px] font-semibold uppercase tracking-wide" style={{ color: ACTION_COLOR[a.kind] }}>{HUMAN_ACTION_LABEL[a.kind]}</span>
+                <span className="block text-sm font-medium text-foreground">{a.title}</span>
+                <span className="block whitespace-pre-wrap break-words text-xs text-muted">{a.detail}</span>
+                <span className="block text-[11px] text-muted">desde {when(a.at)}</span>
+              </span>
+              <span className="flex shrink-0 gap-2">
+                {a.kind === "merge" && a.url && <a href={a.url} target="_blank" rel="noreferrer" className="rounded-lg bg-accent/20 px-3 py-1.5 text-xs font-medium text-foreground ring-1 ring-accent/50 hover:bg-accent/30">Abrir PR</a>}
+                {a.kind === "aprovacao" && <Button size="sm" variant="secondary" onClick={onOpenCenter}>Abrir na Central</Button>}
+                {a.kind === "incidente" && <Button size="sm" variant="secondary" onClick={() => onGoto("operacao")}>Ver incidente</Button>}
+                {a.kind === "acao" && a.itemId && canWrite && (
+                  <Button size="sm" variant="secondary" disabled={act.isPending} onClick={() => act.mutate({ id: a.itemId!, action: "dismiss" }, { onSuccess: () => toast.success("Marcado como feito."), onError: (e) => toast.error(e.message) })}>Já fiz</Button>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
     <section className="overflow-hidden rounded-xl border bg-surface-raised" style={{ borderColor: pending ? `${STATUS.warning}66` : undefined }} aria-label="Fila de correção">
       <header className="border-b border-border px-4 py-3">
         <h3 className="text-sm font-semibold text-foreground">O que a equipe viu e pode melhorar{pending ? ` · ${pending} aguardando` : ""}</h3>
@@ -255,6 +289,7 @@ function Correcoes({ canWrite }: { canWrite: boolean }) {
         </footer>
       )}
     </section>
+    </div>
   );
 }
 
@@ -471,7 +506,7 @@ export function CltAgentPanel({ agentId, canWrite, onClose, onSelectAgent, onOpe
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
         {isLoading && <p className="text-sm text-muted">Carregando dados do agente…</p>}
         {error && <p className="text-sm" style={{ color: STATUS.critical }}>Não consegui carregar o painel: {error instanceof Error ? error.message : "erro desconhecido"}.</p>}
-        {d && current === "correcoes" && <Correcoes canWrite={canWrite} />}
+        {d && current === "correcoes" && <Correcoes canWrite={canWrite} onOpenCenter={onOpenCenter} onGoto={setTab} />}
         {d && current === "operacao" && <Operacao d={d} canWrite={canWrite} />}
         {d && current === "resumo" && <Resumo d={d} />}
         {d && current === "equipe" && <Equipe d={d} onSelect={onSelectAgent} />}

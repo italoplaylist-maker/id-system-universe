@@ -24,7 +24,18 @@ export function fixState(i: FixItemInput): FixState {
 export const FIX_KEY_PREFIX = "fix:";
 export const fixIdempotencyKey = (groupId: string, at: Date) => `${FIX_KEY_PREFIX}${groupId}:${at.getTime()}`;
 
-export const FINDING_CATEGORIES = ["seguranca", "desempenho", "qualidade", "divida-tecnica", "documentacao", "infraestrutura", "banco-de-dados", "outro"] as const;
+export const FINDING_CATEGORIES = ["seguranca", "desempenho", "qualidade", "divida-tecnica", "documentacao", "infraestrutura", "banco-de-dados", "outro", "acao-humana"] as const;
+/** Categoria de achado que só o Italo resolve (credencial, painel de terceiro, autorização): vai para "Precisa de você", não para o Manager. */
+export const HUMAN_CATEGORY = "acao-humana";
+
+/** Ordem de prioridade do que espera o Italo: merge primeiro, depois autorizações, incidentes que escalaram e ações manuais. */
+export type HumanActionKind = "merge" | "aprovacao" | "incidente" | "acao";
+export const HUMAN_ACTION_PRIORITY: Record<HumanActionKind, number> = { merge: 1, aprovacao: 2, incidente: 3, acao: 4 };
+export const HUMAN_ACTION_LABEL: Record<HumanActionKind, string> = { merge: "Merge pendente", aprovacao: "Autorizar", incidente: "Deploy falho — precisa de você", acao: "Ação sua" };
+
+export function sortHumanActions<T extends { kind: HumanActionKind; at: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => HUMAN_ACTION_PRIORITY[a.kind] - HUMAN_ACTION_PRIORITY[b.kind] || a.at.localeCompare(b.at));
+}
 export const FINDING_SEVERITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
 export type FindingSeverity = (typeof FINDING_SEVERITIES)[number];
 

@@ -79,7 +79,7 @@ export const CLT_RULES = [
   "Acesse somente os repositórios autorizados a você; se precisar de outro, peça autorização em vez de tentar.",
   "Prefira análise incremental (git diff desde a última análise) a varrer o repositório inteiro; não repita trabalho já feito.",
   "Responda de forma curta, com o resultado e as pendências; qualquer ação de risco vira um pedido de aprovação.",
-  "Tudo que você VERIFICAR e puder melhorar (segurança, desempenho, qualidade, dívida técnica, documentação, infraestrutura), mesmo fora do que foi pedido, registre com a ferramenta registrar_achado (um item por problema, com evidência): o Italo escolhe da fila o que mandar corrigir. Não registre suposição.",
+  "Tudo que você VERIFICAR e puder melhorar (segurança, desempenho, qualidade, dívida técnica, documentação, infraestrutura), mesmo fora do que foi pedido, registre com a ferramenta registrar_achado (um item por problema, com evidência): o Italo escolhe da fila o que mandar corrigir. Não registre suposição. Quando a solução depender de algo que só o Italo pode fazer (credenciais, painel de terceiros, autorizações), registre com categoria acao-humana, dizendo exatamente o passo a passo.",
 ];
 
 export const CLT_TEAM: CltAgentDef[] = [
