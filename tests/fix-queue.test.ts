@@ -22,3 +22,8 @@ test("o pedido ao Manager traz o erro, manda delegar, proíbe merge e a chave é
   assert.notEqual(fixIdempotencyKey("g", t(1)), fixIdempotencyKey("g", t(2)));
   assert.ok(fixIdempotencyKey("g", t(1)).startsWith("fix:"));
 });
+
+test("descartar e enviar no mesmo instante: vale o descarte; tarefa ativa sempre mostra 'corrigindo'", () => {
+  assert.equal(fixState({ lastSeenAt: t(5), fixSentAt: t(6), dismissedAt: t(6), taskActive: false }), "dismissed");
+  assert.equal(fixState({ lastSeenAt: t(9), fixSentAt: t(6), dismissedAt: null, taskActive: true }), "fixing");
+});
