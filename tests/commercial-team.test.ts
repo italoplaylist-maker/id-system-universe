@@ -62,3 +62,11 @@ test("rotinas nascem desligadas e o ciclo coordenado tem 4 passos em ordem, sem 
   assert.deepEqual(parseCycleKey(cycleKey("abc123", 2)), { cycleId: "abc123", step: 2 });
   assert.equal(parseCycleKey("routine:x:1"), null);
 });
+
+test("o prompt dos agentes comerciais traz as regras de LGPD, fontes públicas e não-invenção", () => {
+  const rules = COMMERCIAL_RULES.join(" ");
+  assert.match(rules, /fontes públicas/);
+  assert.match(rules, /Nunca invente/);
+  assert.match(rules, /origem/);
+  for (const a of COMMERCIAL_TEAM) assert.match(commercialRoleNote(a), new RegExp(a.name));
+});
