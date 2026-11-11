@@ -341,6 +341,23 @@ export function useIncidentMutations() {
   };
 }
 
+export type FixQueueData = import("@/server/orchestrator/fix-queue").FixQueueView;
+
+/** Fila de correção do ID Manager: erros que a equipe viu e o estado de cada um. */
+export function useFixQueue(enabled = true) {
+  return useQuery({ queryKey: [...KEY, "fix-queue"], queryFn: () => apiFetch<FixQueueData>("/api/orchestrator/fix-queue"), enabled, refetchInterval: 10_000 });
+}
+
+export function useFixMutations() {
+  const queryClient = useQueryClient();
+  return {
+    act: useMutation({
+      mutationFn: ({ id, action }: { id: string; action: "fix" | "dismiss" }) => apiFetch<FixQueueData>(`/api/orchestrator/fix-queue/${id}`, { method: "POST", body: JSON.stringify({ action }) }),
+      onSettled: () => queryClient.invalidateQueries({ queryKey: KEY }),
+    }),
+  };
+}
+
 export type CltDashboardView = import("@/server/orchestrator/clt-dashboard").CltDashboard;
 
 /** Painel de um agente da equipe CLT (gráficos, tarefas, rotinas; no Manager, a visão da operação). */

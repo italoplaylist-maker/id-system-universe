@@ -8,10 +8,10 @@ import { cn } from "@/lib/cn";
 import { DASHBOARD_DAYS, MAX_DELEGATIONS_PER_DAY } from "@/lib/clt-dashboard";
 import { ROUTINE_GATES } from "@/lib/clt-routines";
 import { fmtTokens } from "@/lib/claude-usage";
-import { useCltDashboard, useIncidentMutations, useOrchestratorMutations, type CltDashboardView } from "@/hooks/use-orchestrator";
+import { useCltDashboard, useFixMutations, useFixQueue, useIncidentMutations, useOrchestratorMutations, type CltDashboardView } from "@/hooks/use-orchestrator";
 import { DayBarChart, Meter, RankBars, SERIES, STATUS, StatTile } from "./charts";
 
-type Tab = "resumo" | "operacao" | "equipe" | "tarefas" | "rotinas" | "conversar";
+type Tab = "correcoes" | "resumo" | "operacao" | "equipe" | "tarefas" | "rotinas" | "conversar";
 
 const STATE: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   AVAILABLE: { label: "Disponível", color: STATUS.good, icon: <CheckCircle2 className="h-3.5 w-3.5" /> },
@@ -191,6 +191,69 @@ function Incidentes({ incidents, canWrite }: { incidents: NonNullable<CltDashboa
   );
 }
 
+const FIX_STATE: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  pending: { label: "Aguardando", color: STATUS.warning, icon: <AlertTriangle className="h-3.5 w-3.5" /> },
+  fixing: { label: "Manager corrigindo", color: SERIES.blue, icon: <Loader2 className="h-3.5 w-3.5 animate-spin" /> },
+  sent: { label: "Enviado", color: STATUS.good, icon: <CheckCircle2 className="h-3.5 w-3.5" /> },
+  dismissed: { label: "Descartado", color: "#8890a3", icon: <Ban className="h-3.5 w-3.5" /> },
+};
+
+/** Fila de correção: erros que a equipe CLT viu. O Italo escolhe UM, manda corrigir e o ID Manager gerencia (Doctor/DevOps). */
+function Correcoes({ canWrite }: { canWrite: boolean }) {
+  const { data, isLoading, error } = useFixQueue();
+  const { act } = useFixMutations();
+  const [selected, setSelected] = useState<string | null>(null);
+  const items = data?.items ?? [];
+  const pick = items.find((i) => i.id === selected && i.state !== "fixing") ?? null;
+  const pending = items.filter((i) => i.state === "pending").length;
+  return (
+    <section className="overflow-hidden rounded-xl border bg-surface-raised" style={{ borderColor: pending ? `${STATUS.warning}66` : undefined }} aria-label="Fila de correção">
+      <header className="border-b border-border px-4 py-3">
+        <h3 className="text-sm font-semibold text-foreground">O que a equipe viu e precisa corrigir{pending ? ` · ${pending} aguardando` : ""}</h3>
+        <p className="text-xs text-muted">Escolha um erro e mande corrigir. É um de cada vez: o ID Manager delega ao Doctor ou ao DevOps e gerencia. A correção de código chega em PR para você revisar.</p>
+      </header>
+      {isLoading && <p className="p-6 text-center text-sm text-muted">Carregando…</p>}
+      {error && <p className="p-4 text-sm" style={{ color: STATUS.critical }}>Não consegui carregar a fila: {error instanceof Error ? error.message : "erro desconhecido"}.</p>}
+      {data && items.length === 0 && <p className="p-6 text-center text-sm text-muted">Nenhum erro registrado nos últimos 7 dias.</p>}
+      {items.length > 0 && (
+        <ul className="divide-y divide-border" role="radiogroup" aria-label="Erros">
+          {items.map((e) => {
+            const locked = e.state === "fixing";
+            const on = pick?.id === e.id;
+            return (
+              <li key={e.id}>
+                <label className={cn("flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-surface", locked && "cursor-default opacity-90", on && "bg-accent/10")}>
+                  <input type="radio" name="fix" className="mt-1" checked={on} disabled={locked || !canWrite} onChange={() => setSelected(e.id)} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-start justify-between gap-2">
+                      <span className="block text-sm font-medium text-foreground">{e.project ? `${e.project} / ` : ""}{e.application}</span>
+                      <Pill meta={FIX_STATE[e.state]} />
+                    </span>
+                    <span className="block truncate font-mono text-[11px] text-muted">{e.sample.split("\n")[0]}</span>
+                    <span className="block text-[11px] text-muted">{e.count}× · última {when(e.lastSeenAt)}</span>
+                  </span>
+                </label>
+                {on && <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all border-t border-border bg-background/40 px-4 py-3 font-mono text-[11px] text-foreground/90">{e.sample}</pre>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {canWrite && items.length > 0 && (
+        <footer className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3">
+          <Button size="sm" disabled={!pick || data?.busy || act.isPending} onClick={() => pick && act.mutate({ id: pick.id, action: "fix" }, { onSuccess: () => { toast.success("Enviado ao ID Manager."); setSelected(null); }, onError: (e) => toast.error(e.message) })}>
+            <Send className="mr-1 h-3.5 w-3.5" /> Mandar corrigir
+          </Button>
+          <Button size="sm" variant="secondary" disabled={!pick || act.isPending} onClick={() => pick && act.mutate({ id: pick.id, action: "dismiss" }, { onSuccess: () => { toast.success("Descartado."); setSelected(null); }, onError: (e) => toast.error(e.message) })}>
+            Descartar
+          </Button>
+          <span className="text-xs text-muted">{data?.busy ? "O Manager está corrigindo um erro: espere terminar para mandar outro." : pick ? "Pronto para enviar." : "Selecione um erro."}</span>
+        </footer>
+      )}
+    </section>
+  );
+}
+
 function Operacao({ d, canWrite }: { d: CltDashboardView; canWrite: boolean }) {
   const op = d.operation;
   const [open, setOpen] = useState<string | null>(null);
@@ -345,7 +408,7 @@ export function CltAgentPanel({ agentId, canWrite, onClose, onSelectAgent, onOpe
   const { updateAgent } = useOrchestratorMutations();
   const isManager = d?.agent.slug === "id-manager";
   const tabs: Array<{ id: Tab; label: string }> = isManager
-    ? [{ id: "operacao", label: "Operação" }, { id: "resumo", label: "Resumo" }, { id: "equipe", label: "Equipe" }, { id: "tarefas", label: "Tarefas" }, { id: "rotinas", label: "Rotinas" }, { id: "conversar", label: "Conversar" }]
+    ? [{ id: "correcoes", label: "Correções" }, { id: "operacao", label: "Operação" }, { id: "resumo", label: "Resumo" }, { id: "equipe", label: "Equipe" }, { id: "tarefas", label: "Tarefas" }, { id: "rotinas", label: "Rotinas" }, { id: "conversar", label: "Conversar" }]
     : [{ id: "resumo", label: "Resumo" }, { id: "tarefas", label: "Tarefas" }, { id: "rotinas", label: "Rotinas" }, { id: "conversar", label: "Conversar" }];
   const [tab, setTab] = useState<Tab | null>(null);
   const current: Tab = tab && tabs.some((t) => t.id === tab) ? tab : tabs[0].id;
@@ -404,6 +467,7 @@ export function CltAgentPanel({ agentId, canWrite, onClose, onSelectAgent, onOpe
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
         {isLoading && <p className="text-sm text-muted">Carregando dados do agente…</p>}
         {error && <p className="text-sm" style={{ color: STATUS.critical }}>Não consegui carregar o painel: {error instanceof Error ? error.message : "erro desconhecido"}.</p>}
+        {d && current === "correcoes" && <Correcoes canWrite={canWrite} />}
         {d && current === "operacao" && <Operacao d={d} canWrite={canWrite} />}
         {d && current === "resumo" && <Resumo d={d} />}
         {d && current === "equipe" && <Equipe d={d} onSelect={onSelectAgent} />}
