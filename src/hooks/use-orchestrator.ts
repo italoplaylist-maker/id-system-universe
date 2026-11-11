@@ -369,3 +369,27 @@ export function useCltDashboard(agentId: string | null, enabled = true) {
     refetchInterval: 15_000,
   });
 }
+
+export type CommercialView = import("@/server/orchestrator/commercial").CommercialOverview;
+
+/** Equipe COMERCIAL & MARKETING: funil, indicadores e abordagens pendentes (tudo do banco). */
+export function useCommercial(enabled = true) {
+  return useQuery({ queryKey: [...KEY, "commercial"], queryFn: () => apiFetch<CommercialView>("/api/orchestrator/commercial"), enabled, refetchInterval: 10_000 });
+}
+
+export function useCommercialMutations() {
+  const queryClient = useQueryClient();
+  const refresh = () => queryClient.invalidateQueries({ queryKey: KEY });
+  const post = (path: string, body?: unknown) => apiFetch<unknown>(path, { method: "POST", ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return {
+    createTeam: useMutation({ mutationFn: () => apiFetch<{ created: string[]; existing: string[] }>("/api/orchestrator/commercial/team", { method: "POST" }), onSettled: refresh }),
+    startCycle: useMutation({ mutationFn: () => post("/api/orchestrator/commercial/cycle"), onSettled: refresh }),
+    decide: useMutation({ mutationFn: ({ id, decision }: { id: string; decision: "approve" | "reject" | "sent" }) => post(`/api/orchestrator/commercial/interactions/${id}`, { decision }), onSettled: refresh }),
+    setLead: useMutation({ mutationFn: ({ id, ...b }: { id: string; stage?: string; discarded?: boolean; note?: string }) => post(`/api/orchestrator/commercial/leads/${id}`, b), onSettled: refresh }),
+    saveSettings: useMutation({
+      mutationFn: (b: { baseCity?: string; radiusKm?: number; segments?: string[]; maxNewLeadsPerRun?: number; costPerMillionTokens?: number | null }) =>
+        apiFetch<unknown>("/api/orchestrator/commercial/settings", { method: "PUT", body: JSON.stringify(b) }),
+      onSettled: refresh,
+    }),
+  };
+}

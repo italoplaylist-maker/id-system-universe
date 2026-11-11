@@ -12,6 +12,7 @@ import { RepoConnect } from "./repo-connect";
 import { AttachButton, AttachmentStrip, MicButton, useComposerAttachments, useDictation } from "./composer-attachments";
 import { cn } from "@/lib/cn";
 import { cltDef } from "@/lib/clt-team";
+import { commercialDef } from "@/lib/commercial-team";
 import {
   useIncidentMutations,
   useAgentGit,
@@ -27,6 +28,7 @@ import {
   useTaskDetail,
   type RoomAgentView,
   type TaskView,
+  useCommercialMutations,
 } from "@/hooks/use-orchestrator";
 
 const ROOM_LABEL: Record<RoomAgentView["state"], { label: string; cls: string }> = {
@@ -322,20 +324,20 @@ function AgentForm({ initial, onDone }: { initial?: RoomAgentView; onDone: () =>
             onChange={(e) => setF({ ...f, description: e.target.value })}
             maxLength={4000}
           />
-          {initial.slug && cltDef(initial.slug) && (
+          {initial.slug && (cltDef(initial.slug) || commercialDef(initial.slug)) && (
             <Button
               size="sm"
               type="button"
               variant="secondary"
               onClick={() => {
-                const def = cltDef(initial.slug!)!;
+                const def = (cltDef(initial.slug!) ?? commercialDef(initial.slug!))!;
                 setF({ ...f, roleTitle: def.roleTitle, description: def.description });
               }}
             >
               Usar função padrão
             </Button>
           )}
-          <p className="text-[11px] text-muted">{f.description.length}/4000 · As regras de segurança da equipe (sem deploy, sem apagar dados, sem mexer em credenciais) continuam valendo, não importa o que estiver aqui.</p>
+          <p className="text-[11px] text-muted">{f.description.length}/4000 · As regras de segurança da equipe (CLT: sem deploy, sem apagar dados, sem mexer em credenciais; Comercial: nada é enviado sem sua aprovação e sem acesso a código) continuam valendo, não importa o que estiver aqui.</p>
         </>
       )}
       <input className={field} placeholder="Especialidade (opcional)" value={f.specialty} onChange={(e) => setF({ ...f, specialty: e.target.value })} />
@@ -380,6 +382,7 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
   const { data: agents } = useRoomAgents(true);
   const { data: settings } = useOrchestratorSettings(true);
   const { submit, updateAgent, archiveAgent, setConcurrency, createCltTeam } = useOrchestratorMutations();
+  const { createTeam: createCommercialTeam } = useCommercialMutations();
   const unlockIncident = useIncidentMutations();
   const [agentId, setAgentId] = useState<string | null>(initialAgentId);
   const [text, setText] = useState("");
@@ -544,6 +547,15 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
             </Button>
           </div>
         )}
+        {canWrite && agents && !agents.some((a) => a.team === "COMERCIAL") && (
+          <div className="mx-3 mb-2 space-y-1.5 rounded-lg border p-3 text-xs" style={{ borderColor: "#14b8a666", background: "#14b8a615" }}>
+            <p className="font-medium text-foreground">A equipe COMERCIAL & MARKETING ainda não foi criada.</p>
+            <p className="text-muted">Cria os 4 funcionários (Garimpeiro, Analista Comercial, CRM e Vendedor) na segunda ilha da sala. As rotinas nascem desligadas.</p>
+            <Button size="sm" variant="primary" disabled={createCommercialTeam.isPending} onClick={() => createCommercialTeam.mutate(undefined, { onSuccess: (r) => toast.success(r.created.length ? `Equipe Comercial criada: ${r.created.length} funcionário(s).` : "A equipe Comercial já existia."), onError: (e) => toast.error(e.message) })}>
+              {createCommercialTeam.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Criar equipe COMERCIAL & MARKETING"}
+            </Button>
+          </div>
+        )}
         <p className="px-4 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">Agentes</p>
         <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2" aria-label="Agentes">
           {agents?.map((a) => (
@@ -552,7 +564,11 @@ export function CommandCenter({ initialAgentId, onClose, canWrite }: { initialAg
               onClick={() => { setAgentId(a.id); setOpenTask(null); setToolsOpen(false); setRoutinesOpen(false); setErrorsOpen(false); setCreating(false); setEditing(false); }}
               className={cn("flex w-full flex-col rounded-lg px-3 py-2 text-left", a.id === selected?.id && !toolsOpen && !routinesOpen && !errorsOpen ? "bg-surface text-foreground" : "text-muted hover:bg-surface/60 hover:text-foreground")}
             >
-              <span className="truncate text-sm font-medium">{a.name}</span>
+              <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                {a.name}
+                {a.team === "CLT" && <span className="rounded px-1 text-[9px] font-bold tracking-wide" style={{ background: "#e8283f26", color: "#f87171" }}>CLT</span>}
+                {a.team === "COMERCIAL" && <span className="rounded px-1 text-[9px] font-bold tracking-wide" style={{ background: "#14b8a626", color: "#2dd4bf" }}>COMERCIAL</span>}
+              </span>
               <span className={cn("truncate text-[11px]", ROOM_LABEL[a.state].cls)}>{ROOM_LABEL[a.state].label}{a.queued > 0 ? ` · ${a.queued} na fila` : ""}</span>
             </button>
           ))}

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { agentAccent, orderAgentSessions } from "@/lib/agent-order";
 import { computeOfficeLayout, OFFICE } from "@/components/universe/hq/office/office-layout";
-import { CLT_MAX_STATIONS, CLT_ROOM, computeCltLayout } from "@/components/universe/hq/plan/clt-layout";
+import { CLT_DX, CLT_MAX_STATIONS, CLT_ROOM, computeCltLayout } from "@/components/universe/hq/plan/clt-layout";
 
 const proj = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `P${String(i).padStart(3, "0")}`, accent: "#fff" }));
 
@@ -66,7 +66,7 @@ describe("sala AGENTES CLT", () => {
     const others = l.stations.slice(1, 7).map(delta);
     assert.ok(others.filter((a) => a < 0).length === 3 && others.filter((a) => a > 0).length === 3, "três de cada lado do gerente");
     // corredor da porta (x > 2,5, |z| < 1,2) sem estação, sala de reunião, descanso nem mesa
-    for (const s of l.stations) assert.ok(!(s.x > 2.5 && Math.abs(s.z) < 1.2));
+    for (const s of l.stations) assert.ok(!(s.x - CLT_DX > 2.5 && Math.abs(s.z) < 1.2));
     for (const room of [l.meeting, l.rest]) assert.ok(room.z - room.d / 2 > 1.2 || room.z + room.d / 2 < -1.2, "sala bloqueia o corredor da porta");
   });
 

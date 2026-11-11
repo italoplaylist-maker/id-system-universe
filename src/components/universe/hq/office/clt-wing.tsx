@@ -15,6 +15,7 @@ import type { HqPlan } from "../plan/hq-plan";
 import type { CltLayout } from "../plan/clt-layout";
 import { useCameraStore } from "@/store/camera-store";
 import type { AgentSessionView } from "@/server/claude/agent-service";
+import { CommercialIsland, type CommercialIndicators } from "./commercial-island";
 
 export interface CltEntry {
   session: AgentSessionView;
@@ -32,6 +33,8 @@ interface CltWingProps {
   reducedGraphics: boolean;
   /** Quem pode gerenciar agentes pode criar a equipe pela própria sala (clicando na placa). */
   onCreateTeam?: () => void;
+  /** Segunda ilha da sala: equipe COMERCIAL & MARKETING (agentes reais, indicadores do banco). */
+  commercial?: { entries: CltEntry[]; indicators: CommercialIndicators | null; exists: boolean; onOpen: () => void };
 }
 
 const pill = (hot: boolean): React.CSSProperties => ({
@@ -119,7 +122,7 @@ function RestArea({ x, z, w, d }: { x: number; z: number; w: number; d: number }
  * Sala AGENTES CLT: estações em ferradura voltadas para a mesa de supervisão, sala de reunião de vidro e espaço de
  * descanso. Cada estação é um agente REAL do orquestrador (estado, tarefa e consumo vêm das tarefas); mesa vazia = vaga.
  */
-export function CltWing({ plan, shellLayout, layout, entries, selectedAgentId, onSelectAgent, reducedGraphics, onCreateTeam }: CltWingProps) {
+export function CltWing({ plan, shellLayout, layout, entries, selectedAgentId, onSelectAgent, reducedGraphics, onCreateTeam, commercial }: CltWingProps) {
   const focusProject = useCameraStore((s) => s.focusProject);
   const focusId = useCameraStore((s) => s.focusId);
   const cameraMode = useCameraStore((s) => s.mode);
@@ -127,6 +130,7 @@ export function CltWing({ plan, shellLayout, layout, entries, selectedAgentId, o
   const working = entries.filter((e) => e.session.state === "WORKING").length;
   const approvals = entries.filter((e) => e.session.state === "APPROVAL").length;
   const pending = useMemo(() => entries.map((e, i) => ({ entry: e, station: layout.stations[i] })).filter((p) => p.station), [entries, layout.stations]);
+  const commercialDesks = useMemo(() => (commercial?.entries ?? []).map((e, i) => ({ entry: e, station: layout.commercial.stations[i] })).filter((p) => p.station), [commercial?.entries, layout.commercial.stations]);
 
   return (
     <>
@@ -140,7 +144,29 @@ export function CltWing({ plan, shellLayout, layout, entries, selectedAgentId, o
             <TallPlant scale={0.95} />
           </group>
         ))}
+        {commercial && <CommercialIsland layout={layout.commercial} reduced={reducedGraphics} indicators={commercial.indicators} exists={commercial.exists} onOpen={commercial.onOpen} />}
       </group>
+
+      {commercialDesks.map(({ entry, station }) => {
+        const wp = toWorld(clt, { x: station.x, z: station.z });
+        const slot = { projectId: entry.session.id, name: entry.name, accent: entry.accent, x: wp.x, z: wp.z, row: 0, col: station.index };
+        return (
+          <AgentDesk
+            key={entry.session.id}
+            slot={slot}
+            session={entry.session}
+            selected={selectedAgentId === entry.session.id}
+            dimmedByFocus={focusId !== null && cameraMode !== "overview" && cameraMode !== "free" && focusId !== entry.session.id}
+            reduced={reducedGraphics}
+            yaw={station.yaw + clt.rot}
+            level={clt.level}
+            onFocus={() => {
+              onSelectAgent(entry.session.id);
+              focusProject(entry.session.id, [wp.x, 1.0 + clt.level, wp.z], 2.6, `Comercial & Marketing · ${entry.name}`);
+            }}
+          />
+        );
+      })}
 
       {pending.map(({ entry, station }) => {
         const wp = toWorld(clt, { x: station.x, z: station.z });
