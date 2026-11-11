@@ -139,7 +139,12 @@ export interface CltOverview {
 
 /** Painel da equipe: tudo vem de sessões, tarefas e tokens reais gravados — nada é estimado nem simulado. */
 export async function cltOverview(now: Date = new Date()): Promise<CltOverview> {
-  const team = (await listRoomAgents(now)).filter((a) => a.team === CLT_TEAM_ID);
+  return teamOverview(CLT_TEAM_ID, cltWorkspace(), now);
+}
+
+/** Mesmo painel para qualquer equipe (CLT, COMERCIAL): agentes, tarefas e tokens reais. */
+export async function teamOverview(teamId: string, workspace: string, now: Date = new Date()): Promise<CltOverview> {
+  const team = (await listRoomAgents(now)).filter((a) => a.team === teamId);
   const ids = team.map((a) => a.id);
   const w = windowStarts(now);
   const [counts, day, month, repoCounts] = ids.length
@@ -166,7 +171,7 @@ export async function cltOverview(now: Date = new Date()): Promise<CltOverview> 
   });
   const inState = (...s: string[]) => agents.filter((a) => s.includes(a.state)).length;
   return {
-    workspace: cltWorkspace(),
+    workspace,
     agents,
     totals: {
       agents: agents.length,

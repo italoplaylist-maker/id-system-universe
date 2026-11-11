@@ -197,14 +197,14 @@ model Application {
   createdAt                   DateTime               @default(now())
   updatedAt                   DateTime               @updatedAt
 
-  deployments    DeploymentCache[]
-  auditEvents    AuditEvent[]
-  universeEvents UniverseEvent[]
-  repositoryLink ResourceRepository?
-  deploymentRuns DeploymentRun[]
-  errorGroups    ErrorGroup[]
-  errorScan      ErrorScanState?
-  errorDaily     ErrorDaily[]
+  deployments     DeploymentCache[]
+  auditEvents     AuditEvent[]
+  universeEvents  UniverseEvent[]
+  repositoryLink  ResourceRepository?
+  deploymentRuns  DeploymentRun[]
+  errorGroups     ErrorGroup[]
+  errorScan       ErrorScanState?
+  errorDaily      ErrorDaily[]
   deployIncidents DeployIncident[]
 
   @@unique([providerId, externalId])
@@ -1166,4 +1166,90 @@ model AgentFinding {
   dismissedAt     DateTime?
 
   @@index([updatedAt])
+}
+
+/// Funil da equipe COMERCIAL & MARKETING: uma empresa prospectada (dados da EMPRESA, nunca de pessoa física). É o CRM do Universe — não há outro.
+/// A impressão digital (site > telefone > nome+cidade) impede cadastro duplicado.
+model Lead {
+  id             String            @id @default(cuid())
+  fingerprint    String            @unique
+  /// Todas as chaves de identidade (site, telefone, nome+cidade): a empresa é a mesma se qualquer uma coincidir.
+  keys           String[]
+  name           String
+  segment        String            @default("outro")
+  city           String?
+  address        String?
+  phone          String?
+  website        String?
+  distanceKm     Float?
+  /// Onde a empresa foi encontrada (URL ou nome da fonte) e quando.
+  source         String
+  foundAt        DateTime          @default(now())
+  foundBy        String
+  /// NOVO | EM_ANALISE | QUALIFICADO | AGUARDANDO_ABORDAGEM | PRIMEIRO_CONTATO | EM_NEGOCIACAO | CONVERTIDO | PERDIDO
+  stage          String            @default("NOVO")
+  /// ALTA | MEDIA | BAIXA (null = ainda não analisado)
+  priority       String?
+  priorityReason String?
+  productFit     String?
+  painPoints     String?
+  missingInfo    String?
+  /// Opinião do analista sobre a chance de conversão — nunca apresentada como fato.
+  conversionNote String?
+  techNeed       String?
+  discarded      Boolean           @default(false)
+  discardReason  String?
+  lastContactAt  DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  interactions   LeadInteraction[]
+
+  @@index([stage, discarded])
+  @@index([priority])
+  @@index([updatedAt])
+}
+
+/// Histórico do lead: notas, mudanças de etapa, contatos e RASCUNHOS de abordagem. O Universe não envia nada: rascunho fica PENDENTE_APROVACAO até o humano decidir.
+model LeadInteraction {
+  id          String    @id @default(cuid())
+  leadId      String
+  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /// NOTA | RASCUNHO | CONTATO | PROPOSTA | ETAPA
+  kind        String
+  /// WHATSAPP | EMAIL | TELEFONE | PRESENCIAL | OUTRO
+  channel     String?
+  content     String
+  /// REGISTRADO | PENDENTE_APROVACAO | APROVADO | REJEITADO | ENVIADO
+  status      String    @default("REGISTRADO")
+  agentName   String
+  createdAt   DateTime  @default(now())
+  decidedAt   DateTime?
+  decidedById String?
+
+  @@index([leadId, createdAt])
+  @@index([status, kind])
+}
+
+/// Descrição comercial de cada produto (SaaS), mantida pelos agentes CLT/humano e LIDA pela equipe comercial: ninguém promete o que não existe.
+model ProductProfile {
+  id             String   @id @default(cuid())
+  name           String   @unique
+  summary        String
+  features       String
+  idealSegments  String?
+  commercialNote String?
+  updatedBy      String
+  updatedAt      DateTime @updatedAt
+}
+
+/// Configuração única (id = "default") da prospecção e do custo.
+model CommercialSettings {
+  id                   String   @id @default("default")
+  baseCity             String   @default("Itatiaiuçu/MG")
+  radiusKm             Int      @default(50)
+  segments             String[]
+  maxNewLeadsPerRun    Int      @default(10)
+  /// Preço por milhão de tokens para estimar custo em dinheiro. null = só tokens (sem chute).
+  costPerMillionTokens Float?
+  updatedAt            DateTime @updatedAt
 }

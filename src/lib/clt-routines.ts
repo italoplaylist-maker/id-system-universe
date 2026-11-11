@@ -8,12 +8,15 @@ import type { CltSlug } from "./clt-team";
 export const ROUTINE_TZ = "America/Sao_Paulo";
 
 /** Gatilhos determinísticos: o Claude só é chamado quando o gatilho confirma que há o que fazer. */
-export type RoutineGate = "always" | "changed" | "alert" | "activity";
+export type RoutineGate = "always" | "changed" | "alert" | "activity" | "leads_novos" | "leads_abertos" | "leads_qualificados";
 export const ROUTINE_GATES: Array<{ id: RoutineGate; label: string; help: string }> = [
   { id: "always", label: "Sempre", help: "Roda em todo horário agendado." },
   { id: "changed", label: "Só se houve deploy novo", help: "Pula se não houve deploy com sucesso desde a última execução." },
   { id: "alert", label: "Só se há alerta", help: "Pula se não há aplicação com erro, deploy falho nas últimas 24 h nem servidor em alerta." },
   { id: "activity", label: "Só se a equipe trabalhou", help: "Pula se nenhuma tarefa terminou nas últimas 24 h." },
+  { id: "leads_novos", label: "Só se há leads novos", help: "Equipe comercial: pula se não há lead na etapa Novo lead." },
+  { id: "leads_abertos", label: "Só se há leads em aberto", help: "Equipe comercial: pula se o funil não tem oportunidade aberta." },
+  { id: "leads_qualificados", label: "Só se há leads para abordar", help: "Equipe comercial: pula se não há lead qualificado sem rascunho de abordagem pendente." },
 ];
 
 /** -1 baixa · 0 normal · 1 alta: define a ordem na fila quando vários agentes esperam. */

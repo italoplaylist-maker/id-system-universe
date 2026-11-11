@@ -49,6 +49,8 @@ export function HqView() {
   const canManageAgents = sessionUser ? canUser(sessionUser, "provider:write") : false;
   // Clicou num funcionário da equipe AGENTES CLT: abre o painel dele (os demais agentes seguem com a linha do tempo).
   const selectedClt = roomAgentsQuery.data?.find((a) => a.id === selectedAgentId && a.team === "CLT") ?? null;
+  // A linha do tempo só existe para sessão observada pelo hook; sem sessão ela ficava um painel cinza vazio.
+  const selectedObserved = Boolean(selectedAgentId && observedSessions?.some((x) => x.id === selectedAgentId));
   const router = useRouter();
   const { selectedApplicationId, selectApplication, quality, setQuality, hydrateQuality, reducedGraphics, demoMode, setDemoMode, setViewMode } = useUiStore();
   const cameraMode = useCameraStore((s) => s.mode);
@@ -85,7 +87,9 @@ export function HqView() {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       if (centerOpen) {
+        // Fechar a Central também solta o agente selecionado: senão sobra o painel cinza de linha do tempo (vazio) à direita.
         setCenterOpen(false);
+        setSelectedAgentId(null);
         return;
       }
       if (selectedAgentId) {
@@ -227,19 +231,19 @@ export function HqView() {
         <WeatherHud timeLabel={timeLabel} />
       </div>
 
-      <MotionPanelSlot panelKey={centerOpen ? "center" : selectedClt ? `clt:${selectedClt.id}` : selectedAgentId ? `timeline:${selectedAgentId}` : null}>
+      <MotionPanelSlot panelKey={centerOpen ? "center" : selectedClt ? `clt:${selectedClt.id}` : selectedObserved ? `timeline:${selectedAgentId}` : null}>
         {centerOpen ? (
-          <CommandCenter initialAgentId={selectedAgentId} onClose={() => setCenterOpen(false)} canWrite={canManageAgents} />
+          <CommandCenter initialAgentId={selectedAgentId} onClose={() => { setCenterOpen(false); setSelectedAgentId(null); }} canWrite={canManageAgents} />
         ) : selectedClt ? (
           <CltAgentPanel agentId={selectedClt.id} canWrite={canManageAgents} onClose={() => setSelectedAgentId(null)} onSelectAgent={setSelectedAgentId} onOpenCenter={() => setCenterOpen(true)} />
         ) : (
-          selectedAgentId && <TimelinePanel sessionId={selectedAgentId} onClose={() => setSelectedAgentId(null)} canSend={canManageAgents} />
+          selectedObserved && <TimelinePanel sessionId={selectedAgentId as string} onClose={() => setSelectedAgentId(null)} canSend={canManageAgents} />
         )}
       </MotionPanelSlot>
 
       <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-end gap-2 pointer-events-none [&>*]:pointer-events-auto">
         {sessionUser && canUser(sessionUser, "provider:read") && (
-          <button onClick={() => setCenterOpen((v) => !v)} className="flex items-center gap-1.5 rounded-full border border-border bg-surface-raised/80 px-3 py-1.5 text-xs text-muted backdrop-blur hover:text-foreground">
+          <button onClick={() => { if (centerOpen) setSelectedAgentId(null); setCenterOpen((v) => !v); }} className="flex items-center gap-1.5 rounded-full border border-border bg-surface-raised/80 px-3 py-1.5 text-xs text-muted backdrop-blur hover:text-foreground">
             Central de Agentes
           </button>
         )}

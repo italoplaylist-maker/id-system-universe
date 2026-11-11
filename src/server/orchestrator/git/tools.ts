@@ -20,6 +20,9 @@ export async function buildUniverseMcp(agentId: string, taskId: string) {
   const { createSdkMcpServer, tool } = await import("@anthropic-ai/claude-agent-sdk");
   // Equipe CLT: erros/logs dos sistemas (e, no Manager, o estado da equipe). Para os demais agentes a lista vem vazia.
   const extra = await teamTools(tool as never, agentId, taskId).catch(() => []);
+  // Equipe COMERCIAL: separação de poderes — recebe SÓ as ferramentas do funil, nunca as de Git/PR/merge.
+  const owner = await prisma.agentProfile.findUnique({ where: { id: agentId }, select: { team: true } });
+  if (owner?.team === "COMERCIAL") return createSdkMcpServer({ name: "universe", version: "1.0.0", instructions: "Ferramentas do funil comercial. Nenhuma envia mensagem: abordagens são rascunhos que o Italo aprova.", tools: extra as never });
   return createSdkMcpServer({
     name: "universe",
     version: "1.0.0",
