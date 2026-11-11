@@ -121,3 +121,9 @@ test("orçamento: o agente recebe quanto gastou e o conselho muda conforme apert
   assert.ok(CLT_RULES.some((r) => /tokens como dinheiro/.test(r)));
   for (const a of CLT_TEAM) assert.ok(a.dailyTokenLimit >= 3_000_000 && a.monthlyTokenLimit >= 20 * a.dailyTokenLimit);
 });
+
+test("nota de orçamento mostra o que resta de hoje e do mês", () => {
+  const n = budgetNote({ usedDay: 1_000_000, usedMonth: 10_000_000, dailyLimit: 4_000_000, monthlyLimit: 80_000_000 });
+  assert.match(n, /restam 3 mi/);
+  assert.match(n, /restam 70 mi/);
+});
