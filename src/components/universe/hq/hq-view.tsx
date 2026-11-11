@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
 import { TimelinePanel } from "@/components/agents/timeline-panel";
 import { CltAgentPanel } from "./clt-panel/clt-agent-panel";
+import { CommercialPanel } from "./clt-panel/commercial-panel";
 import { FeedsDialog } from "@/components/agents/feed-dialogs";
 import { NotificationsDialog } from "@/components/notifications/notifications-dialog";
 import { CommandCenter } from "@/components/agents/command-center";
@@ -43,12 +44,13 @@ export function HqView() {
   const [webglOk, setWebglOk] = useState<boolean | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [centerOpen, setCenterOpen] = useState(false);
+  const [commercialOpen, setCommercialOpen] = useState(false);
   const { data: sessionUser } = useSession();
   const roomAgentsQuery = useRoomAgents(sessionUser ? canUser(sessionUser, "provider:read") : false);
   const { data: observedSessions } = useAgentSessions(sessionUser ? canUser(sessionUser, "provider:read") : false);
   const canManageAgents = sessionUser ? canUser(sessionUser, "provider:write") : false;
   // Clicou num funcionário da equipe AGENTES CLT: abre o painel dele (os demais agentes seguem com a linha do tempo).
-  const selectedClt = roomAgentsQuery.data?.find((a) => a.id === selectedAgentId && a.team === "CLT") ?? null;
+  const selectedClt = roomAgentsQuery.data?.find((a) => a.id === selectedAgentId && (a.team === "CLT" || a.team === "COMERCIAL")) ?? null;
   // A linha do tempo só existe para sessão observada pelo hook; sem sessão ela ficava um painel cinza vazio.
   const selectedObserved = Boolean(selectedAgentId && observedSessions?.some((x) => x.id === selectedAgentId));
   const router = useRouter();
@@ -86,6 +88,10 @@ export function HqView() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
+      if (commercialOpen) {
+        setCommercialOpen(false);
+        return;
+      }
       if (centerOpen) {
         // Fechar a Central também solta o agente selecionado: senão sobra o painel cinza de linha do tempo (vazio) à direita.
         setCenterOpen(false);
@@ -104,7 +110,7 @@ export function HqView() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [centerOpen, selectedAgentId, selectedApplicationId, selectApplication, cameraMode, backOneLevel]);
+  }, [centerOpen, commercialOpen, selectedAgentId, selectedApplicationId, selectApplication, cameraMode, backOneLevel]);
 
   useEffect(() => {
     // WebGL support can only be known client-side (canvas probing needs
@@ -181,8 +187,21 @@ export function HqView() {
             onOpenActivity={() => router.push("/activity")}
             dataReady={demoMode || (realApplications !== undefined && realProjects !== undefined)}
             selectedAgentId={selectedAgentId}
+            onOpenCommercial={() => {
+              selectApplication(null);
+              setCenterOpen(false);
+              setSelectedAgentId(null);
+              setCommercialOpen(true);
+            }}
             onSelectAgent={(id) => {
               selectApplication(null);
+              setCommercialOpen(false);
+              // Equipes (CLT e Comercial) têm painel próprio: nunca abrem a Central por trás.
+              if (roomAgentsQuery.data?.some((a) => a.id === id && (a.team === "CLT" || a.team === "COMERCIAL"))) {
+                setCenterOpen(false);
+                setSelectedAgentId(id);
+                return;
+              }
               // Funcionário permanente → Central de comandos; sessão observada pelo hook → linha do tempo.
               // Só é sessão observada (linha do tempo) se o hook de fato a conhece; qualquer outro funcionário abre a Central.
               if (!observedSessions?.some((s) => s.id === id)) {
@@ -231,8 +250,10 @@ export function HqView() {
         <WeatherHud timeLabel={timeLabel} />
       </div>
 
-      <MotionPanelSlot panelKey={centerOpen ? "center" : selectedClt ? `clt:${selectedClt.id}` : selectedObserved ? `timeline:${selectedAgentId}` : null}>
-        {centerOpen ? (
+      <MotionPanelSlot panelKey={commercialOpen ? "commercial" : centerOpen ? "center" : selectedClt ? `clt:${selectedClt.id}` : selectedObserved ? `timeline:${selectedAgentId}` : null}>
+        {commercialOpen ? (
+          <CommercialPanel canWrite={canManageAgents} onClose={() => setCommercialOpen(false)} onSelectAgent={(id) => { setCommercialOpen(false); setSelectedAgentId(id); }} onOpenCenter={() => { setCommercialOpen(false); setCenterOpen(true); }} />
+        ) : centerOpen ? (
           <CommandCenter initialAgentId={selectedAgentId} onClose={() => { setCenterOpen(false); setSelectedAgentId(null); }} canWrite={canManageAgents} />
         ) : selectedClt ? (
           <CltAgentPanel agentId={selectedClt.id} canWrite={canManageAgents} onClose={() => setSelectedAgentId(null)} onSelectAgent={setSelectedAgentId} onOpenCenter={() => setCenterOpen(true)} />

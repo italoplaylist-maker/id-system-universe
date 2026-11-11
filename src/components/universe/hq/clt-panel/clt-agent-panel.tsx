@@ -471,7 +471,7 @@ export function CltAgentPanel({ agentId, canWrite, onClose, onSelectAgent, onOpe
       <header className="shrink-0 border-b border-border px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[11px] uppercase tracking-wider text-muted">AGENTES CLT{a?.roleTitle ? ` · ${a.roleTitle}` : ""}</p>
+            <p className="text-[11px] uppercase tracking-wider text-muted" style={a?.team === "COMERCIAL" ? { color: "#f59e0b" } : undefined}>{a?.team === "COMERCIAL" ? "COMERCIAL & MARKETING" : "AGENTES CLT"}{a?.roleTitle ? ` · ${a.roleTitle}` : ""}</p>
             <h2 className="truncate text-xl font-semibold text-foreground">{a?.name ?? "Carregando…"}</h2>
             {a && <p className="mt-0.5 truncate text-xs text-muted">{a.activity ?? a.specialty ?? "—"}</p>}
           </div>

@@ -10,7 +10,7 @@ import { computeAgentPods, computeOfficeLayout } from "./office/office-layout";
 import { computeHqPlan } from "./plan/hq-plan";
 import { Atrium, Ramp } from "./office/atrium";
 import { ATRIUM_WANDER, atriumObstacles } from "./plan/atrium-layout";
-import { CLT_ROOM, computeCltLayout, CLT_MAX_STATIONS } from "./plan/clt-layout";
+import { CLT_ROOM, computeCltLayout, CLT_MAX_STATIONS, COMMERCIAL_MAX_STATIONS } from "./plan/clt-layout";
 import { toWorld } from "./life/geometry";
 import { useHqViews } from "@/store/hq-views-store";
 import { OfficeShell, partitionDoorZ } from "./office/office-shell";
@@ -23,7 +23,7 @@ import type { LifeAgent } from "./life/agent-life";
 import type { PlanWorldInput } from "./life/world";
 import { useAgentSessions } from "@/hooks/use-agents";
 import { agentAccent, orderAgentSessions } from "@/lib/agent-order";
-import { roomAgentToSession, useClaudeUsage, useOrchestratorMutations, useRoomAgents } from "@/hooks/use-orchestrator";
+import { roomAgentToSession, useClaudeUsage, useCommercial, useCommercialMutations, useOrchestratorMutations, useRoomAgents } from "@/hooks/use-orchestrator";
 import { toast } from "sonner";
 import { OfficeProps, officePropObstacles } from "./office/office-props";
 import { NocWall } from "./office/noc-wall";
@@ -56,6 +56,8 @@ interface HqSceneProps {
   onOpenActivity?: () => void;
   selectedAgentId: string | null;
   onSelectAgent: (id: string) => void;
+  /** Abre o painel da equipe COMERCIAL & MARKETING (clique no núcleo da segunda ilha). */
+  onOpenCommercial: () => void;
   /** Projetos e recursos já chegaram do servidor (ou é demo). Antes disso ninguém é desenhado. */
   dataReady: boolean;
   reducedGraphics: boolean;
@@ -93,6 +95,7 @@ export function HqScene({
   onOpenActivity,
   selectedAgentId,
   onSelectAgent,
+  onOpenCommercial,
   dataReady,
   reducedGraphics: reducedGraphicsProp,
   quality: qualityProp,
@@ -132,11 +135,13 @@ export function HqScene({
   const { data: observedSessions } = useAgentSessions(canReadAgents);
   const { data: roomAgents } = useRoomAgents(canReadAgents);
   const { createCltTeam } = useOrchestratorMutations();
+  const commercialQuery = useCommercial(canReadAgents);
+  const commercialMut = useCommercialMutations();
   const canManageTeam = sessionUser ? canUser(sessionUser, "provider:write") : false;
   // Funcionários permanentes (perfis) primeiro, em ordem estável; depois as sessões externas observadas pelo hook.
   // Os perfis existem independentemente de haver tarefa: terminar, atualizar a página ou sincronizar não os remove.
   const agentSessions = useMemo(
-    () => (observedSessions === undefined && roomAgents === undefined ? undefined : orderAgentSessions((roomAgents ?? []).filter((a) => a.team !== "CLT").map(roomAgentToSession), observedSessions ?? [])),
+    () => (observedSessions === undefined && roomAgents === undefined ? undefined : orderAgentSessions((roomAgents ?? []).filter((a) => a.team !== "CLT" && a.team !== "COMERCIAL").map(roomAgentToSession), observedSessions ?? [])),
     [observedSessions, roomAgents],
   );
   const agentsEnabled = agentSessions !== undefined;
@@ -148,6 +153,17 @@ export function HqScene({
         .slice(0, CLT_MAX_STATIONS)
         .map(roomAgentToSession)
         .map((session) => ({ session, name: session.profile?.title ?? "Agente", accent: agentAccent(session.id, AGENT_ACCENTS) })),
+    [roomAgents],
+  );
+
+  // Segunda ilha da mesma sala: equipe COMERCIAL & MARKETING, também de agentes reais do orquestrador.
+  const commercialEntries = useMemo(
+    () =>
+      (roomAgents ?? [])
+        .filter((a) => a.team === "COMERCIAL")
+        .slice(0, COMMERCIAL_MAX_STATIONS)
+        .map(roomAgentToSession)
+        .map((session) => ({ session, name: session.profile?.title ?? "Agente", accent: "#f59e0b" })),
     [roomAgents],
   );
 
@@ -168,11 +184,12 @@ export function HqScene({
   // Planta em Y: três alas (tecnológica, operacional, AGENTES CLT) ligadas por um átrio central. Cada ala é uma sala com o
   // seu próprio sistema de coordenadas; `plan` as posiciona, gira e põe em níveis diferentes.
   const cltCount = cltEntries.length;
+  const commercialCount = commercialEntries.length;
   const { layout, agentsLayout, cltLayout, cltShellLayout, plan } = useMemo(() => {
     const agentInputs = agentEntries.map((e) => ({ id: e.session.id, name: e.name, accent: e.accent }));
     const main = computeOfficeLayout(activeProjects, enabledProviders);
     const agents = computeAgentPods(agentInputs);
-    const cltRoom = computeCltLayout(cltCount);
+    const cltRoom = computeCltLayout(cltCount, commercialCount);
     const cltShell = computeOfficeLayout([], [], { minWidth: CLT_ROOM.width, minDepth: CLT_ROOM.depth });
     const hq = computeHqPlan({
       tech: { width: main.width, depth: main.depth, doorZ: partitionDoorZ(main.depth) },
@@ -183,7 +200,7 @@ export function HqScene({
     // As alas só dependem de QUEM são os agentes (ids/nomes), não do que eles estão fazendo agora:
     // o estado muda a cada poucos segundos e não pode reconstruir layout nem malha de navegação.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjects, enabledProviders, agentLayoutKey, cltCount]);
+  }, [activeProjects, enabledProviders, agentLayoutKey, cltCount, commercialCount]);
 
   // O "mundo" que a câmera, o céu, a sombra e a luz enxergam: a planta inteira.
   const world = useMemo(() => ({ width: plan.bounds.maxX - plan.bounds.minX, depth: plan.bounds.maxZ - plan.bounds.minZ, center: plan.center, radius: plan.radius, bounds: plan.bounds }), [plan]);
@@ -232,12 +249,15 @@ export function HqScene({
         ...[-1, 1].map((sd) => ({ kind: "circle" as const, cx: sd * (agentsLayout.width / 2 - 0.9), cz: -agentsLayout.depth / 2 + 0.9, r: 0.38, label: "plant" })),
         ...agentsLayout.rooms.map((r) => ({ kind: "rect" as const, minX: r.x - r.w / 2, maxX: r.x + r.w / 2, minZ: r.z - r.d / 2, maxZ: r.z + r.d / 2, label: "project-room" })),
       ],
-      cltDesks: cltLayout.stations.map((st, i) => ({ id: cltEntries[i]?.session.id ?? `clt-vaga-${i}`, x: st.x, z: st.z, yaw: st.yaw })).filter((d) => !d.id.startsWith("clt-vaga-")),
+      cltDesks: [
+        ...cltLayout.stations.map((st, i) => ({ id: cltEntries[i]?.session.id ?? `clt-vaga-${i}`, x: st.x, z: st.z, yaw: st.yaw })),
+        ...cltLayout.commercial.stations.map((st, i) => ({ id: commercialEntries[i]?.session.id ?? `clt-vaga-c${i}`, x: st.x, z: st.z, yaw: st.yaw })),
+      ].filter((d) => !d.id.startsWith("clt-vaga-")),
       cltObstacles: cltLayout.obstacles,
       wander: ATRIUM_WANDER,
       atriumObstacles: atriumObstacles(),
     };
-  }, [plan, layout, agentsLayout, cltLayout, cltEntries, resourcesByProject, agentsEnabled]);
+  }, [plan, layout, agentsLayout, cltLayout, cltEntries, commercialEntries, resourcesByProject, agentsEnabled]);
   const lifeAgents: LifeAgent[] = useMemo(
     () => [
       // Funcionários dos projetos: trabalhando (deploy/operação) ou com erro ficam na mesa; sem trabalho circulam; tudo parado = ausente.
@@ -247,9 +267,9 @@ export function HqScene({
         return [{ id: slot.projectId, accent: slot.accent, mustWork: state === "WORKING" || state === "ERROR", working: state === "WORKING" }];
       }),
       // Agentes do Claude: pelo estado real da sessão.
-      ...[...agentEntries, ...cltEntries].map((e) => ({ id: e.session.id, accent: e.accent, mustWork: agentNeedsDesk(e.session.state), working: e.session.profile ? e.session.profile.roomState === "RUNNING" : agentIsTyping(e.session.state) })),
+      ...[...agentEntries, ...cltEntries, ...commercialEntries].map((e) => ({ id: e.session.id, accent: e.accent, mustWork: agentNeedsDesk(e.session.state), working: e.session.profile ? e.session.profile.roomState === "RUNNING" : agentIsTyping(e.session.state) })),
     ],
-    [layout.desks, deskStates, agentEntries, cltEntries],
+    [layout.desks, deskStates, agentEntries, cltEntries, commercialEntries],
   );
 
   const canSeeBilling = sessionUser ? canUser(sessionUser, "billing:view") : false;
@@ -291,13 +311,17 @@ export function HqScene({
     const ag = plan.wings.agents;
     const clt = plan.wings.clt;
     const t = plan.wings.tech;
+    const cltIsland = toWorld(clt, { x: cltLayout.table.x, z: cltLayout.table.z });
+    const comIsland = toWorld(clt, { x: cltLayout.commercial.core.x, z: cltLayout.commercial.core.z });
     setViews([
       { id: "core", label: "Núcleo", center: [0, plan.atrium.level + 1.2, 0], radius: 5.5 },
       { id: "ops", label: "Operacional", center: [ag.x, ag.level + 1.0, ag.z], radius: Math.max(ag.width, ag.depth) * 0.5 },
-      { id: "clt", label: "AGENTES CLT", center: [clt.x, clt.level + 1.0, clt.z], radius: Math.max(clt.width, clt.depth) * 0.5 },
+      // As duas ilhas dividem a sala: a câmera enquadra cada uma (CLT a leste/porta, Comercial a oeste).
+      { id: "clt", label: "AGENTES CLT", center: [cltIsland.x, clt.level + 1.0, cltIsland.z], radius: 9.5 },
+      { id: "comercial", label: "COMERCIAL & MARKETING", center: [comIsland.x, clt.level + 1.0, comIsland.z], radius: 9.5 },
       { id: "tech", label: "Tecnológica", center: [t.x, t.level + 1.0, t.z], radius: Math.max(t.width, t.depth) * 0.5 },
     ]);
-  }, [plan, setViews]);
+  }, [plan, cltLayout, setViews]);
 
   const [centerX, , centerZ] = world.center;
 
@@ -436,6 +460,18 @@ export function HqScene({
                 shellLayout={cltShellLayout}
                 layout={cltLayout}
                 entries={cltEntries}
+                commercial={{
+                  entries: commercialEntries,
+                  indicators: commercialQuery.data?.indicators ?? null,
+                  exists: commercialEntries.length > 0,
+                  onOpen: () => {
+                    if (commercialEntries.length === 0) {
+                      if (canManageTeam && !commercialMut.createTeam.isPending) commercialMut.createTeam.mutate(undefined, { onSuccess: (r) => toast.success(r.created.length ? `Equipe Comercial criada: ${r.created.length} funcionário(s).` : "A equipe Comercial já existia."), onError: (e) => toast.error(e.message) });
+                      return;
+                    }
+                    onOpenCommercial();
+                  },
+                }}
                 selectedAgentId={selectedAgentId}
                 onSelectAgent={onSelectAgent}
                 reducedGraphics={reducedGraphics}

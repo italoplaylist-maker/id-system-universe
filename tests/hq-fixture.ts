@@ -7,13 +7,14 @@ import { buildLifeWorldFromPlan } from "../src/components/universe/hq/life/world
 import { partitionDoorZ } from "../src/components/universe/hq/office/office-shell";
 
 /** Mesma montagem do hq-scene: alas tecnológica, operacional e AGENTES CLT em volta do átrio. */
-export function hqFixture(nProjects: number, nAgents: number, nClt = 7) {
+export function hqFixture(nProjects: number, nAgents: number, nClt = 7, nCom = 4) {
   const projects = Array.from({ length: nProjects }, (_, i) => ({ id: `p${i}`, name: `Projeto ${i}`, accent: "#38bdf8" }));
   const agents = Array.from({ length: nAgents }, (_, i) => ({ id: `a${i}`, name: `Agente ${i}`, accent: "#e8283f" }));
   const clt = Array.from({ length: nClt }, (_, i) => ({ id: `c${i}` }));
+  const com = Array.from({ length: nCom }, (_, i) => ({ id: `m${i}` }));
   const tech = computeOfficeLayout(projects, [{ id: "r1", name: "VPS", color: "#34d399" }]);
   const pods = computeAgentPods(agents);
-  const cltLayout = computeCltLayout(nClt);
+  const cltLayout = computeCltLayout(nClt, nCom);
   const plan = computeHqPlan({
     tech: { width: tech.width, depth: tech.depth, doorZ: partitionDoorZ(tech.depth) },
     agents: { width: pods.width, depth: pods.depth, doorZ: pods.aisleZ },
@@ -25,10 +26,10 @@ export function hqFixture(nProjects: number, nAgents: number, nClt = 7) {
     techObstacles: officePropObstacles(tech),
     agentDesks: pods.desks.map((d) => ({ id: d.projectId, x: d.x, z: d.z, yaw: d.yaw ?? 0 })),
     agentObstacles: pods.rooms.map((r) => ({ kind: "rect" as const, minX: r.x - r.w / 2, maxX: r.x + r.w / 2, minZ: r.z - r.d / 2, maxZ: r.z + r.d / 2 })),
-    cltDesks: cltLayout.stations.map((s, i) => ({ id: clt[i].id, x: s.x, z: s.z, yaw: s.yaw })),
+    cltDesks: [...cltLayout.stations.map((s, i) => ({ id: clt[i].id, x: s.x, z: s.z, yaw: s.yaw })), ...cltLayout.commercial.stations.map((s, i) => ({ id: com[i].id, x: s.x, z: s.z, yaw: s.yaw }))],
     cltObstacles: cltLayout.obstacles,
     wander: ATRIUM_WANDER,
     atriumObstacles: atriumObstacles(),
   });
-  return { world, plan, projects, agents, clt, cltLayout };
+  return { world, plan, projects, agents, clt, com, cltLayout };
 }
