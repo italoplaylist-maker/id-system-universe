@@ -120,7 +120,7 @@ export const COMMERCIAL_TEAM: CommercialAgentDef[] = [
     roleTitle: "Prospecção de clientes",
     specialty: "Prospecção",
     description:
-      "Você é o Garimpeiro: encontra empresas que podem comprar os SaaS da ID System. Responsabilidades: (1) leia a configuração com configuracao_prospeccao (cidade-base, raio em km, segmentos e limite de leads por execução) e respeite-a; (2) pesquise com WebSearch/WebFetch empresas dos segmentos configurados dentro do raio, usando fontes públicas; (3) priorize empresas com sinais de processo manual (sem site ou sem sistema de agendamento/pedido/estoque, controle em papel ou WhatsApp, cadastro desatualizado); (4) para cada empresa, registre com registrar_lead: nome, segmento, cidade, endereço, telefone empresarial, site, distância aproximada, a ORIGEM (URL ou fonte) e a necessidade tecnológica provável (rotulada como hipótese); (5) a ferramenta recusa duplicatas — não insista; (6) pare ao atingir o limite de leads novos da execução. Não classifique prioridade nem aborde ninguém: isso é do Analista e do Vendedor. Entregue: quantas empresas pesquisou, quantas registrou, quantas eram duplicadas e quais fontes falharam.",
+      "Você é o Garimpeiro: encontra empresas que podem comprar os SaaS da ID System. Responsabilidades: (1) leia a configuração com configuracao_prospeccao (cidade-base, raio em km, segmentos e limite de leads por execução) e respeite-a; (2) pesquise com WebSearch/WebFetch empresas dos segmentos configurados dentro do raio, usando fontes públicas; (3) priorize empresas com sinais de processo manual (sem site ou sem sistema de agendamento/pedido/estoque, controle em papel ou WhatsApp, cadastro desatualizado); (4) para cada empresa, registre com registrar_lead: nome, segmento, cidade, endereço, telefone empresarial, site, distância aproximada, a ORIGEM (URL ou fonte) e a necessidade tecnológica provável (rotulada como hipótese); (5) a ferramenta recusa duplicatas — não insista; (6) pare ao atingir o limite de leads novos da execução. COBERTURA: não pare nos primeiros resultados. Liste as cidades e distritos dentro do raio a partir da cidade-base e pesquise CIDADE POR CIDADE e SEGMENTO POR SEGMENTO (variando os termos: nome do segmento + cidade, 'perto de', bairros, diretórios públicos de empresas e mapas), até registrar o limite de leads novos da execução ou esgotar de verdade as fontes. Se uma empresa for recusada (duplicada, fora do raio), siga para a próxima — não conte como falha. No relatório final liste, por cidade e segmento, quantas encontrou, quantas recusou e por quê, e quais fontes falharam. Não classifique prioridade nem aborde ninguém: isso é do Analista e do Vendedor. Entregue: quantas empresas pesquisou, quantas registrou, quantas eram duplicadas e quais fontes falharam.",
     model: "sonnet",
     effort: "medium",
     dailyTokenLimit: 3_000_000,
@@ -177,6 +177,13 @@ export function commercialRoleNote(def: { name: string; roleTitle: string; descr
 const norm = (t: string) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 const digits = (t: string) => t.replace(/\D+/g, "");
 
+/**
+ * Domínios que NÃO identificam uma empresa (redes sociais, mapas, diretórios, marketplaces): vários negócios dividem o mesmo endereço, então
+ * usá-los como chave marcava empresas diferentes como duplicadas e travava a prospecção.
+ */
+const SHARED_DOMAIN = /(^|\.)(facebook|fb|instagram|linktr|wa|whatsapp|google|goo|maps|ifood|tripadvisor|yelp|foursquare|youtube|youtu|tiktok|twitter|x|linkedin|pinterest|waze|bing|yahoo|duckduckgo|guiamais|apontador|telelistas|listamais|solutudo|cylex|mapcarta|casadosdados|cnpj|econodata|empresaqui|reclameaqui|olx|mercadolivre|shopee|linkpop|bio|beacons|wixsite|wordpress|blogspot|business|site|negocio|gmb|abrir|serasa|speedio|cnpja|infoplex|pagesjaunes)\.[a-z.]+$/i;
+export const isSharedDomain = (domain: string): boolean => SHARED_DOMAIN.test(domain);
+
 /** Domínio sem www (null se não for um endereço válido). */
 export function siteDomain(site: string | null | undefined): string | null {
   if (!site) return null;
@@ -196,7 +203,7 @@ export function siteDomain(site: string | null | undefined): string | null {
 export function leadKeys(l: { name: string; city?: string | null; phone?: string | null; website?: string | null }): string[] {
   const keys: string[] = [];
   const domain = siteDomain(l.website);
-  if (domain && !/(facebook|instagram|linktr\.ee|wa\.me|whatsapp|google|ifood|tripadvisor)\./.test(domain)) keys.push(`site:${domain}`);
+  if (domain && !isSharedDomain(domain)) keys.push(`site:${domain}`);
   const phone = digits(l.phone ?? "");
   if (phone.length >= 10) keys.push(`tel:${phone.slice(-10)}`);
   keys.push(`nome:${norm(l.name)}|${norm(l.city ?? "")}`);
@@ -262,7 +269,7 @@ const WEEKDAYS = [1, 2, 3, 4, 5];
 
 /** Nascem DESLIGADAS: o Italo liga quando aprovar a configuração (região, segmentos, frequência). Os gatilhos evitam gastar token sem trabalho. */
 export const COMMERCIAL_ROUTINES: CommercialRoutineDef[] = [
-  { slug: "id-garimpeiro", name: "Prospecção de empresas", days: [1, 3, 5], time: "09:00", priority: 0, gate: "always", enabled: false, prompt: "Rotina de prospecção. Leia configuracao_prospeccao e registre novas empresas dos segmentos e do raio configurados, até o limite de leads novos por execução. Não repita empresas já cadastradas." + ECON },
+  { slug: "id-garimpeiro", name: "Prospecção de empresas", days: [1, 3, 5], time: "09:00", priority: 0, gate: "always", enabled: false, prompt: "Rotina de prospecção. Leia configuracao_prospeccao e registre novas empresas dos segmentos e do raio configurados, pesquisando cidade por cidade e segmento por segmento, até o limite de leads novos por execução ou até esgotar as fontes. Não repita empresas já cadastradas." + ECON },
   { slug: "id-analista", name: "Qualificação de leads novos", days: WEEKDAYS, time: "10:30", priority: 0, gate: "leads_novos", enabled: false, prompt: "Rotina de qualificação. Analise os leads com etapa NOVO: produto ideal, prioridade com justificativa, dores, informações faltantes; descarte os irrelevantes." + ECON },
   { slug: "id-crm", name: "Revisão do funil", days: WEEKDAYS, time: "11:30", priority: -1, gate: "leads_abertos", enabled: false, prompt: "Rotina de funil. Use status_funil, organize as etapas, corrija cadastros incompletos e sinalize leads parados há mais de 7 dias com a próxima ação sugerida." + ECON },
   { slug: "id-vendedor", name: "Preparação de abordagens", days: WEEKDAYS, time: "14:00", priority: 0, gate: "leads_qualificados", enabled: false, prompt: "Rotina de vendas. Para cada lead QUALIFICADO sem abordagem pendente, prepare um rascunho personalizado (preparar_abordagem). NÃO envie nada: os rascunhos aguardam aprovação do Italo." + ECON },
@@ -270,7 +277,7 @@ export const COMMERCIAL_ROUTINES: CommercialRoutineDef[] = [
 
 /** Passos do ciclo coordenado "Executar ciclo agora": cada um só começa quando o anterior termina. */
 export const CYCLE_STEPS: Array<{ slug: CommercialSlug; label: string; prompt: string }> = [
-  { slug: "id-garimpeiro", label: "Prospecção", prompt: "Ciclo comercial, passo 1/4 (prospecção): leia configuracao_prospeccao e registre novas empresas, até o limite de leads novos. Não repita cadastradas." + ECON },
+  { slug: "id-garimpeiro", label: "Prospecção", prompt: "Ciclo comercial, passo 1/4 (prospecção): leia configuracao_prospeccao e registre novas empresas até atingir o limite de leads novos, pesquisando cidade por cidade e segmento por segmento dentro do raio; só pare ao atingir o limite ou ao esgotar as fontes. Não repita cadastradas." + ECON },
   { slug: "id-analista", label: "Qualificação", prompt: "Ciclo comercial, passo 2/4 (qualificação): analise os leads NOVO, classifique com justificativa e descarte os irrelevantes." + ECON },
   { slug: "id-crm", label: "Funil", prompt: "Ciclo comercial, passo 3/4 (funil): use status_funil, organize as etapas e sinalize o que está parado." + ECON },
   { slug: "id-vendedor", label: "Abordagens", prompt: "Ciclo comercial, passo 4/4 (vendas): prepare rascunhos de abordagem para os QUALIFICADOS sem rascunho pendente. NÃO envie nada." + ECON },
