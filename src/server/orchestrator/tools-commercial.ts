@@ -86,12 +86,13 @@ export async function commercialTools(tool: ToolFn, agentId: string, taskId: str
       const data = { name: clean(args.nome, 120)!, city: clean(args.cidade, 80), phone: clean(args.telefone, 30), website: clean(args.site, 200) };
       const keys = leadKeys(data);
       const dup = await prisma.lead.findFirst({ where: { OR: [{ keys: { hasSome: keys } }, { fingerprint: { in: keys } }] }, select: { id: true, name: true, stage: true } });
-      if (dup) return text(`Duplicada: já existe "${dup.name}" (${dup.id}, ${stageLabel(dup.stage)}). Não registrei de novo.`, true);
+      if (dup) return text(`Duplicada: já existe "${dup.name}" (${dup.id}, ${stageLabel(dup.stage)}). Não registrei. Siga para a PRÓXIMA empresa — isso não é falha.`, true);
       const lead = await prisma.lead.create({
         data: { ...data, fingerprint: keys[0], keys, segment: args.segmento, address: clean(args.endereco, 200), distanceKm: args.distancia_km ?? null, source: clean(args.fonte, 300)!, foundBy: agentName, techNeed: clean(args.necessidade, 400) },
       });
       await prisma.leadInteraction.create({ data: { leadId: lead.id, kind: "NOTA", content: `Encontrada por ${agentName}. Fonte: ${lead.source}`, agentName } });
-      return text(`Registrada: ${lead.name} [${lead.id}]. Restam ${Math.max(0, settings.maxNewLeadsPerRun - already - 1)} nesta execução.`);
+      const left = Math.max(0, settings.maxNewLeadsPerRun - already - 1);
+      return text(`Registrada: ${lead.name} [${lead.id}]. Faltam ${left} para o limite desta execução${left > 0 ? " — continue pesquisando outras empresas, cidades e segmentos até atingi-lo ou esgotar as fontes" : ": pare e entregue o relatório"}.`);
     } catch (e) {
       return fail(e);
     }

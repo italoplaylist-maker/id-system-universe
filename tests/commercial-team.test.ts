@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   COMMERCIAL_ALLOWED_TOOLS, COMMERCIAL_DISALLOWED_TOOLS, COMMERCIAL_ROUTINES, COMMERCIAL_RULES, COMMERCIAL_TEAM, COMMERCIAL_TOOLS_BY_SLUG, CYCLE_STEPS,
-  cycleKey, funnelMetrics, isStale, leadKeys, nextCycleStep, operatingCost, parseCycleKey, siteDomain, commercialRoleNote,
+  cycleKey, funnelMetrics, isSharedDomain, isStale, leadKeys, nextCycleStep, operatingCost, parseCycleKey, siteDomain, commercialRoleNote,
 } from "../src/lib/commercial-team";
 import { CLT_TEAM } from "../src/lib/clt-team";
 
@@ -69,4 +69,13 @@ test("o prompt dos agentes comerciais traz as regras de LGPD, fontes públicas e
   assert.match(rules, /Nunca invente/);
   assert.match(rules, /origem/);
   for (const a of COMMERCIAL_TEAM) assert.match(commercialRoleNote(a), new RegExp(a.name));
+});
+
+test("diretórios, mapas e redes sociais não identificam empresa: empresas diferentes no mesmo diretório NÃO são duplicadas", () => {
+  for (const d of ["guiamais.com.br", "apontador.com.br", "facebook.com", "instagram.com", "maps.google.com", "ifood.com.br", "linktr.ee", "negocio.site", "empresa.wixsite.com"]) assert.ok(isSharedDomain(d), d);
+  assert.ok(!isSharedDomain("padariadoze.com.br"));
+  const a = leadKeys({ name: "Barbearia Alfa", city: "Itaúna", website: "https://www.guiamais.com.br/itauna/barbearia-alfa" });
+  const b = leadKeys({ name: "Barbearia Beta", city: "Itaúna", website: "https://www.guiamais.com.br/itauna/barbearia-beta" });
+  assert.ok(!a.some((k) => b.includes(k)), "mesmo diretório não pode virar duplicata");
+  assert.ok(COMMERCIAL_TEAM[0].description.includes("COBERTURA"));
 });
