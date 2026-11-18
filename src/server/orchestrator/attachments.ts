@@ -29,6 +29,11 @@ export interface AttachmentView {
 
 const toView = (a: { id: string; name: string; mime: string; size: number; kind: string }): AttachmentView => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, kind: a.kind === "image" ? "image" : "file" });
 
+const isMissingFile = (error: unknown) => (error as NodeJS.ErrnoException | null)?.code === "ENOENT";
+
+/** O registro existe mas o arquivo saiu do disco (ex.: diretório sem volume persistente, recriado no deploy): 404 claro, não 500. */
+const missingFileError = (name: string) => new NotFoundError(`O arquivo do anexo "${name}" não está mais no servidor. Envie de novo.`);
+
 /** Só confia no CONTEÚDO (bytes iniciais), nunca na extensão/tipo declarado. SVG não entra como imagem (pode carregar script). */
 export function sniffImage(b: Buffer): "image/png" | "image/jpeg" | "image/gif" | "image/webp" | null {
   if (b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
@@ -98,7 +103,9 @@ export async function prepareForRun(taskId: string): Promise<{ attachments: RunA
     while (used.has(name.toLowerCase())) name = `${i++}-${safeName(r.name)}`;
     used.add(name.toLowerCase());
     const path = join(dir, name);
-    await copyFile(r.storedPath, path);
+    await copyFile(r.storedPath, path).catch((error: unknown) => {
+      throw isMissingFile(error) ? missingFileError(r.name) : error;
+    });
     out.push({ name: r.name, mime: r.mime, kind: r.kind === "image" ? "image" : "file", size: r.size, path });
   }
   return { attachments: out, dir };
@@ -107,7 +114,12 @@ export async function prepareForRun(taskId: string): Promise<{ attachments: RunA
 export async function readFor(id: string): Promise<{ bytes: Buffer; view: AttachmentView }> {
   const a = await prisma.agentAttachment.findUnique({ where: { id } });
   if (!a) throw new NotFoundError("Anexo não encontrado.");
-  return { bytes: await readFile(a.storedPath), view: toView(a) };
+  try {
+    return { bytes: await readFile(a.storedPath), view: toView(a) };
+  } catch (error) {
+    if (isMissingFile(error)) throw missingFileError(a.name);
+    throw error;
+  }
 }
 
 export async function deleteUnlinked(id: string, userId: string): Promise<void> {

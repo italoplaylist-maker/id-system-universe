@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { makeUser, prisma, resetDb } from "./helpers";
-import { LIMITS, prepareForRun, purgeAttachments, safeName, saveUpload, sniffImage } from "@/server/orchestrator/attachments";
+import { LIMITS, prepareForRun, purgeAttachments, readFor, safeName, saveUpload, sniffImage } from "@/server/orchestrator/attachments";
+import { NotFoundError } from "@/lib/errors";
 import { buildPrompt } from "@/server/orchestrator/executor";
 import { createAgent, getTaskDetail, submitTask, updateAgent } from "@/server/orchestrator/service";
 import { setExecutor, type ExecutorRunInput } from "@/server/orchestrator/executor";
@@ -126,5 +127,14 @@ describe("anexos do comando (imagem, arquivo)", () => {
     const loose = await saveUpload(userId, { name: "solto.pdf", bytes: PDF });
     await prisma.agentAttachment.update({ where: { id: loose.id }, data: { createdAt: new Date(Date.now() - 48 * 3_600_000) } });
     assert.equal(await purgeAttachments(), 1);
+  });
+
+  it("arquivo que sumiu do disco (deploy sem volume) responde 404 claro, não 500 cru com ENOENT", async () => {
+    await updateAgent(agentId, { paused: true }, actor());
+    const a = await saveUpload(userId, { name: "foto.png", bytes: PNG });
+    rmSync((await prisma.agentAttachment.findUniqueOrThrow({ where: { id: a.id } })).storedPath);
+    await assert.rejects(() => readFor(a.id), (e: unknown) => e instanceof NotFoundError && /foto\.png" não está mais no servidor/.test(e.message));
+    const { task } = await submitTask(agentId, { prompt: "x", idempotencyKey: key(), attachmentIds: [a.id] }, actor());
+    await assert.rejects(() => prepareForRun(task.id), (e: unknown) => e instanceof NotFoundError);
   });
 });
