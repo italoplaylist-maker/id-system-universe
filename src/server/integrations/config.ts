@@ -16,6 +16,7 @@ export type ConfigKey =
   | "whatsapp.baseUrl"
   | "whatsapp.apiKey"
   | "whatsapp.instance"
+  | "whatsapp.pendingInstance"
   | "billing.timezone"
   | "billing.windowStart"
   | "billing.windowEnd";

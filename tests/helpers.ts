@@ -58,10 +58,15 @@ export function readBody(req: http.IncomingMessage): Promise<string> {
 export interface MockEvolution extends MockServer {
   sent: { phone: string; text: string }[];
   mode: { value: "ok" | "500" | "400" };
+  /** nome → estado ("connecting" | "open"); o teste muda o estado para simular a leitura do QR. */
+  instances: Map<string, string>;
+  calls: string[];
 }
 
 export async function startMockEvolution(): Promise<MockEvolution> {
   const sent: { phone: string; text: string }[] = [];
+  const instances = new Map<string, string>();
+  const calls: string[] = [];
   const mode = { value: "ok" as "ok" | "500" | "400" };
   const server = await startServer(async (req, res) => {
     const body = await readBody(req);
@@ -74,15 +79,41 @@ export async function startMockEvolution(): Promise<MockEvolution> {
       res.end(JSON.stringify({ key: { id: `msg-${sent.length}` } }));
       return;
     }
-    if (req.url?.startsWith("/instance/connectionState/")) {
-      res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ instance: { state: "open" } }));
+    const path = (req.url ?? "").split("?")[0];
+    calls.push(`${req.method} ${path}`);
+    res.setHeader("content-type", "application/json");
+    if (path === "/instance/create" && req.method === "POST") {
+      const { instanceName } = JSON.parse(body) as { instanceName: string };
+      instances.set(instanceName, "connecting");
+      res.end(JSON.stringify({ instance: { instanceName }, qrcode: { base64: "data:image/png;base64,QR1" } }));
+      return;
+    }
+    if (path.startsWith("/instance/connect/")) {
+      const name = decodeURIComponent(path.slice("/instance/connect/".length));
+      if (!instances.has(name)) { res.statusCode = 404; res.end("{}"); return; }
+      res.end(JSON.stringify({ base64: "data:image/png;base64,QR2", pairingCode: "ABCD1234" }));
+      return;
+    }
+    if (path.startsWith("/instance/connectionState/")) {
+      const name = decodeURIComponent(path.slice("/instance/connectionState/".length));
+      // Sem instâncias criadas pelo teste, mantém o comportamento antigo (sempre "open").
+      if (instances.size && !instances.has(name)) { res.statusCode = 404; res.end("{}"); return; }
+      res.end(JSON.stringify({ instance: { state: instances.get(name) ?? "open" } }));
+      return;
+    }
+    if (path.startsWith("/instance/fetchInstances")) {
+      res.end(JSON.stringify([{ ownerJid: "5511999990000@s.whatsapp.net" }]));
+      return;
+    }
+    if ((path.startsWith("/instance/logout/") || path.startsWith("/instance/delete/")) && req.method === "DELETE") {
+      if (path.startsWith("/instance/delete/")) instances.delete(decodeURIComponent(path.slice("/instance/delete/".length)));
+      res.end("{}");
       return;
     }
     res.statusCode = 404;
     res.end();
   });
-  return Object.assign(server, { sent, mode });
+  return Object.assign(server, { sent, mode, instances, calls });
 }
 
 export interface MockCoolify extends MockServer {

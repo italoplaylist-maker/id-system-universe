@@ -70,3 +70,37 @@ export function useUpdateWhatsApp() {
 export function useTestWhatsApp() {
   return useMutation({ mutationFn: () => apiFetch<{ status: { connected: boolean; detail?: string } }>("/api/integrations/whatsapp/test", { method: "POST" }) });
 }
+
+export interface WhatsAppConnectionView {
+  state: "none" | "qr" | "connecting" | "open" | "error";
+  qr?: string;
+  pairingCode?: string;
+  instance?: string;
+  number?: string | null;
+  detail?: string;
+}
+
+/** Consulta o estado da conexão por QR; só roda enquanto `enabled` (ex.: depois de clicar em Conectar). */
+export function useWhatsAppConnection(enabled: boolean, refreshQr: boolean, attempt = 0) {
+  const invalidate = useInvalidateIntegrations();
+  return useQuery({
+    queryKey: ["integrations", "whatsapp", "connection", refreshQr, attempt],
+    queryFn: async () => {
+      const r = await apiFetch<{ connection: WhatsAppConnectionView }>(`/api/integrations/whatsapp/connect${refreshQr ? "?qr=1" : ""}`);
+      if (r.connection.state === "open") invalidate();
+      return r.connection;
+    },
+    enabled,
+    refetchInterval: 4_000,
+    select: (d) => d,
+  });
+}
+
+export function useStartWhatsAppConnection() {
+  return useMutation({ mutationFn: () => apiFetch<{ connection: WhatsAppConnectionView }>("/api/integrations/whatsapp/connect", { method: "POST" }) });
+}
+
+export function useDisconnectWhatsApp() {
+  const invalidate = useInvalidateIntegrations();
+  return useMutation({ mutationFn: () => apiFetch("/api/integrations/whatsapp/connect", { method: "DELETE" }), onSuccess: invalidate });
+}
